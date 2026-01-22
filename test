@@ -1,9 +1,4 @@
-SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=10
-SPRING_DATASOURCE_URL=jdbc:postgresql://postgresql.postgresql-data-access:5432/access_service_db
-SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
-SPRING_DATASOURCE_USERNAME=access_service_user
-SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT=30000
-SPRING_DATASOURCE_PASSWORD=rCyc2Ht7VmCp99fY
-SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE=5
-SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT=600000
-SPRING_DATASOURCE_HIKARI_MAX_LIFETIME=1800000
+oc -n umka exec data-access-service-6d9465cf96-sbft9 -- sh -lc '
+  getent hosts postgresql.postgresql-data-access || true
+  getent hosts postgresql.postgresql-data-access.svc.cluster.local || true
+'
