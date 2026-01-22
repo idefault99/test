@@ -1,8 +1,10 @@
-oc run -n umka test-psql --rm -i --restart=Never \
+oc run -n umka test-psql \
+  --restart=Never \
   --image=nexus.sogaz.ru/library/postgres:16-alpine \
   --env="PGPASSWORD=rCyc2Ht7VmCp99fY" \
   --command -- sh -lc '
     psql -h s00-0000-uk01.sogaz.ru -p 5432 -U access_service_user -d access_service_db -c "select 1;" -v ON_ERROR_STOP=1
   '
-If you don't see a command prompt, try pressing enter.
 
+oc -n umka logs pod/test-psql
+oc -n umka delete pod test-psql
