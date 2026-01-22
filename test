@@ -1,3 +1,3 @@
-nc -vz <HOST_IP_OR_DNS> 5432
-# или
-psql "host=<HOST_IP_OR_DNS> port=5432 dbname=access_service_db user=access_service_user password=CHANGE_ME_STRONG_PASSWORD"
+oc run -n umka test --image=nexus.sogaz.ru/library/postgres:16-alpine --rm -it --restart=Never --command -- sh -lc '
+psql "host=s00-0000-uk01.sogaz.ru port=5432 dbname=access_service_db user=access_service_user password=rCyc2Ht7VmCp99fY"
+  '
