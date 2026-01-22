@@ -1,4 +1,28 @@
-oc -n umka exec data-access-service-6d9465cf96-sbft9 -- sh -lc '
-  getent hosts postgresql.postgresql-data-access || true
-  getent hosts postgresql.postgresql-data-access.svc.cluster.local || true
-'
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: access-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: access_service_db
+      POSTGRES_USER: access_service_user
+      POSTGRES_PASSWORD: "CHANGE_ME_STRONG_PASSWORD"
+      # При необходимости можно задать кодировку/локаль:
+      # POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+
+    ports:
+      # ВАЖНО: 0.0.0.0 означает доступно извне, не только localhost
+      - "0.0.0.0:5432:5432"
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1 -p 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
