@@ -4,3 +4,5 @@ oc run -n umka test-psql --rm -i --restart=Never \
   --command -- sh -lc '
     psql -h s00-0000-uk01.sogaz.ru -p 5432 -U access_service_user -d access_service_db -c "select 1;" -v ON_ERROR_STOP=1
   '
+If you don't see a command prompt, try pressing enter.
+
