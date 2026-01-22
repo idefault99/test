@@ -1,10 +1,6 @@
-oc run -n umka test-psql \
-  --restart=Never \
-  --image=nexus.sogaz.ru/library/postgres:16-alpine \
-  --env="PGPASSWORD=rCyc2Ht7VmCp99fY" \
+oc run -n umka test-tcp --rm -i --restart=Never \
+  --image=alpine:3.19 \
   --command -- sh -lc '
-    psql -h s00-0000-uk01.sogaz.ru -p 5432 -U access_service_user -d access_service_db -c "select 1;" -v ON_ERROR_STOP=1
+    apk add --no-cache netcat-openbsd >/dev/null 2>&1
+    nc -vz -w5 s00-0000-uk01.sogaz.ru 5432
   '
-
-oc -n umka logs pod/test-psql
-oc -n umka delete pod test-psql
