@@ -1,3 +1,6 @@
-oc run -n umka test --image=nexus.sogaz.ru/library/postgres:16-alpine --rm -it --restart=Never --command -- sh -lc '
-psql "host=s00-0000-uk01.sogaz.ru port=5432 dbname=access_service_db user=access_service_user password=rCyc2Ht7VmCp99fY"
+oc run -n umka test-psql --rm -i --restart=Never \
+  --image=nexus.sogaz.ru/library/postgres:16-alpine \
+  --env="PGPASSWORD=rCyc2Ht7VmCp99fY" \
+  --command -- sh -lc '
+    psql -h s00-0000-uk01.sogaz.ru -p 5432 -U access_service_user -d access_service_db -c "select 1;" -v ON_ERROR_STOP=1
   '
