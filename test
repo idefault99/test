@@ -1,30 +1,33 @@
-rabbitmq:
-  host: rabbitmq.rabbitmq.svc.cluster.local
-  port: 5672
-  username: app_user
-  virtualHost: /
+2026-01-22T14:22:45.859Z  INFO 1 --- [data-access] [           main] ru.sogaz.umka.Application                : Starting Application vbuild_53gqos718943y6e0etu4qa64n$_run_closure1@af9d304 using Java 21 with PID 1 (/app/app.jar started by 1000900000 in /app)
+2026-01-22T14:22:45.862Z  INFO 1 --- [data-access] [           main] ru.sogaz.umka.Application                : No active profile set, falling back to 1 default profile: "default"
+2026-01-22T14:22:48.922Z  INFO 1 --- [data-access] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-01-22T14:22:49.221Z  INFO 1 --- [data-access] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 289 ms. Found 13 JPA repository interfaces.
+2026-01-22T14:22:49.430Z  INFO 1 --- [data-access] [           main] faultConfiguringBeanFactoryPostProcessor : No bean named 'errorChannel' has been explicitly defined. Therefore, a default PublishSubscribeChannel will be created.
+2026-01-22T14:22:49.440Z  INFO 1 --- [data-access] [           main] faultConfiguringBeanFactoryPostProcessor : No bean named 'integrationHeaderChannelRegistry' has been explicitly defined. Therefore, a default DefaultHeaderChannelRegistry will be created.
+2026-01-22T14:22:51.056Z  INFO 1 --- [data-access] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-01-22T14:22:51.069Z  INFO 1 --- [data-access] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-01-22T14:22:51.069Z  INFO 1 --- [data-access] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.46]
+2026-01-22T14:22:51.344Z  INFO 1 --- [data-access] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-01-22T14:22:51.345Z  INFO 1 --- [data-access] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 5396 ms
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+2026-01-22T14:22:52.229Z  INFO 1 --- [data-access] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-01-22T14:23:03.304Z  WARN 1 --- [data-access] [           main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'entityManagerFactory' defined in class path resource [org/springframework/boot/autoconfigure/orm/jpa/HibernateJpaConfiguration.class]: Failed to initialize dependency 'liquibase' of LoadTimeWeaverAware bean 'entityManagerFactory': Error creating bean with name 'liquibase' defined in class path resource [org/springframework/boot/autoconfigure/liquibase/LiquibaseAutoConfiguration$LiquibaseConfiguration.class]: Failed to instantiate [liquibase.integration.spring.SpringLiquibase]: Factory method 'liquibase' threw exception with message: Error creating bean with name 'dataSource': Could not bind properties to 'HikariDataSource' : prefix=spring.datasource.hikari, ignoreInvalidFields=false, ignoreUnknownFields=true
+2026-01-22T14:23:03.308Z  INFO 1 --- [data-access] [           main] o.apache.catalina.core.StandardService   : Stopping service [Tomcat]
+2026-01-22T14:23:03.324Z  INFO 1 --- [data-access] [           main] .s.b.a.l.ConditionEvaluationReportLogger :
 
-  # пароль НЕ храним в values
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ .Values.app.name }}-config
-  namespace: {{ .Values.namespace }}
-data:
-  SPRING_RABBITMQ_HOST: "{{ .Values.rabbitmq.host }}"
-  SPRING_RABBITMQ_PORT: "{{ .Values.rabbitmq.port }}"
-  SPRING_RABBITMQ_USERNAME: "{{ .Values.rabbitmq.username }}"
-  SPRING_RABBITMQ_VIRTUAL_HOST: "{{ .Values.rabbitmq.virtualHost }}"
-  SPRING_RABBITMQ_SSL_ENABLED: "true"
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-01-22T14:23:03.346Z ERROR 1 --- [data-access] [           main] o.s.b.d.LoggingFailureAnalysisReporter   :
 
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ .Values.app.name }}-rabbitmq-secret
-  namespace: {{ .Values.namespace }}
-type: Opaque
-stringData:
-  SPRING_RABBITMQ_PASSWORD: "{{ .Values.rabbitmq.password }}"
----
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Failed to bind properties under 'spring.datasource.hikari.connection' to java.sql.Connection:
+
+    Reason: java.net.SocketTimeoutException: Connect timed out
+
+Action:
+
+Update your application's configuration
