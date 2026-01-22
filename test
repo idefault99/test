@@ -1,6 +1,30 @@
-.@timestamp = now()
+rabbitmq:
+  host: rabbitmq.rabbitmq.svc.cluster.local
+  port: 5672
+  username: app_user
+  virtualHost: /
 
-# убрать системное поле _id из документа
-if exists(._id) {
-  .doc_id = del(._id)
-}
+  # пароль НЕ храним в values
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.app.name }}-config
+  namespace: {{ .Values.namespace }}
+data:
+  SPRING_RABBITMQ_HOST: "{{ .Values.rabbitmq.host }}"
+  SPRING_RABBITMQ_PORT: "{{ .Values.rabbitmq.port }}"
+  SPRING_RABBITMQ_USERNAME: "{{ .Values.rabbitmq.username }}"
+  SPRING_RABBITMQ_VIRTUAL_HOST: "{{ .Values.rabbitmq.virtualHost }}"
+  SPRING_RABBITMQ_SSL_ENABLED: "true"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.app.name }}-rabbitmq-secret
+  namespace: {{ .Values.namespace }}
+type: Opaque
+stringData:
+  SPRING_RABBITMQ_PASSWORD: "{{ .Values.rabbitmq.password }}"
+---
