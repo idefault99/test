@@ -1,159 +1,181 @@
-include:
-  - project: 'infrastructure/common/gitlab-ci'
-    ref: master
-    file: '/node/k8s/v100/.gitlab-ci.yml'
-  - project: 'infrastructure/common/gitlab-ci'
-    ref: master
-    file: '/argocd/push-tag.yaml'
+TAG: features-devops
+REGISTRY_URL: harbor.sogaz.ru
+ENVIRONMENT: test
 
-# 1) Создаём pipeline ТОЛЬКО для develop и release-*
-# 2) Тут же задаём переменные окружения для develop (TEST).
-workflow:
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      when: always
-      variables:
-        # целевое окружение для develop = TEST
-        HELM_APP_ENV: ${HELM_APP_ENV_TEST}
-        SERVICE_ENV: ${CI_ENV_TEST}
-        SERVICE_HOST: ${CI_HOST_TEST}
-        SERVICE_URL: ${CI_PROJECT_NAME}.${CI_DOMAIN_TEST}
-        SERVICE_NAMESPACE: ${CI_NAMESPACE_TEST}
-        KUBECONFIG_INTERNAL: ${KUBECONFIG_NEW_TEST}
-        VITE_CONFIG: ${VITE_CONFIG_TEST}
-        VITE_ENV: ${VITE_ENV_TEST}
+INGRESS_BASE:  data-access-service-test.sogaz.ru
+INGRESS_CLASS_NAME: ingress-data-access-service
+IMAGE_PULL_SECRETS: sogaz
 
-    - if: '$CI_COMMIT_BRANCH =~ /^release-.*$/'
-      when: always
+RESTART_POLICY: Always
+REPLICA: 1
 
-    - when: never
+R_INIT_DELAY: 180
+R_PERIOD: 30
+L_INIT_DELAY: 240
+L_PERIOD: 30
 
-# -------------------------
-# Отключаем "лишние" джобы из include,
-# чтобы в пайплайне develop/release-* не торчали init/lint/build и т.п.
-# -------------------------
-init:
-  rules:
-    - when: never
+namespace: umka
 
-lint:
-  rules:
-    - when: never
+secret:
+  openbao: umka-secret
 
-build:
-  rules:
-    - when: never
+app:
+  name: data-access
+  port: 8080
 
-deploy-future-bugfix:
-  rules:
-    - when: never
+# PostgreSQL connection settings
+postgres:
+  host: s00-0000-uk01.sogaz.ru
+  port: 5432
+  database: access_service_db
+  username: access_service_user
+  
+  # HikariCP connection pool settings
+  hikari:
+    maximumPoolSize: 10
+    minimumIdle: 5
+    connectionTimeout: 30000  # 30 seconds
+    idleTimeout: 600000       # 10 minutes
+    maxLifetime: 1800000      # 30 minutes
 
-deploy-dev:
-  rules:
-    - when: never
+# JPA/Hibernate settings
+jpa:
+  hibernateDdlAuto: validate  # Options: none, validate, update, create, create-drop
+  showSql: false
+  formatSql: true
+  useSqlComments: true
 
-stop_k8s_future-bugfix:
-  rules:
-    - when: never
-
-# -------------------------
-# BUILD: используем существующий build-kaniko из include
-# включаем его только для develop и release-*
-# -------------------------
-build-kaniko:
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      when: on_success
-    - if: '$CI_COMMIT_BRANCH =~ /^release-.*$/'
-      when: on_success
-    - when: never
-
-# clone_ci_templates нужен для deploy jobs (они зависят от templates)
-clone_ci_templates:
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      when: on_success
-    - if: '$CI_COMMIT_BRANCH =~ /^release-.*$/'
-      when: on_success
-    - when: never
-
-# -------------------------
-# DEVELOP -> DEPLOY TEST (AUTO)
-# используем существующий deploy_test из include, но меняем rules
-# -------------------------
-deploy_test:
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      when: on_success
-    - when: never
-
-# -------------------------
-# RELEASE-* -> manual deploy STAGE
-# В include нет отдельного stage-джоба под ваш процесс, добавляем ОДИН новый job.
-# Скрипт — тот же helm upgrade, но с stage-переменными.
-# -------------------------
-deploy_stage:
-  stage: deploy
-  image: $CI_REPO_DOCKER/devth/helm:v3.12.3
-  variables:
-    EXCLUDE_FROM_LOGGING: false
-
-    HELM_APP_ENV: ${HELM_APP_ENV_STAGE}
-    SERVICE_ENV: ${CI_ENV_STAGE}
-    SERVICE_HOST: ${CI_HOST_STAGE}
-    SERVICE_URL: stage.${CI_PROJECT_NAME}.${CI_DOMAIN_STAGE}
-    SERVICE_NAMESPACE: ${CI_NAMESPACE_STAGE}
-    KUBECONFIG_INTERNAL: ${KUBECONFIG_NEW_TEST}
-    VITE_CONFIG: ${VITE_CONFIG_STAGE}
-    VITE_ENV: ${VITE_ENV_STAGE}
-
-  dependencies:
-    - clone_ci_templates
-
-  before_script:
-    - export SERVICE_URL_PATH=${CI_PATH_PREFIX}
-    - echo $SERVICE_URL_PATH
-    - export NEXT_PUBLIC_BASE_PATH=''
-    - export SERVICE_PATH=$(echo "${CI_PATH_PREFIX}/${SERVICE_ENV}/${CI_PROJECT_NAME}/${CI_COMMIT_REF_SLUG}")
-    - echo $SERVICE_PATH
-    - export SHORT_CI_COMMIT_REF_NAME1=$(echo "$CI_COMMIT_REF_NAME" | cut -f1 -d"/" | tr '[:upper:]' '[:lower:]')
-    - export SERVICE_NAME=${CI_PROJECT_NAME}-${SHORT_CI_COMMIT_REF_NAME1}
-    - echo $SERVICE_NAME
-
-  script:
-    - mkdir -p ~/.kube
-    - echo ${KUBECONFIG_INTERNAL} | base64 -d > ~/.kube/config
-    - cp $LOCAL_TEMPLATE_REPO_PATH/helm/custom.json custom.json
-    - envsubst < custom.json > ${HELM_CUSTOM_VALUES_FILE}
-    - echo "${HELM_APP_ENV}" > helm_app_env.yml
-    - helm upgrade --install
-      ${CI_HELM_UPGRADE_FLAGS}
-      --namespace ${SERVICE_NAMESPACE}
-      --create-namespace
-      -f ${HELM_CUSTOM_VALUES_FILE}
-      -f helm_app_env.yml
-      ${SERVICE_NAME} $LOCAL_TEMPLATE_REPO_PATH/helm/
-
-  rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^release-.*$/'
-      when: manual
-    - when: never
-
-  allow_failure: true
-
-# -------------------------
-# RELEASE-* -> manual deploy PROD
-# используем существующий deploy_prod_dmz / deploy_prod из include,
-# но убираем master и оставляем только release-*.
-# -------------------------
-deploy_prod_dmz:
-  rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^release-.*$/'
-      when: manual
-    - when: never
-
-deploy_prod:
-  rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^release-.*$/'
-      when: manual
-    - when: never
+# Logging levels
+logging:
+  level:
+    root: INFO
+    springframework: INFO
+    hibernate: WARN
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.app.name }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Values.app.name }}
+data:
+  # Database connection settings
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgresql.postgresql-data-access.svc.cluster.local:5432/access_service_db"
+  SPRING_DATASOURCE_USERNAME: "access_service_user"
+  SPRING_DATASOURCE_DRIVER_CLASS_NAME: "org.postgresql.Driver"
+  
+  # Connection pool settings
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "10"
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "5"
+  SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT: "30000"
+  SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT: "600000"
+  SPRING_DATASOURCE_HIKARI_MAX_LIFETIME: "1800000"
+  
+  # JPA/Hibernate settings
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "validate"
+  SPRING_JPA_SHOW_SQL: "false"
+  SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: "org.hibernate.dialect.PostgreSQLDialect"
+  SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "true"
+  SPRING_JPA_PROPERTIES_HIBERNATE_USE_SQL_COMMENTS: "true"
+  
+  # Application settings
+  SERVER_PORT: "8080"
+  SPRING_APPLICATION_NAME: "data-access"
+  
+  # Logging
+  LOGGING_LEVEL_ROOT: "INFO"
+  LOGGING_LEVEL_ORG_SPRINGFRAMEWORK: "INFO"
+  LOGGING_LEVEL_ORG_HIBERNATE: "WARN"
+---
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-access-service
+spec:
+  selector:
+    matchLabels:
+      app: data-access-service
+  replicas: {{ .Values.REPLICA }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: data-access-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - image: {{ .Values.REGISTRY_URL }}/corphealth/data-access-service:{{ .Values.TAG }}
+          imagePullPolicy: Always
+          name: data-access-service
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ .Values.app.name }}-config
+            - secretRef:
+                name: {{ .Values.secret.openbao }}
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          # readinessProbe:
+          #   httpGet:
+          #     path: /actuator/health/readiness
+          #     port: 8080
+          #   initialDelaySeconds: {{ .Values.R_INIT_DELAY }}
+          #   periodSeconds: {{ .Values.R_PERIOD }}
+          # livenessProbe:
+          #   httpGet:
+          #     path: /actuator/health/liveness
+          #     port: 8080
+          #   initialDelaySeconds: {{ .Values.L_INIT_DELAY }}
+          #   periodSeconds: {{ .Values.L_PERIOD }}
+      restartPolicy: {{ .Values.RESTART_POLICY }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-access-service
+  labels:
+    app: data-access-service
+    metrics: enabled
+spec:
+  type: ClusterIP
+  ports:
+    - name: data-access-service
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: data-access-service
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: umka
+  name: umka
+  namespace: umka
+spec:
+  refreshInterval: 1m
+  secretStoreRef:
+    kind: SecretStore
+    name: vault-k8s
+  target:
+    creationPolicy: Owner
+    name: umka-secret
+  dataFrom: 
+    - extract:
+        key: umka/umka-backend
