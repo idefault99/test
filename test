@@ -9,12 +9,6 @@ sources:
     type: socket
     address: 0.0.0.0:6514
     mode: tcp
-#    tls:
-#      enabled: true
-#      crt_file: /etc/vector/tls/server.crt
-#      key_file: /etc/vector/tls/server.key
-#      ca_file: /etc/vector/tls/ca.crt
-#      verify_certificate: true
     decoding:
       codec: json
     framing:
@@ -29,7 +23,7 @@ sources:
   rabbit:
     type: amqp
     connection_string: "amqp://dev:dev@haproxy:5672/%2f"
-    queue: "USK-DisPult"     #Очередь
+    queue: "USK-DisPult"
     acknowledgements: true
     decoding:
       codec: json
@@ -41,6 +35,18 @@ transforms:
     source: |
       .@timestamp = now()
 
+      # Убираем запрещённое мета-поле _id, если его прислали
+      if exists(._id) {
+        .doc_id = del(._id)
+      }
+
+      # (опционально) если у тебя иногда прилетает timestamp в строке и ломает маппинг,
+      # лучше сохранять его отдельно. Если timestamp уже число — оставим как есть.
+      if exists(.timestamp) && is_string(.timestamp) {
+        .original_timestamp = .timestamp
+        del(.timestamp)
+      }
+
       if !exists(.service) { .service = "vector" }
 
       if !exists(.host) {
@@ -48,72 +54,42 @@ transforms:
         if err != null { .host = "unknown" }
       }
 
-      if exists(._id) {
-        .doc_id = del(._id)
-      }
   route:
     type: route
-    inputs: ["rabbit"]
+    inputs: ["normalize"]   # ВАЖНО: не "rabbit"
     route:
-      policy: '.stream == "policy"'
-      policy_lpu: '.stream == "policy-lpu"'
-      policy_lpu_services:  '.stream == "policy-lpu-services"'
+      policy: .stream == "policy"
+      policy_lpu: .stream == "policy-lpu"
+      policy_lpu_services: .stream == "policy-lpu-services"
+      policy_program: .stream == "policy-program"
 
 sinks:
+  # Debug: что реально выходит из normalize
   console_debug:
     type: console
     inputs: ["normalize"]
     encoding:
       codec: json
 
+  # Общий индекс со всем входящим (можешь потом отключить, если не нужен)
   opensearch_logs:
     type: elasticsearch
     inputs: ["normalize"]
     endpoints: ["http://opensearch:9200"]
-
     api_version: v7
-
-#    auth:
-#      strategy: basic
-#      user: admin
-#      password: admin
-
-#    tls:
-#      ca_file: /etc/vector/tls/ca.crt
-#      verify_certificate: true
-#      verify_hostname: false
-
-      # === mTLS ===
-#      crt_file: /etc/vector/tls/client.crt
-#      key_file: /etc/vector/tls/client.key
-
     bulk:
       index: "vuln_input-%Y.%m.%d"
       action: "index"
-
     buffer:
       type: memory
       max_events: 5000
 
+  # Раздельные индексы по stream
   policy:
     type: elasticsearch
     inputs: ["route.policy"]
     endpoints: ["http://opensearch:9200"]
     api_version: v7
-#    auth:
-#      strategy: basic
-#      user: admin
-#      password: admin
-
-#    tls:
-#      ca_file: /etc/vector/tls/ca.crt
-#      verify_certificate: true
-#      verify_hostname: false
-
-      # === mTLS ===
-#      crt_file: /etc/vector/tls/client.crt
-#      key_file: /etc/vector/tls/client.key
-
     bulk:
       index: "usk-dispult-policy"
       action: "index"
@@ -123,20 +99,6 @@ sinks:
     inputs: ["route.policy_lpu"]
     endpoints: ["http://opensearch:9200"]
     api_version: v7
-#    auth:
-#      strategy: basic
-#      user: admin
-#      password: admin
-
-#    tls:
-#      ca_file: /etc/vector/tls/ca.crt
-#      verify_certificate: true
-#      verify_hostname: false
-
-      # === mTLS ===
-#      crt_file: /etc/vector/tls/client.crt
-#      key_file: /etc/vector/tls/client.key
-
     bulk:
       index: "usk-dispult-policy-lpu"
       action: "index"
@@ -146,21 +108,15 @@ sinks:
     inputs: ["route.policy_lpu_services"]
     endpoints: ["http://opensearch:9200"]
     api_version: v7
-#    auth:
-#      strategy: basic
-#      user: admin
-#      password: admin
-
-#    tls:
-#      ca_file: /etc/vector/tls/ca.crt
-#      verify_certificate: true
-#      verify_hostname: false
-
-      # === mTLS ===
-#      crt_file: /etc/vector/tls/client.crt
-#      key_file: /etc/vector/tls/client.key
-
     bulk:
       index: "usk-dispult-policy-lpu-services"
       action: "index"
 
+  policy_program:
+    type: elasticsearch
+    inputs: ["route.policy_program"]
+    endpoints: ["http://opensearch:9200"]
+    api_version: v7
+    bulk:
+      index: "usk-dispult-policy-program"
+      action: "index"
