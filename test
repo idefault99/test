@@ -1,8 +1,1 @@
-helm template my-release ./my-chart \
-  -f values.yaml
-
-helm template my-release ./my-chart \
-  -f values.yaml \
-  --show-only templates/configmap.yaml
-
-helm lint ./my-chart -f values.yaml
+kubectl -n service-stage exec -it transcription-service-backend-9b49f6548-lrk4s sh 'printenv | sort | egrep "TRANSCRIPTION_RMQ_REQUEST_QUEUE_NAME|TRANSCRIPTION_RMQ_RESULT_QUEUE_NAME|ENVIRONMENT"'
