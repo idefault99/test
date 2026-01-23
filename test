@@ -1,3 +1,167 @@
-SPRING_LIQUIBASE_ENABLED: "false"
-SPRING_JPA_HIBERNATE_DDL_AUTO: "none"
-SPRING_DATASOURCE_HIKARI_INITIALIZATION_FAIL_TIMEOUT: "-1"
+==============================
+POSTGRESQL В DOCKER — ШПАРГАЛКА
+==============================
+
+------------------------------
+1. ПРОСМОТР КОНТЕЙНЕРОВ
+------------------------------
+# Список запущенных контейнеров
+docker ps
+
+# Список всех контейнеров (включая остановленные)
+docker ps -a
+
+
+------------------------------
+2. ПОДКЛЮЧЕНИЕ К POSTGRES
+------------------------------
+# Зайти в контейнер
+docker exec -it <container_name> bash
+
+# Подключиться к postgres под пользователем
+docker exec -it <container_name> psql -U <user> -d <db_name>
+
+# Пример
+docker exec -it postgres psql -U postgres -d mydb
+
+
+------------------------------
+3. ОСНОВНЫЕ PSQL КОМАНДЫ
+------------------------------
+# Список баз данных
+\l
+
+# Подключиться к базе
+\c db_name
+
+# Список пользователей (ролей)
+\du
+
+# Список таблиц
+\dt
+
+# Список схем
+\dn
+
+# Описание таблицы
+\d table_name
+
+# Выход из psql
+\q
+
+
+------------------------------
+4. РАБОТА С БАЗАМИ ДАННЫХ
+------------------------------
+# Создать базу
+CREATE DATABASE db_name;
+
+# Удалить базу
+DROP DATABASE db_name;
+
+# Переименовать базу
+ALTER DATABASE old_name RENAME TO new_name;
+
+
+------------------------------
+5. РАБОТА С ПОЛЬЗОВАТЕЛЯМИ
+------------------------------
+# Создать пользователя
+CREATE USER username WITH PASSWORD 'password';
+
+# Создать пользователя с правами логина
+CREATE ROLE username WITH LOGIN PASSWORD 'password';
+
+# Дать все права на базу
+GRANT ALL PRIVILEGES ON DATABASE db_name TO username;
+
+# Сделать пользователя суперпользователем
+ALTER USER username WITH SUPERUSER;
+
+# Изменить пароль
+ALTER USER username WITH PASSWORD 'new_password';
+
+# Удалить пользователя
+DROP USER username;
+
+
+------------------------------
+6. РАБОТА С ТАБЛИЦАМИ
+------------------------------
+# Создать таблицу
+CREATE TABLE table_name (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    created_at TIMESTAMP DEFAULT now()
+);
+
+# Удалить таблицу
+DROP TABLE table_name;
+
+# Очистить таблицу (быстро)
+TRUNCATE TABLE table_name;
+
+# Переименовать таблицу
+ALTER TABLE old_name RENAME TO new_name;
+
+
+------------------------------
+7. ДАННЫЕ (CRUD)
+------------------------------
+# Вставка данных
+INSERT INTO table_name (name) VALUES ('test');
+
+# Чтение данных
+SELECT * FROM table_name;
+
+# Обновление данных
+UPDATE table_name SET name = 'new' WHERE id = 1;
+
+# Удаление данных
+DELETE FROM table_name WHERE id = 1;
+
+
+------------------------------
+8. БЭКАП И ВОССТАНОВЛЕНИЕ
+------------------------------
+# Бэкап базы из контейнера
+docker exec <container_name> pg_dump -U <user> <db_name> > backup.sql
+
+# Бэкап с custom-форматом
+docker exec <container_name> pg_dump -U <user> -Fc <db_name> > backup.dump
+
+# Восстановление из sql
+cat backup.sql | docker exec -i <container_name> psql -U <user> -d <db_name>
+
+# Восстановление из dump
+docker exec -i <container_name> pg_restore -U <user> -d <db_name> < backup.dump
+
+
+------------------------------
+9. ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
+------------------------------
+POSTGRES_DB=db_name
+POSTGRES_USER=user
+POSTGRES_PASSWORD=password
+PGHOST=localhost
+PGPORT=5432
+
+
+------------------------------
+10. ПОЛЕЗНОЕ
+------------------------------
+# Проверка версии Postgres
+SELECT version();
+
+# Текущая база
+SELECT current_database();
+
+# Текущий пользователь
+SELECT current_user;
+
+# Активные соединения
+SELECT * FROM pg_stat_activity;
+
+==============================
+КОНЕЦ
+==============================
