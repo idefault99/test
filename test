@@ -1,22 +1,10 @@
 apiVersion: v1
-kind: Service
+kind: Secret
 metadata:
-  name: postgres-external
-  namespace: your-ns
-spec:
-  ports:
-    - name: pg
-      port: 5432
-      targetPort: 5432
----
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: postgres-external
-  namespace: your-ns
-subsets:
-  - addresses:
-      - ip: 192.168.1.10   # IP хоста, где docker-postgres
-    ports:
-      - port: 5432
-        name: pg
+  name: postgres-secret
+  namespace: service-stage
+type: Opaque
+stringData:
+  username: postgres
+  password: super-secret-password
+  database: transcription
