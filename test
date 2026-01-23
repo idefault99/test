@@ -1,2 +1,179 @@
-plugins.query_insights.enabled: false
-plugins.performance_analyzer.enabled: false
+Enabling OpenSearch Security Plugin                                                                                                                                                                                                                                                                                                                                                                1.7s
+Disabling execution of install_demo_configuration.sh for OpenSearch Security Plugin
+Enabling execution of OPENSEARCH_HOME/bin/opensearch-performance-analyzer/performance-analyzer-agent-cli for OpenSearch Performance Analyzer Plugin
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: Unknown module: org.apache.arrow.memory.core specified to --add-opens
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction
+WARNING: Please consider reporting this to the maintainers of class net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by com.sun.jna.Native in an unnamed module (file:/usr/share/opensearch/lib/jna-5.16.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+[2026-01-23T14:08:07,762][WARN ][stderr                   ] [opensearch] Jan 23, 2026 2:08:07 PM org.opensearch.javaagent.bootstrap.AgentPolicy setPolicy
+[2026-01-23T14:08:07,764][WARN ][stderr                   ] [opensearch] INFO: Policy attached successfully: org.opensearch.bootstrap.OpenSearchPolicy@249e0271
+[2026-01-23T14:08:07,777][INFO ][o.o.n.Node               ] [opensearch] version[3.2.0], pid[1], build[tar/6adc0bf476e1624190564d7fbe4aba00ccf49ad8/2025-08-12T03:55:01.226522683Z], OS[Linux/6.1.0-39-amd64/amd64], JVM[Eclipse Adoptium/OpenJDK 64-Bit Server VM/24.0.2/24.0.2+12]
+[2026-01-23T14:08:07,777][INFO ][o.o.n.Node               ] [opensearch] JVM home [/usr/share/opensearch/jdk], using bundled JDK/JRE [true]
+[2026-01-23T14:08:07,777][INFO ][o.o.n.Node               ] [opensearch] JVM arguments [-Xshare:auto, -Dopensearch.networkaddress.cache.ttl=60, -Dopensearch.networkaddress.cache.negative.ttl=10, -XX:+AlwaysPreTouch, -Xss1m, -Djava.awt.headless=true, -Dfile.encoding=UTF-8, -Djna.nosys=true, -XX:-OmitStackTraceInFastThrow, -XX:+ShowCodeDetailsInExceptionMessages, -Dio.netty.noUnsafe=true, -Dio.netty.noKeySetOptimization=true, -Dio.netty.recycler.maxCapacityPerThread=0, -Dio.netty.allocator.numDirectArenas=0, -Dlog4j.shutdownHookEnabled=false, -Dlog4j2.disable.jmx=true, -Djava.locale.providers=SPI,CLDR, -Xms1g, -Xmx1g, -XX:+UseG1GC, -XX:G1ReservePercent=25, -XX:InitiatingHeapOccupancyPercent=30, -Djava.io.tmpdir=/tmp/opensearch-9584683512841716192, -XX:+HeapDumpOnOutOfMemoryError, -XX:HeapDumpPath=data, -XX:ErrorFile=logs/hs_err_pid%p.log, -Xlog:gc*,gc+age=trace,safepoint:file=logs/gc.log:utctime,pid,tags:filecount=32,filesize=64m, --add-modules=jdk.incubator.vector, -javaagent:agent/opensearch-agent.jar, --add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED, -Dclk.tck=100, -Djdk.attach.allowAttachSelf=true, -Djava.security.policy=/usr/share/opensearch/config/opensearch-performance-analyzer/opensearch_security.policy, --add-opens=jdk.attach/sun.tools.attach=ALL-UNNAMED, -Dopensearch.cgroups.hierarchy.override=/, -Xms512m, -Xmx512m, -Djava.io.tmpdir=/tmp, -XX:MaxDirectMemorySize=268435456, -Dopensearch.path.home=/usr/share/opensearch, -Dopensearch.path.conf=/usr/share/opensearch/config, -Dopensearch.distribution.type=tar, -Dopensearch.bundled_jdk=true]
+[2026-01-23T14:08:08,089][WARN ][stderr                   ] [opensearch] Jan 23, 2026 2:08:08 PM org.apache.lucene.internal.vectorization.PanamaVectorizationProvider <init>
+[2026-01-23T14:08:08,089][WARN ][stderr                   ] [opensearch] INFO: Java vector incubator API enabled; uses preferredBitSize=512; FMA enabled
+[2026-01-23T14:08:09,611][INFO ][o.o.s.s.t.SSLConfig      ] [opensearch] SSL dual mode is disabled
+[2026-01-23T14:08:09,612][WARN ][o.o.s.OpenSearchSecurityPlugin] [opensearch] OpenSearch Security plugin installed but disabled. This can expose your configuration (including passwords) to the public.
+[2026-01-23T14:08:13,036][ERROR][o.o.p.c.c.PluginSettings ] [opensearch] Loading config file /usr/share/opensearch/config/opensearch-performance-analyzer/performance-analyzer.properties failed with error: org.opensearch.performanceanalyzer.commons.config.ConfigFileException: java.io.FileNotFoundException: /usr/share/opensearch/config/opensearch-performance-analyzer/performance-analyzer.properties (No such file or directory). Disabling plugin.
+[2026-01-23T14:08:13,036][INFO ][o.o.p.c.c.PluginSettings ] [opensearch] Config: metricsLocation: /dev/shm/performanceanalyzer/, metricsDeletionInterval: 1, httpsEnabled: false, cleanup-metrics-db-files: false, batch-metrics-retention-period-minutes: 7, rpc-port: 9650, webservice-port 9600
+[2026-01-23T14:08:13,369][ERROR][o.o.p.c.c.StatsCollector ] [opensearch] Error in loading metadata for folderLocation: /usr/share/opensearch/config/opensearch-performance-analyzer/, fileLocation: plugin-stats-metadata
+java.io.FileNotFoundException: /usr/share/opensearch/config/opensearch-performance-analyzer/plugin-stats-metadata (No such file or directory)
+        at java.base/java.io.FileInputStream.open0(Native Method) ~[?:?]
+        at java.base/java.io.FileInputStream.open(FileInputStream.java:185) ~[?:?]
+        at java.base/java.io.FileInputStream.<init>(FileInputStream.java:139) ~[?:?]
+        at java.base/java.io.FileInputStream.<init>(FileInputStream.java:109) ~[?:?]
+        at org.opensearch.performanceanalyzer.commons.collectors.StatsCollector.loadMetadata(StatsCollector.java:158) [performance-analyzer-commons-2.0.0.jar:?]
+        at org.opensearch.performanceanalyzer.commons.collectors.StatsCollector.instance(StatsCollector.java:73) [performance-analyzer-commons-2.0.0.jar:?]
+        at org.opensearch.performanceanalyzer.PerformanceAnalyzerPlugin.scheduleRcaCollectors(PerformanceAnalyzerPlugin.java:264) [opensearch-performance-analyzer-3.2.0.0.jar:3.2.0.0]
+        at org.opensearch.performanceanalyzer.PerformanceAnalyzerPlugin.<init>(PerformanceAnalyzerPlugin.java:213) [opensearch-performance-analyzer-3.2.0.0.jar:3.2.0.0]
+        at java.base/jdk.internal.reflect.DirectConstructorHandleAccessor.newInstance(DirectConstructorHandleAccessor.java:62) ~[?:?]
+        at java.base/java.lang.reflect.Constructor.newInstanceWithCaller(Constructor.java:499) ~[?:?]
+        at java.base/java.lang.reflect.Constructor.newInstance(Constructor.java:483) ~[?:?]
+        at org.opensearch.plugins.PluginsService.loadPlugin(PluginsService.java:872) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.plugins.PluginsService.loadBundle(PluginsService.java:820) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.plugins.PluginsService.loadBundles(PluginsService.java:615) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.plugins.PluginsService.<init>(PluginsService.java:229) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.node.Node.<init>(Node.java:554) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.node.Node.<init>(Node.java:482) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.Bootstrap$5.<init>(Bootstrap.java:249) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.Bootstrap.setup(Bootstrap.java:249) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.Bootstrap.init(Bootstrap.java:411) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.init(OpenSearch.java:168) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.execute(OpenSearch.java:159) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.common.cli.EnvironmentAwareCommand.execute(EnvironmentAwareCommand.java:110) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.cli.Command.mainWithoutErrorHandling(Command.java:138) [opensearch-cli-3.2.0.jar:3.2.0]
+        at org.opensearch.cli.Command.main(Command.java:101) [opensearch-cli-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:125) [opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:91) [opensearch-3.2.0.jar:3.2.0]
+[2026-01-23T14:08:13,374][INFO ][o.o.p.c.SearchBackPressureStatsCollector] [opensearch] SearchBackPressureStatsCollector started
+[2026-01-23T14:08:14,098][INFO ][o.o.i.r.ReindexModulePlugin] [opensearch] ReindexPlugin reloadSPI called
+[2026-01-23T14:08:14,098][INFO ][o.o.i.r.ReindexModulePlugin] [opensearch] Unable to find any implementation for RemoteReindexExtension
+[2026-01-23T14:08:14,157][INFO ][o.o.j.JobSchedulerPlugin ] [opensearch] Loaded scheduler extension: opensearch_time_series_analytics, index: .opendistro-anomaly-detector-jobs
+[2026-01-23T14:08:14,158][INFO ][o.o.j.JobSchedulerPlugin ] [opensearch] Loaded scheduler extension: opendistro-index-management, index: .opendistro-ism-config
+[2026-01-23T14:08:14,159][INFO ][o.o.j.JobSchedulerPlugin ] [opensearch] Loaded scheduler extension: opensearch_sap_job, index: .opensearch-sap--job
+[2026-01-23T14:08:14,258][INFO ][o.o.j.JobSchedulerPlugin ] [opensearch] Loaded scheduler extension: reports-scheduler, index: .opendistro-reports-definitions
+[2026-01-23T14:08:14,260][INFO ][o.o.j.JobSchedulerPlugin ] [opensearch] Loaded scheduler extension: opensearch_ml_commons_jobs, index: .plugins-ml-jobs
+[2026-01-23T14:08:14,261][INFO ][o.o.j.JobSchedulerPlugin ] [opensearch] Loaded scheduler extension: scheduler_geospatial_ip2geo_datasource, index: .scheduler-geospatial-ip2geo-datasource
+[2026-01-23T14:08:14,268][INFO ][o.o.j.JobSchedulerPlugin ] [opensearch] Loaded scheduler extension: async-query-scheduler, index: .async-query-scheduler
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [aggs-matrix-stats]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [analysis-common]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [cache-common]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [geo]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [ingest-common]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [ingest-geoip]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [ingest-user-agent]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [lang-expression]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [lang-mustache]
+[2026-01-23T14:08:14,308][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [lang-painless]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [mapper-extras]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [opensearch-dashboards]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [parent-join]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [percolator]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [rank-eval]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [reindex]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [repository-url]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [rule-framework]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [search-pipeline-common]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [systemd]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [transport-grpc]
+[2026-01-23T14:08:14,309][INFO ][o.o.p.PluginsService     ] [opensearch] loaded module [transport-netty4]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-alerting]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-anomaly-detection]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-asynchronous-search]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-cross-cluster-replication]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-custom-codecs]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-flow-framework]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-geospatial]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-index-management]
+[2026-01-23T14:08:14,310][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-job-scheduler]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-knn]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-ltr]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-ml]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-neural-search]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-notifications]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-notifications-core]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-observability]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-performance-analyzer]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-reports-scheduler]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-search-relevance]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-security]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-security-analytics]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-skills]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-sql]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-system-templates]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [opensearch-ubi]
+[2026-01-23T14:08:14,311][INFO ][o.o.p.PluginsService     ] [opensearch] loaded plugin [query-insights]
+[2026-01-23T14:08:14,406][INFO ][o.o.e.NodeEnvironment    ] [opensearch] using [1] data paths, mounts [[/usr/share/opensearch/data (/dev/mapper/vg_data-lv_data)]], net usable_space [89gb], net total_space [97.8gb], types [ext4]
+[2026-01-23T14:08:14,406][INFO ][o.o.e.NodeEnvironment    ] [opensearch] heap size [512mb], compressed ordinary object pointers [true]
+[2026-01-23T14:08:14,690][INFO ][o.o.n.Node               ] [opensearch] node name [opensearch], node ID [s1ycYCRUT5yfvi3KGBUunA], cluster name [docker-cluster], roles [ingest, remote_cluster_client, data, cluster_manager]
+[2026-01-23T14:08:14,906][INFO ][o.o.e.ExtensionsManager  ] [opensearch] ExtensionsManager initialized
+[2026-01-23T14:08:17,239][WARN ][stderr                   ] [opensearch] SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+[2026-01-23T14:08:17,239][WARN ][stderr                   ] [opensearch] SLF4J: Defaulting to no-operation (NOP) logger implementation
+[2026-01-23T14:08:17,239][WARN ][stderr                   ] [opensearch] SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+[2026-01-23T14:08:18,617][ERROR][o.o.b.OpenSearchUncaughtExceptionHandler] [opensearch] uncaught exception in thread [main]
+org.opensearch.bootstrap.StartupException: SettingsException[unknown setting [plugins.performance_analyzer.enabled] please check that any required plugins are installed, or check the breaking changes documentation for removed settings]
+        at org.opensearch.bootstrap.OpenSearch.init(OpenSearch.java:172) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.execute(OpenSearch.java:159) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.common.cli.EnvironmentAwareCommand.execute(EnvironmentAwareCommand.java:110) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.cli.Command.mainWithoutErrorHandling(Command.java:138) ~[opensearch-cli-3.2.0.jar:3.2.0]
+        at org.opensearch.cli.Command.main(Command.java:101) ~[opensearch-cli-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:125) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:91) ~[opensearch-3.2.0.jar:3.2.0]
+Caused by: org.opensearch.common.settings.SettingsException: unknown setting [plugins.performance_analyzer.enabled] please check that any required plugins are installed, or check the breaking changes documentation for removed settings
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:606) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:547) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:517) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:487) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.common.settings.SettingsModule.<init>(SettingsModule.java:178) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.node.Node.<init>(Node.java:665) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.node.Node.<init>(Node.java:482) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.Bootstrap$5.<init>(Bootstrap.java:249) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.Bootstrap.setup(Bootstrap.java:249) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.Bootstrap.init(Bootstrap.java:411) ~[opensearch-3.2.0.jar:3.2.0]
+        at org.opensearch.bootstrap.OpenSearch.init(OpenSearch.java:168) ~[opensearch-3.2.0.jar:3.2.0]
+        ... 6 more
+        Suppressed: org.opensearch.common.settings.SettingsException: unknown setting [plugins.query_insights.enabled] please check that any required plugins are installed, or check the breaking changes documentation for removed settings
+                at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:606) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:547) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:517) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:487) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.common.settings.SettingsModule.<init>(SettingsModule.java:178) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.node.Node.<init>(Node.java:665) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.node.Node.<init>(Node.java:482) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.bootstrap.Bootstrap$5.<init>(Bootstrap.java:249) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.bootstrap.Bootstrap.setup(Bootstrap.java:249) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.bootstrap.Bootstrap.init(Bootstrap.java:411) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.bootstrap.OpenSearch.init(OpenSearch.java:168) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.bootstrap.OpenSearch.execute(OpenSearch.java:159) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.common.cli.EnvironmentAwareCommand.execute(EnvironmentAwareCommand.java:110) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.cli.Command.mainWithoutErrorHandling(Command.java:138) ~[opensearch-cli-3.2.0.jar:3.2.0]
+                at org.opensearch.cli.Command.main(Command.java:101) ~[opensearch-cli-3.2.0.jar:3.2.0]
+                at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:125) ~[opensearch-3.2.0.jar:3.2.0]
+                at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:91) ~[opensearch-3.2.0.jar:3.2.0]
+uncaught exception in thread [main]
+SettingsException[unknown setting [plugins.performance_analyzer.enabled] please check that any required plugins are installed, or check the breaking changes documentation for removed settings]
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:606)
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:547)
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:517)
+        at org.opensearch.common.settings.AbstractScopedSettings.validate(AbstractScopedSettings.java:487)
+        at org.opensearch.common.settings.SettingsModule.<init>(SettingsModule.java:178)
+        at org.opensearch.node.Node.<init>(Node.java:665)
+        at org.opensearch.node.Node.<init>(Node.java:482)
+        at org.opensearch.bootstrap.Bootstrap$5.<init>(Bootstrap.java:249)
+        at org.opensearch.bootstrap.Bootstrap.setup(Bootstrap.java:249)
+        at org.opensearch.bootstrap.Bootstrap.init(Bootstrap.java:411)
+        at org.opensearch.bootstrap.OpenSearch.init(OpenSearch.java:168)
+        at org.opensearch.bootstrap.OpenSearch.execute(OpenSearch.java:159)
+        at org.opensearch.common.cli.EnvironmentAwareCommand.execute(EnvironmentAwareCommand.java:110)
+        at org.opensearch.cli.Command.mainWithoutErrorHandling(Command.java:138)
+        at org.opensearch.cli.Command.main(Command.java:101)
+        at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:125)
+        at org.opensearch.bootstrap.OpenSearch.main(OpenSearch.java:91)
+For complete error details, refer to the log at /usr/share/opensearch/logs/docker-cluster.log
