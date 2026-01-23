@@ -1,2 +1,8 @@
-implementation 'org.springframework:spring-messaging'
-implementation 'org.springframework.cloud:spring-cloud-starter-stream-rabbit'
+helm template my-release ./my-chart \
+  -f values.yaml
+
+helm template my-release ./my-chart \
+  -f values.yaml \
+  --show-only templates/configmap.yaml
+
+helm lint ./my-chart -f values.yaml
