@@ -1,88 +1,67 @@
-#15 [builder 8/8] RUN ./gradlew --no-daemon clean bootJar -x test
-#15 1.302 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.0.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
-#15 2.803 Daemon will be stopped at the end of the build 
-#15 9.704 > Task :clean UP-TO-DATE
-#15 9.802 > Task :bootBuildInfo
-#15 16.60 
-#15 16.60 > Task :compileJava
-#15 16.60 /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:8: error: package org.springframework.messaging does not exist
-#15 16.60 import org.springframework.messaging.Message;
-#15 16.60                                     ^
-#15 16.60 /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:9: error: package org.springframework.messaging.support does not exist
-#15 16.60 import org.springframework.messaging.support.MessageBuilder;
-#15 16.60                                             ^
-#15 16.60 /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:25: error: cannot find symbol
-#15 16.60     public Function<Message<UnderwritingRequestDto>, Message<UnderwritingResponseDto>> bidProcessing() {
-#15 16.60                     ^
-#15 16.60   symbol:   class Message
-#15 16.60   location: class GatewayFlowConfiguration
-#15 16.60 /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:25: error: cannot find symbol
-#15 16.60     public Function<Message<UnderwritingRequestDto>, Message<UnderwritingResponseDto>> bidProcessing() {
-#15 16.60                                                      ^
-#15 16.60   symbol:   class Message
-#15 16.60   location: class GatewayFlowConfiguration
-#15 16.60 4 errors
-#15 16.70 
-#15 16.70 > Task :compileJava FAILED
-#15 16.70 FAILURE: Build failed with an exception.
-#15 16.70 
-#15 16.70 
-#15 16.70 [Incubating] Problems report is available at: file:///home/gradle/app/build/reports/problems/problems-report.html
-#15 16.70 
-#15 16.70 * What went wrong:
-#15 16.70 3 actionable tasks: 2 executed, 1 up-to-date
-#15 16.70 Execution failed for task ':compileJava'.
-#15 16.70 > Compilation failed; see the compiler output below.
-#15 16.70   /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:25: error: cannot find symbol
-#15 16.70       public Function<Message<UnderwritingRequestDto>, Message<UnderwritingResponseDto>> bidProcessing() {
-#15 16.70                       ^
-#15 16.70     symbol:   class Message
-#15 16.70     location: class GatewayFlowConfiguration
-#15 16.70   /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:25: error: cannot find symbol
-#15 16.70       public Function<Message<UnderwritingRequestDto>, Message<UnderwritingResponseDto>> bidProcessing() {
-#15 16.70                                                        ^
-#15 16.70     symbol:   class Message
-#15 16.70     location: class GatewayFlowConfiguration
-#15 16.70   /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:8: error: package org.springframework.messaging does not exist
-#15 16.70   import org.springframework.messaging.Message;
-#15 16.70                                       ^
-#15 16.70   /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:9: error: package org.springframework.messaging.support does not exist
-#15 16.70   import org.springframework.messaging.support.MessageBuilder;
-#15 16.70                                               ^
-#15 16.70   4 errors
-#15 16.70 
-#15 16.70 * Try:
-#15 16.70 > Check your code and dependencies to fix the compilation error(s)
-#15 16.70 > Run with --scan to generate a Build Scan (Powered by Develocity).
-#15 16.70 
-#15 16.70 BUILD FAILED in 16s
-#15 ERROR: process "/bin/sh -c ./gradlew --no-daemon clean bootJar -x test" did not complete successfully: exit code: 1
-------
- > [builder 8/8] RUN ./gradlew --no-daemon clean bootJar -x test:
-16.70   /home/gradle/app/src/main/java/ru/sogaz/umka/configuration/GatewayFlowConfiguration.java:9: error: package org.springframework.messaging.support does not exist
-16.70   import org.springframework.messaging.support.MessageBuilder;
-16.70                                               ^
-16.70   4 errors
-16.70 
-16.70 * Try:
-16.70 > Check your code and dependencies to fix the compilation error(s)
-16.70 > Run with --scan to generate a Build Scan (Powered by Develocity).
-16.70 
-16.70 BUILD FAILED in 16s
-------
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.6'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'idea'
+}
 
- [33m2 warnings found (use docker --debug to expand):
-[0m - WorkdirRelativePath: Relative workdir "app" can have unexpected results if the base image changes (line 11)
- - WorkdirRelativePath: Relative workdir "app" can have unexpected results if the base image changes (line 2)
-Dockerfile:8
---------------------
-   6 |     RUN ./gradlew --no-daemon dependencies || true
-   7 |     COPY src/ src/
-   8 | >>> RUN ./gradlew --no-daemon clean bootJar -x test
-   9 |     
-  10 |     FROM nexus.sogaz.ru/library/openjdk:21-jdk-slim
---------------------
-ERROR: failed to solve: process "/bin/sh -c ./gradlew --no-daemon clean bootJar -x test" did not complete successfully: exit code: 1
-section_end:1769159031:step_script[0Ksection_start:1769159031:cleanup_file_variables[0K[0K[36;1mCleaning up project directory and file based variables[0;m[0;m
-[0KUsing docker image sha256:2966b46118e8d4b242e1ebf6801e60a6bb742893694c131df30b17d013ec65be for nexus.sogaz.ru/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-c20f0bec with digest nexus.sogaz.ru/gitlab-org/gitlab-runner/gitlab-runner-helper@sha256:29afe1cad8308976c1aa03cfde81494ab4d53f17c5489cbd300c18a904ee8274 ...[0;m
-section_end:1769159032:cleanup_file_variables[0K[31;1mERROR: Job failed: exit code 1
+group = 'ru.sogaz.umka'
+version = {RELEASE_VERSION}
+
+java {
+    sourceCompatibility = '21'
+    targetCompatibility = '21'
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    maven {
+       url = {NEXUS_MAVEN_CENTRAL_URL}
+   }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'org.springframework.retry:spring-retry'
+    implementation 'org.projectlombok:lombok'
+    implementation 'io.micrometer:micrometer-core'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'com.google.guava:guava:33.4.8-jre'
+    implementation 'org.mapstruct:mapstruct:1.6.3'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5'
+    implementation 'org.apache.commons:commons-lang3:3.18.0'
+    implementation 'org.liquibase:liquibase-core'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:postgresql:1.21.3'
+    testImplementation 'org.testcontainers:junit-jupiter'
+
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+springBoot {
+    buildInfo()
+}
+
+test {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+tasks.bootJar {
+    archiveFileName.set("app.jar")
+}
