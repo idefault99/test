@@ -1,5 +1,7 @@
-oc run -n umka test --image=nexus.sogaz.ru/alpine/k8s:1.32.5 --rm -it --restart=Never -- sh -lc '
-    nc -vz s00-0000-uk01.sogaz.ru 5447
-  '
-
-tcpdump -nn -i any tcp port 5447
+oc port-forward svc/transcription-service-frontend-test -n kdms 8080:81
+Forwarding from 127.0.0.1:8080 -> 8000
+Forwarding from [::1]:8080 -> 8000
+Handling connection for 8080
+Handling connection for 8080
+E0126 13:03:39.201906   17236 portforward.go:424] "Unhandled Error" err="an error occurred forwarding 8080 -> 8000: error forwarding port 8000 to pod dfab8e4b3505cab62ead32620bd38b0f84e01e19f1ebd5c967c08e450dcc02f2, uid : port forward into network namespace \"/var/run/netns/12a9909c-a437-452f-ac3d-5d61e7d3ac83\": failed to connect to localhost:8000 inside namespace dfab8e4b3505cab62ead32620bd38b0f84e01e19f1ebd5c967c08e450dcc02f2: dial tcp [::1]:8000: connect: connection refused"
+error: lost connection to pod
