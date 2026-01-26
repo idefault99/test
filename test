@@ -1,1 +1,1 @@
-sudo ufw route allow proto tcp to any port 5447
+sudo tcpdump -nn -i any tcp port 5447
