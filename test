@@ -1,5 +1,1 @@
-iptables -L DOCKER-USER -n -v --line-numbers
-# Warning: iptables-legacy tables present, use iptables-legacy to see them
-Chain DOCKER-USER (1 references)
-num   pkts bytes target     prot opt in     out     source               destination
-1      32M   36G RETURN     0    --  *      *       0.0.0.0/0            0.0.0.0/0
+sudo ufw route allow proto tcp to any port 5447
