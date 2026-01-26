@@ -1,22 +1,5 @@
-12:36:19.941699 cali27288afc62e In  IP 10.233.119.178.48398 > 10.233.26.11.5447: Flags [F.], seq 164657, ack 233824, win 502, options [nop,nop,TS val 787911517 ecr 842257427], length 0
-12:36:19.941811 cali27288afc62e In  IP 10.233.119.178.48404 > 10.233.26.11.5447: Flags [P.], seq 340:345, ack 682, win 504, options [nop,nop,TS val 787911517 ecr 842248187], length 5
-12:36:19.941858 cali27288afc62e In  IP 10.233.119.178.48404 > 10.233.26.11.5447: Flags [F.], seq 345, ack 682, win 504, options [nop,nop,TS val 787911517 ecr 842248187], length 0
-12:36:19.941904 cali27288afc62e In  IP 10.233.119.178.48408 > 10.233.26.11.5447: Flags [P.], seq 340:345, ack 682, win 504, options [nop,nop,TS val 787911517 ecr 842248512], length 5
-12:36:19.941936 cali27288afc62e In  IP 10.233.119.178.48408 > 10.233.26.11.5447: Flags [F.], seq 345, ack 682, win 504, options [nop,nop,TS val 787911518 ecr 842248512], length 0
-12:36:19.941975 cali27288afc62e In  IP 10.233.119.178.48412 > 10.233.26.11.5447: Flags [P.], seq 340:345, ack 682, win 504, options [nop,nop,TS val 787911518 ecr 842248701], length 5
-12:36:19.942007 cali27288afc62e In  IP 10.233.119.178.48412 > 10.233.26.11.5447: Flags [F.], seq 345, ack 682, win 504, options [nop,nop,TS val 787911518 ecr 842248701], length 0
-12:36:19.942044 cali27288afc62e In  IP 10.233.119.178.48416 > 10.233.26.11.5447: Flags [P.], seq 340:345, ack 682, win 504, options [nop,nop,TS val 787911518 ecr 842248816], length 5
-12:36:19.942072 cali27288afc62e In  IP 10.233.119.178.48416 > 10.233.26.11.5447: Flags [F.], seq 345, ack 682, win 504, options [nop,nop,TS val 787911518 ecr 842248816], length 0
-12:36:19.942104 cali27288afc62e In  IP 10.233.119.178.48392 > 10.233.26.11.5447: Flags [F.], seq 422, ack 791, win 504, options [nop,nop,TS val 787911518 ecr 842247602], length 0
-12:36:19.944066 cali27288afc62e Out IP 10.233.26.11.5447 > 10.233.119.178.48412: Flags [F.], seq 682, ack 346, win 509, options [nop,nop,TS val 842257510 ecr 787911518], length 0
-12:36:19.944083 cali27288afc62e In  IP 10.233.119.178.48412 > 10.233.26.11.5447: Flags [.], ack 683, win 504, options [nop,nop,TS val 787911520 ecr 842257510], length 0
-12:36:19.944560 cali27288afc62e Out IP 10.233.26.11.5447 > 10.233.119.178.48392: Flags [F.], seq 791, ack 423, win 509, options [nop,nop,TS val 842257510 ecr 787911518], length 0
-12:36:19.944601 cali27288afc62e In  IP 10.233.119.178.48392 > 10.233.26.11.5447: Flags [.], ack 792, win 504, options [nop,nop,TS val 787911520 ecr 842257510], length 0
-12:36:19.945515 cali27288afc62e Out IP 10.233.26.11.5447 > 10.233.119.178.48404: Flags [F.], seq 682, ack 346, win 509, options [nop,nop,TS val 842257511 ecr 787911517], length 0
-12:36:19.945544 cali27288afc62e In  IP 10.233.119.178.48404 > 10.233.26.11.5447: Flags [.], ack 683, win 504, options [nop,nop,TS val 787911521 ecr 842257511], length 0
-12:36:19.945982 cali27288afc62e Out IP 10.233.26.11.5447 > 10.233.119.178.48416: Flags [F.], seq 682, ack 346, win 509, options [nop,nop,TS val 842257512 ecr 787911518], length 0
-12:36:19.945993 cali27288afc62e In  IP 10.233.119.178.48416 > 10.233.26.11.5447: Flags [.], ack 683, win 504, options [nop,nop,TS val 787911522 ecr 842257512], length 0
-12:36:19.947581 cali27288afc62e Out IP 10.233.26.11.5447 > 10.233.119.178.48398: Flags [F.], seq 233824, ack 164658, win 501, options [nop,nop,TS val 842257513 ecr 787911517], length 0
-12:36:19.947624 cali27288afc62e In  IP 10.233.119.178.48398 > 10.233.26.11.5447: Flags [.], ack 233825, win 502, options [nop,nop,TS val 787911523 ecr 842257513], length 0
-12:36:19.949659 cali27288afc62e Out IP 10.233.26.11.5447 > 10.233.119.178.48408: Flags [F.], seq 682, ack 346, win 509, options [nop,nop,TS val 842257515 ecr 787911517], length 0
-12:36:19.949688 cali27288afc62e In  IP 10.233.119.178.48408 > 10.233.26.11.5447: Flags [.], ack 683, win 504, options [nop,nop,TS val 787911525 ecr 842257515], length 0
+oc run -n umka test --image=nexus.sogaz.ru/alpine/k8s:1.32.5 --rm -it --restart=Never -- sh -lc '
+    nc -vz s00-0000-uk01.sogaz.ru 5447
+  '
+
+tcpdump -nn -i any tcp port 5447
