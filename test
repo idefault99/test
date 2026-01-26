@@ -1,6 +1,12 @@
-oc -n kdms port-forward pod/transcription-service-frontend-test-585dbd67dd-4g646 8080:8080 --address 127.0.0.1
-
-
-oc -n kdms patch svc transcription-service-frontend-test \
-  --type='json' \
-  -p='[{"op":"replace","path":"/spec/ports/0/targetPort","value":8080}]'
+W0126 10:28:26.984537       2 controller.go:1226] Service "kdms/backend-clusters-dms-test" does not have any active Endpoint.
+W0126 10:28:26.984556       2 controller.go:1226] Service "kdms/background-test" does not have any active Endpoint.
+2026/01/26 10:26:16 [error] 31#31: *28596791 connect() failed (111: Connection refused) while connecting to upstream, client: 100.64.0.7, server: kdms.apps.okd.test.sogaz.ru, request: "GET /transcription-service-frontend HTTP/2.0", upstream: "http://10.129.3.160:8000/", host: "kdms.apps.okd.test.sogaz.ru"
+2026/01/26 10:26:16 [error] 31#31: *28596791 connect() failed (111: Connection refused) while connecting to upstream, client: 100.64.0.7, server: kdms.apps.okd.test.sogaz.ru, request: "GET /transcription-service-frontend HTTP/2.0", upstream: "http://10.129.3.160:8000/", host: "kdms.apps.okd.test.sogaz.ru"
+100.64.0.7 - - [26/Jan/2026:10:26:16 +0000] "GET /transcription-service-frontend HTTP/2.0" 502 552 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 YaBrowser/25.12.0.0 Safari/537.36" 51 0.004 [kdms-transcription-service-frontend-test-81] [] 10.129.3.160:8000, 10.129.3.160:8000, 10.129.3.160:8000 0, 0, 0 0.002, 0.001, 0.000 502, 502, 502 8bb78572e42c9f33f3d84f086ba9886c
+2026/01/26 10:27:12 [error] 31#31: *28596791 connect() failed (111: Connection refused) while connecting to upstream, client: 100.64.0.7, server: kdms.apps.okd.test.sogaz.ru, request: "GET /transcription-service-frontend HTTP/2.0", upstream: "http://10.129.3.160:8000/", host: "kdms.apps.okd.test.sogaz.ru"
+2026/01/26 10:27:12 [error] 31#31: *28596791 connect() failed (111: Connection refused) while connecting to upstream, client: 100.64.0.7, server: kdms.apps.okd.test.sogaz.ru, request: "GET /transcription-service-frontend HTTP/2.0", upstream: "http://10.129.3.160:8000/", host: "kdms.apps.okd.test.sogaz.ru"
+2026/01/26 10:27:12 [error] 31#31: *28596791 connect() failed (111: Connection refused) while connecting to upstream, client: 100.64.0.7, server: kdms.apps.okd.test.sogaz.ru, request: "GET /transcription-service-frontend HTTP/2.0", upstream: "http://10.129.3.160:8000/", host: "kdms.apps.okd.test.sogaz.ru"
+100.64.0.7 - - [26/Jan/2026:10:27:12 +0000] "GET /transcription-service-frontend HTTP/2.0" 502 552 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 YaBrowser/25.12.0.0 Safari/537.36" 51 0.002 [kdms-transcription-service-frontend-test-81] [] 10.129.3.160:8000, 10.129.3.160:8000, 10.129.3.160:8000 0, 0, 0 0.002, 0.001, 0.000 502, 502, 502 70d593802a31d58ca9a5c04734d175e7
+W0126 10:28:26.983677       2 controller.go:1226] Service "kdms/transcription-service-backend-test" does not have any active Endpoint.
+W0126 10:28:26.983707       2 controller.go:1226] Service "kdms/backend-clusters-dms-test" does not have any active Endpoint.
+W0126 10:28:26.983719       2 controller.go:1226] Service "kdms/background-test" does not have any active Endpoint.
