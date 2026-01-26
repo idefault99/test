@@ -1,3 +1,1 @@
-0.0.0.0:5447->5432/tcp
-
-5447/tcp                   ALLOW       Anywhere
+iptables -L DOCKER-USER -n -v --line-numbers
