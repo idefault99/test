@@ -15,3 +15,34 @@ script:
       --create-namespace \
       --atomic \
       --timeout 5m
+
+
+stages:
+  - deploy
+
+deploy_helm_chart_stage:
+  stage: deploy
+  script:
+    - set -euo pipefail
+
+    - echo "Using kubeconfig at: $KUBECONFIG"
+    - chmod 600 "$KUBECONFIG" || true
+
+    - echo "Check access"
+    - kubectl version --client
+    - kubectl config current-context
+    - kubectl cluster-info
+    - helm version
+
+    - echo "Deploy helm chart to stage"
+    - helm upgrade --install my-release ./helm/my-chart \
+        --namespace stage \
+        --create-namespace \
+        --values ./helm/my-chart/values.yaml \
+        --atomic \
+        --timeout 5m \
+        --wait
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "stage"'
+      when: on_success
+    - when: never
