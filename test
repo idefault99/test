@@ -1,7 +1,2 @@
-oc port-forward svc/transcription-service-frontend-test -n kdms 8080:81
-Forwarding from 127.0.0.1:8080 -> 8000
-Forwarding from [::1]:8080 -> 8000
-Handling connection for 8080
-Handling connection for 8080
-E0126 13:03:39.201906   17236 portforward.go:424] "Unhandled Error" err="an error occurred forwarding 8080 -> 8000: error forwarding port 8000 to pod dfab8e4b3505cab62ead32620bd38b0f84e01e19f1ebd5c967c08e450dcc02f2, uid : port forward into network namespace \"/var/run/netns/12a9909c-a437-452f-ac3d-5d61e7d3ac83\": failed to connect to localhost:8000 inside namespace dfab8e4b3505cab62ead32620bd38b0f84e01e19f1ebd5c967c08e450dcc02f2: dial tcp [::1]:8000: connect: connection refused"
-error: lost connection to pod
+oc -n kdms get svc transcription-service-frontend-test -o yaml | sed -n '/ports:/,$p' | sed -n '1,80p'
+oc -n kdms get endpoints transcription-service-frontend-test -o wide
