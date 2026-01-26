@@ -1,48 +1,141 @@
-script:
-  - mkdir -p ~/.kube
-  - echo "$KUBECONFIG_CONTENT" > ~/.kube/config
-  - chmod 600 ~/.kube/config
-  - export KUBECONFIG=~/.kube/config
+ :: Spring Boot ::   v3.5.6
+ :: Spring Cloud Stream ::   v
+ :: Spring Cloud Function ::   v
+2026-01-26T07:25:44.919Z  INFO 1 --- [data-access] [           main] ru.sogaz.umka.Application                : Starting Application vbuild_53gqos718943y6e0etu4qa64n$_run_closure1@af9d304 using Java 21 with PID 1 (/app/app.jar started by root in /app)
+2026-01-26T07:25:44.924Z  INFO 1 --- [data-access] [           main] ru.sogaz.umka.Application                : No active profile set, falling back to 1 default profile: "default"
+2026-01-26T07:25:51.043Z  INFO 1 --- [data-access] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-01-26T07:25:51.643Z  INFO 1 --- [data-access] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 582 ms. Found 13 JPA repository interfaces.
+2026-01-26T07:25:51.961Z  INFO 1 --- [data-access] [           main] faultConfiguringBeanFactoryPostProcessor : No bean named 'errorChannel' has been explicitly defined. Therefore, a default PublishSubscribeChannel will be created.
+2026-01-26T07:25:52.025Z  INFO 1 --- [data-access] [           main] faultConfiguringBeanFactoryPostProcessor : No bean named 'integrationHeaderChannelRegistry' has been explicitly defined. Therefore, a default DefaultHeaderChannelRegistry will be created.
+2026-01-26T07:25:55.132Z  INFO 1 --- [data-access] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-01-26T07:25:55.146Z  INFO 1 --- [data-access] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-01-26T07:25:55.147Z  INFO 1 --- [data-access] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.46]
+2026-01-26T07:25:55.564Z  INFO 1 --- [data-access] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-01-26T07:25:55.566Z  INFO 1 --- [data-access] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 10533 ms
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+2026-01-26T07:25:57.148Z  INFO 1 --- [data-access] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-01-26T07:25:57.928Z  INFO 1 --- [data-access] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@1abf951a
+2026-01-26T07:25:57.929Z  INFO 1 --- [data-access] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-01-26T07:25:58.646Z  INFO 1 --- [data-access] [           main] liquibase.database                       : Set default schema name to public
+2026-01-26T07:25:59.250Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_address.sql
+2026-01-26T07:25:59.545Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading from public.databasechangelog
+2026-01-26T07:25:59.653Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_address_identifier.sql
+2026-01-26T07:25:59.725Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_address_type.sql
+2026-01-26T07:25:59.750Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_age_range.sql
+2026-01-26T07:25:59.824Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_appeal_type.sql
+2026-01-26T07:25:59.848Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_bid_table.sql
+2026-01-26T07:25:59.864Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_chamber_types.sql
+2026-01-26T07:25:59.942Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_contracts_lpu.sql
+2026-01-26T07:25:59.966Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_counterparty_type_activity.sql
+2026-01-26T07:26:00.029Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_deal_types.sql
+2026-01-26T07:26:00.041Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_employee_positions.sql
+2026-01-26T07:26:00.051Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_employees.sql
+2026-01-26T07:26:00.060Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_fl.sql
+2026-01-26T07:26:00.069Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_hospital_smp_number.sql
+2026-01-26T07:26:00.128Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_hospital_types.sql
+2026-01-26T07:26:00.137Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_insurance_categories.sql
+2026-01-26T07:26:00.146Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_insurance_territories.sql
+2026-01-26T07:26:00.161Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_licenses.sql
+2026-01-26T07:26:00.172Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_licenses_appeal_type.sql
+2026-01-26T07:26:00.240Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_lpu.sql
+2026-01-26T07:26:00.254Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_lpu_programs.sql
+2026-01-26T07:26:00.264Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_lpu_specialization.sql
+2026-01-26T07:26:00.339Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_netto_lpu.sql
+2026-01-26T07:26:00.359Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_netto_lpu_history.sql
+2026-01-26T07:26:00.430Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_okved.sql
+2026-01-26T07:26:00.450Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_opf.sql
+2026-01-26T07:26:00.521Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_organization.sql
+2026-01-26T07:26:00.546Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_pnd_remoteness.sql
+2026-01-26T07:26:00.621Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_program.sql
+2026-01-26T07:26:00.639Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_program_conditions.sql
+2026-01-26T07:26:00.650Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_program_risk_type.sql
+2026-01-26T07:26:00.663Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_program_volume.sql
+2026-01-26T07:26:00.721Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_providers.sql
+2026-01-26T07:26:00.737Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_providers_types_activity.sql
+2026-01-26T07:26:00.748Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_related_counterparty.sql
+2026-01-26T07:26:00.763Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_request_type.sql
+2026-01-26T07:26:00.776Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_segment_table.sql
+2026-01-26T07:26:00.833Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_smp_remoteness.sql
+2026-01-26T07:26:00.848Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_status.sql
+2026-01-26T07:26:00.863Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_tender_type.sql
+2026-01-26T07:26:00.929Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/init/create_units.sql
+2026-01-26T07:26:00.949Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_address.sql
+2026-01-26T07:26:00.962Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_bid.sql
+2026-01-26T07:26:01.030Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_employees.sql
+2026-01-26T07:26:01.052Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_lpu_programs.sql
+2026-01-26T07:26:01.066Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_lpu_specialization.sql
+2026-01-26T07:26:01.077Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_program.sql
+2026-01-26T07:26:01.131Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_program_conditions.sql
+2026-01-26T07:26:01.144Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constraint_providers_types_activity.sql
+2026-01-26T07:26:01.220Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/constraint/constrant_licenses_appeal_type.sql
+2026-01-26T07:26:01.459Z  INFO 1 --- [data-access] [           main] liquibase.ui                             : Database is up to date, no changesets to execute
+2026-01-26T07:26:01.462Z  INFO 1 --- [data-access] [           main] liquibase.changelog                      : Reading from public.databasechangelog
+2026-01-26T07:26:01.550Z  INFO 1 --- [data-access] [           main] liquibase.util                           : UPDATE SUMMARY
+2026-01-26T07:26:01.550Z  INFO 1 --- [data-access] [           main] liquibase.util                           : Run:                          0
+2026-01-26T07:26:01.550Z  INFO 1 --- [data-access] [           main] liquibase.util                           : Previously run:              50
+2026-01-26T07:26:01.551Z  INFO 1 --- [data-access] [           main] liquibase.util                           : Filtered out:                 0
+2026-01-26T07:26:01.551Z  INFO 1 --- [data-access] [           main] liquibase.util                           : -------------------------------
+2026-01-26T07:26:01.551Z  INFO 1 --- [data-access] [           main] liquibase.util                           : Total change sets:           50
+2026-01-26T07:26:01.552Z  INFO 1 --- [data-access] [           main] liquibase.util                           : Update summary generated
+2026-01-26T07:26:01.555Z  INFO 1 --- [data-access] [           main] liquibase.command                        : Command execution complete
+2026-01-26T07:26:03.333Z  INFO 1 --- [data-access] [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-01-26T07:26:03.436Z  WARN 1 --- [data-access] [           main] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-01-26T07:26:07.859Z ERROR 1 --- [data-access] [           main] j.LocalContainerEntityManagerFactoryBean : Failed to initialize JPA EntityManagerFactory: [PersistenceUnit: default] Unable to build Hibernate SessionFactory; nested exception is org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation: wrong column type encountered in column [id] in table [address]; found [serial (Types#INTEGER)], but expecting [bigint (Types#BIGINT)]
+2026-01-26T07:26:07.860Z  WARN 1 --- [data-access] [           main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'entityManagerFactory' defined in class path resource [org/springframework/boot/autoconfigure/orm/jpa/HibernateJpaConfiguration.class]: [PersistenceUnit: default] Unable to build Hibernate SessionFactory; nested exception is org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation: wrong column type encountered in column [id] in table [address]; found [serial (Types#INTEGER)], but expecting [bigint (Types#BIGINT)]
+2026-01-26T07:26:07.861Z  INFO 1 --- [data-access] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-01-26T07:26:07.919Z  INFO 1 --- [data-access] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+2026-01-26T07:26:07.925Z  INFO 1 --- [data-access] [           main] o.apache.catalina.core.StandardService   : Stopping service [Tomcat]
+2026-01-26T07:26:07.965Z  INFO 1 --- [data-access] [           main] .s.b.a.l.ConditionEvaluationReportLogger :
 
-script:
-  - set -euo pipefail
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-01-26T07:26:08.054Z ERROR 1 --- [data-access] [           main] o.s.boot.SpringApplication               : Application run failed
 
-  - kubectl version --client
-  - helm version
+org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'entityManagerFactory' defined in class path resource [org/springframework/boot/autoconfigure/orm/jpa/HibernateJpaConfiguration.class]: [PersistenceUnit: default] Unable to build Hibernate SessionFactory; nested exception is org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation: wrong column type encountered in column [id] in table [address]; found [serial (Types#INTEGER)], but expecting [bigint (Types#BIGINT)]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1826) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:607) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:529) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:373) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:207) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:970) ~[spring-context-6.2.11.jar!/:6.2.11]
+        at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:627) ~[spring-context-6.2.11.jar!/:6.2.11]
+        at org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:146) ~[spring-boot-3.5.6.jar!/:3.5.6]
+        at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:752) ~[spring-boot-3.5.6.jar!/:3.5.6]
+        at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:439) ~[spring-boot-3.5.6.jar!/:3.5.6]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:318) ~[spring-boot-3.5.6.jar!/:3.5.6]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1361) ~[spring-boot-3.5.6.jar!/:3.5.6]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1350) ~[spring-boot-3.5.6.jar!/:3.5.6]
+        at ru.sogaz.umka.Application.main(Application.java:9) ~[!/:build_53gqos718943y6e0etu4qa64n$_run_closure1@af9d304]
+        at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+        at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+        at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:102) ~[app.jar:build_53gqos718943y6e0etu4qa64n$_run_closure1@af9d304]
+        at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:64) ~[app.jar:build_53gqos718943y6e0etu4qa64n$_run_closure1@af9d304]
+        at org.springframework.boot.loader.launch.JarLauncher.main(JarLauncher.java:40) ~[app.jar:build_53gqos718943y6e0etu4qa64n$_run_closure1@af9d304]
+Caused by: jakarta.persistence.PersistenceException: [PersistenceUnit: default] Unable to build Hibernate SessionFactory; nested exception is org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation: wrong column type encountered in column [id] in table [address]; found [serial (Types#INTEGER)], but expecting [bigint (Types#BIGINT)]
+        at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.buildNativeEntityManagerFactory(AbstractEntityManagerFactoryBean.java:431) ~[spring-orm-6.2.11.jar!/:6.2.11]
+        at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.afterPropertiesSet(AbstractEntityManagerFactoryBean.java:400) ~[spring-orm-6.2.11.jar!/:6.2.11]
+        at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.afterPropertiesSet(LocalContainerEntityManagerFactoryBean.java:366) ~[spring-orm-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.invokeInitMethods(AbstractAutowireCapableBeanFactory.java:1873) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1822) ~[spring-beans-6.2.11.jar!/:6.2.11]
+        ... 20 common frames omitted
+Caused by: org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation: wrong column type encountered in column [id] in table [address]; found [serial (Types#INTEGER)], but expecting [bigint (Types#BIGINT)]
+        at org.hibernate.tool.schema.internal.AbstractSchemaValidator.validateColumnType(AbstractSchemaValidator.java:169) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.tool.schema.internal.AbstractSchemaValidator.validateTable(AbstractSchemaValidator.java:156) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.tool.schema.internal.GroupedSchemaValidatorImpl.validateTables(GroupedSchemaValidatorImpl.java:46) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.tool.schema.internal.AbstractSchemaValidator.performValidation(AbstractSchemaValidator.java:99) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.tool.schema.internal.AbstractSchemaValidator.doValidation(AbstractSchemaValidator.java:77) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.performDatabaseAction(SchemaManagementToolCoordinator.java:289) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.lambda$process$5(SchemaManagementToolCoordinator.java:144) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at java.base/java.util.HashMap.forEach(HashMap.java:1429) ~[na:na]
+        at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.process(SchemaManagementToolCoordinator.java:141) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.boot.internal.SessionFactoryObserverForSchemaExport.sessionFactoryCreated(SessionFactoryObserverForSchemaExport.java:37) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.internal.SessionFactoryObserverChain.sessionFactoryCreated(SessionFactoryObserverChain.java:35) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.internal.SessionFactoryImpl.<init>(SessionFactoryImpl.java:324) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.boot.internal.SessionFactoryBuilderImpl.build(SessionFactoryBuilderImpl.java:463) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.hibernate.jpa.boot.internal.EntityManagerFactoryBuilderImpl.build(EntityManagerFactoryBuilderImpl.java:1517) ~[hibernate-core-6.6.29.Final.jar!/:6.6.29.Final]
+        at org.springframework.orm.jpa.vendor.SpringHibernateJpaPersistenceProvider.createContainerEntityManagerFactory(SpringHibernateJpaPersistenceProvider.java:66) ~[spring-orm-6.2.11.jar!/:6.2.11]
+        at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.createNativeEntityManagerFactory(LocalContainerEntityManagerFactoryBean.java:390) ~[spring-orm-6.2.11.jar!/:6.2.11]
+        at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.buildNativeEntityManagerFactory(AbstractEntityManagerFactoryBean.java:419) ~[spring-orm-6.2.11.jar!/:6.2.11]
+        ... 24 common frames omitted
 
-  - helm upgrade --install my-release ./helm/my-chart \
-      --namespace my-namespace \
-      --create-namespace \
-      --atomic \
-      --timeout 5m
-
-
-stages:
-  - deploy
-
-deploy_helm_chart_stage:
-  stage: deploy
-  script:
-    - set -euo pipefail
-
-    - echo "Using kubeconfig at: $KUBECONFIG"
-    - chmod 600 "$KUBECONFIG" || true
-
-    - echo "Check access"
-    - kubectl version --client
-    - kubectl config current-context
-    - kubectl cluster-info
-    - helm version
-
-    - echo "Deploy helm chart to stage"
-    - helm upgrade --install my-release ./helm/my-chart \
-        --namespace stage \
-        --create-namespace \
-        --values ./helm/my-chart/values.yaml \
-        --atomic \
-        --timeout 5m \
-        --wait
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "stage"'
-      when: on_success
-    - when: never
