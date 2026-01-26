@@ -1,2 +1,1 @@
-oc -n kdms get svc transcription-service-frontend-test -o yaml | sed -n '/ports:/,$p' | sed -n '1,80p'
-oc -n kdms get endpoints transcription-service-frontend-test -o wide
+oc -n kdms exec <pod> -- sh -c 'cat /proc/net/tcp /proc/net/tcp6 | head'
