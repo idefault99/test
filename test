@@ -1,1 +1,17 @@
-DISABLE_PERFORMANCE_ANALYZER=true
+script:
+  - mkdir -p ~/.kube
+  - echo "$KUBECONFIG_CONTENT" > ~/.kube/config
+  - chmod 600 ~/.kube/config
+  - export KUBECONFIG=~/.kube/config
+
+script:
+  - set -euo pipefail
+
+  - kubectl version --client
+  - helm version
+
+  - helm upgrade --install my-release ./helm/my-chart \
+      --namespace my-namespace \
+      --create-namespace \
+      --atomic \
+      --timeout 5m
