@@ -2,3 +2,7 @@ kubectl -n keycloak get endpoints postgresql -o wide
 kubectl -n keycloak get endpointslice -l kubernetes.io/service-name=postgresql -o wide
 kubectl -n keycloak describe svc postgresql
 kubectl -n keycloak get pod postgresql-0 --show-labels
+
+
+kubectl -n keycloak get netpol
+kubectl -n keycloak describe netpol
