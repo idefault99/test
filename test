@@ -1,3 +1,3 @@
-kubectl -n keycloak get endpointslice -l kubernetes.io/service-name=postgresql -o wide
-NAME               ADDRESSTYPE   PORTS   ENDPOINTS      AGE
-postgresql-5lqvv   IPv4          5432    10.233.77.10   32m
+kubectl -n keycloak get pod -o wide
+kubectl -n keycloak exec -it keycloak-0 -- sh -lc 'nc -vz -w 2 10.233.77.10 5432 || true'
+kubectl -n keycloak exec -it postgresql-0 -- sh -lc 'ss -ltnp | grep 5432 || true'
