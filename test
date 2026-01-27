@@ -1,4 +1,26 @@
-cat /proc/net/tcp | head
-  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
-
-   0: 7B02800A:EA72 8347BF0A:1538 02 00000001:00000000 01:000007BC 00000009     0        0 93026801 2 0000000000000000 3200 0 0 1 7
+build_app:
+  stage: docker
+  image: nexus.sogaz.ru/docker:27
+  services:
+    - name: nexus.sogaz.ru/docker:27-dind
+      command: ["--mtu=1460"]
+  variables:
+    CI_REGISTRY_IMAGE: "${REGISTRY_URL}/data-access-service"
+    CI_REGISTRY: "harbor.sogaz.ru"
+    GIT_STRATEGY: fetch
+  script:
+    - docker login -u "$REPO_USER" -p "$CI_REPO_PASSWORD" "$CI_REGISTRY"
+    - docker build --build-arg NEXT_PUBLIC_API_URL=$CI_NEXT_PUBLIC_API_URL -t "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}" -t "$CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}" .
+    - echo "$CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}"
+    - echo "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        docker tag "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}" "$CI_REGISTRY_IMAGE:latest"
+      fi
+    - docker push "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}"
+    - docker push "$CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        docker push "$CI_REGISTRY_IMAGE:latest"
+      fi
+    - echo ${CI_COMMIT_SHORT_SHA}
