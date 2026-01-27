@@ -1,11 +1,5 @@
-kubectl -n keycloak exec -it postgresql-0 -- sh -lc '
-(ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null) | grep 5432 || echo "NO_LISTEN_5432"
+kubectl -n keycloak run netshoot --rm -it --restart=Never --image=nicolaka/netshoot -- sh -lc '
+echo "DNS:"; dig +short postgresql.keycloak.svc.cluster.local
+echo "Service TCP:"; nc -vz -w 2 postgresql 5432 || true
+echo "Direct endpoint TCP:"; nc -vz -w 2 10.233.77.10 5432 || true
 '
-
-
-kubectl -n keycloak exec -it keycloak-0 -- sh -lc '
-getent hosts postgresql.keycloak.svc.cluster.local || true
-( command -v bash >/dev/null && bash -lc "timeout 2 bash -lc '\''</dev/tcp/postgresql/5432'\''" && echo "TCP_OK" ) || echo "TCP_FAIL"
-'
-
-
