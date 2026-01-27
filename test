@@ -1,3 +1,11 @@
-kubectl -n keycloak get pod -o wide
-kubectl -n keycloak exec -it keycloak-0 -- sh -lc 'nc -vz -w 2 10.233.77.10 5432 || true'
-kubectl -n keycloak exec -it postgresql-0 -- sh -lc 'ss -ltnp | grep 5432 || true'
+kubectl -n keycloak exec -it postgresql-0 -- sh -lc '
+(ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null) | grep 5432 || echo "NO_LISTEN_5432"
+'
+
+
+kubectl -n keycloak exec -it keycloak-0 -- sh -lc '
+getent hosts postgresql.keycloak.svc.cluster.local || true
+( command -v bash >/dev/null && bash -lc "timeout 2 bash -lc '\''</dev/tcp/postgresql/5432'\''" && echo "TCP_OK" ) || echo "TCP_FAIL"
+'
+
+
