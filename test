@@ -1,1 +1,53 @@
-openssl s_client -connect s00-0000-rt14.sogaz.ru:5671 -showcerts </dev/null
+#!/bin/sh
+set -e
+
+# ====== НАСТРОЙКИ ======
+CA_BUNDLE="/etc/ssl/rabbitmq/sogaz-bundle.crt"
+OUT_DIR="./rabbitmq-client-certs"
+TRUSTSTORE_PASS="changeit"
+JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk}"
+
+# ======================
+
+echo "[INFO] Preparing RabbitMQ client certificates..."
+
+# 1. Проверки
+if [ ! -f "$CA_BUNDLE" ]; then
+  echo "[ERROR] CA bundle not found: $CA_BUNDLE"
+  exit 1
+fi
+
+if [ ! -x "$JAVA_HOME/bin/keytool" ]; then
+  echo "[ERROR] keytool not found in $JAVA_HOME"
+  exit 1
+fi
+
+mkdir -p "$OUT_DIR"
+
+# 2. Копируем CA bundle (чтобы можно было положить в Secret)
+cp "$CA_BUNDLE" "$OUT_DIR/ca.crt"
+
+# 3. Создаём truststore (PKCS12)
+"$JAVA_HOME/bin/keytool" -importcert -noprompt -trustcacerts \
+  -alias sogaz-rabbitmq-ca \
+  -file "$OUT_DIR/ca.crt" \
+  -keystore "$OUT_DIR/truststore.p12" \
+  -storetype PKCS12 \
+  -storepass "$TRUSTSTORE_PASS"
+
+# 4. Проверка
+"$JAVA_HOME/bin/keytool" -list \
+  -keystore "$OUT_DIR/truststore.p12" \
+  -storetype PKCS12 \
+  -storepass "$TRUSTSTORE_PASS"
+
+echo
+echo "[OK] Done."
+echo "[RESULT]"
+echo " - CA:          $OUT_DIR/ca.crt"
+echo " - Truststore:  $OUT_DIR/truststore.p12"
+echo
+echo "[USE IN OKD]"
+echo " JAVA_TOOL_OPTIONS=\"-Djavax.net.ssl.trustStore=/certs/truststore.p12 \\"
+echo "  -Djavax.net.ssl.trustStoreType=PKCS12 \\"
+echo "  -Djavax.net.ssl.trustStorePassword=$TRUSTSTORE_PASS\""
