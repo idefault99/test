@@ -1,3 +1,5 @@
-nc: postgresql (10.233.29.94:5432): Operation timed out
-Direct endpoint TCP:
-10.233.77.10 (10.233.77.10:5432) open
+kubectl -n kube-system get pods -l k8s-app=kube-proxy -o wide
+kubectl -n kube-system logs -l k8s-app=kube-proxy --tail=200
+sudo iptables-save | head
+sudo nft list ruleset | head
+kubectl -n kube-system rollout restart ds/kube-proxy
