@@ -1,8 +1,45 @@
-kubectl -n keycloak get endpoints postgresql -o wide
-kubectl -n keycloak get endpointslice -l kubernetes.io/service-name=postgresql -o wide
-kubectl -n keycloak describe svc postgresql
-kubectl -n keycloak get pod postgresql-0 --show-labels
+Name:         keycloak
+Namespace:    keycloak
+Created on:   2026-01-27 17:30:18 +0300 MSK
+Labels:       app.kubernetes.io/component=keycloak
+              app.kubernetes.io/instance=keycloak
+              app.kubernetes.io/managed-by=Helm
+              app.kubernetes.io/name=keycloak
+              app.kubernetes.io/part-of=keycloak
+              app.kubernetes.io/version=26.3.3
+              helm.sh/chart=keycloak-25.2.0
+Annotations:  meta.helm.sh/release-name: keycloak
+              meta.helm.sh/release-namespace: keycloak
+Spec:
+  PodSelector:     app.kubernetes.io/component=keycloak,app.kubernetes.io/instance=keycloak,app.kubernetes.io/name=keycloak,app.kubernetes.io/part-of=keycloak
+  Allowing ingress traffic:
+    To Port: 8080/TCP
+    To Port: 8443/TCP
+    To Port: 7800/TCP
+    From: <any> (traffic not restricted by source)
+  Allowing egress traffic:
+    To Port: <any> (traffic allowed to all ports)
+    To: <any> (traffic not restricted by destination)
+  Policy Types: Ingress, Egress
 
 
-kubectl -n keycloak get netpol
-kubectl -n keycloak describe netpol
+Name:         postgresql
+Namespace:    keycloak
+Created on:   2026-01-27 17:04:14 +0300 MSK
+Labels:       app.kubernetes.io/component=primary
+              app.kubernetes.io/instance=postgresql
+              app.kubernetes.io/managed-by=Helm
+              app.kubernetes.io/name=postgresql
+              app.kubernetes.io/version=18.1.0
+              helm.sh/chart=postgresql-18.2.3
+Annotations:  meta.helm.sh/release-name: postgresql
+              meta.helm.sh/release-namespace: keycloak
+Spec:
+  PodSelector:     app.kubernetes.io/component=primary,app.kubernetes.io/instance=postgresql,app.kubernetes.io/name=postgresql
+  Allowing ingress traffic:
+    To Port: 5432/TCP
+    From: <any> (traffic not restricted by source)
+  Allowing egress traffic:
+    To Port: <any> (traffic allowed to all ports)
+    To: <any> (traffic not restricted by destination)
+  Policy Types: Ingress, Egress
