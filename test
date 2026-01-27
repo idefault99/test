@@ -1,49 +1,60 @@
-2026-01-27T11:52:25.350Z ERROR 1 --- [data-access] [k_to_umka_lpu-1] o.s.a.r.l.SimpleMessageListenerContainer : Stopping container from aborted consumer
-2026-01-27T11:52:25.350Z  INFO 1 --- [data-access] [k_to_umka_lpu-1] o.s.a.r.l.SimpleMessageListenerContainer : Waiting for workers to finish.
-2026-01-27T11:52:25.350Z  INFO 1 --- [data-access] [k_to_umka_lpu-1] o.s.a.r.l.SimpleMessageListenerContainer : Successfully waited for workers to finish.
-2026-01-27T11:52:25.349Z ERROR 1 --- [data-access] [   scheduling-1] o.s.cloud.stream.binding.BindingService  : Failed to create consumer binding; retrying in 30 seconds
+{{- /*
+Copyright Broadcom, Inc. All Rights Reserved.
+SPDX-License-Identifier: APACHE-2.0
+*/}}
 
-org.springframework.cloud.stream.binder.BinderException: Exception thrown while starting consumer:
-        at org.springframework.cloud.stream.binder.AbstractMessageChannelBinder.doBindConsumer(AbstractMessageChannelBinder.java:615) ~[spring-cloud-stream-4.3.0.jar!/:4.3.0]
-        at org.springframework.cloud.stream.binder.AbstractMessageChannelBinder.doBindConsumer(AbstractMessageChannelBinder.java:103) ~[spring-cloud-stream-4.3.0.jar!/:4.3.0]
-        at org.springframework.cloud.stream.binder.AbstractBinder.bindConsumer(AbstractBinder.java:144) ~[spring-cloud-stream-4.3.0.jar!/:4.3.0]
-        at org.springframework.cloud.stream.binding.BindingService.lambda$rescheduleConsumerBinding$1(BindingService.java:213) ~[spring-cloud-stream-4.3.0.jar!/:4.3.0]
-        at org.springframework.scheduling.support.DelegatingErrorHandlingRunnable.run(DelegatingErrorHandlingRunnable.java:54) ~[spring-context-6.2.11.jar!/:6.2.11]
-        at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572) ~[na:na]
-        at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317) ~[na:na]
-        at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[na:na]
-        at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144) ~[na:na]
-        at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642) ~[na:na]
-        at java.base/java.lang.Thread.run(Thread.java:1583) ~[na:na]
-Caused by: org.springframework.amqp.AmqpIllegalStateException: Fatal exception on listener startup
-        at org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer.waitForConsumersToStart(SimpleMessageListenerContainer.java:646) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer.doStart(SimpleMessageListenerContainer.java:606) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.listener.AbstractMessageListenerContainer.start(AbstractMessageListenerContainer.java:1417) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.integration.amqp.inbound.AmqpInboundChannelAdapter.doStart(AmqpInboundChannelAdapter.java:299) ~[spring-integration-amqp-6.5.2.jar!/:6.5.2]
-        at org.springframework.integration.endpoint.AbstractEndpoint.start(AbstractEndpoint.java:152) ~[spring-integration-core-6.5.2.jar!/:6.5.2]
-        at org.springframework.cloud.stream.binder.AbstractMessageChannelBinder.doBindConsumer(AbstractMessageChannelBinder.java:549) ~[spring-cloud-stream-4.3.0.jar!/:4.3.0]
-        ... 10 common frames omitted
-Caused by: org.springframework.amqp.rabbit.listener.exception.FatalListenerStartupException: Authentication failure
-        at org.springframework.amqp.rabbit.listener.BlockingQueueConsumer.start(BlockingQueueConsumer.java:631) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer$AsyncMessageProcessingConsumer.initialize(SimpleMessageListenerContainer.java:1490) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer$AsyncMessageProcessingConsumer.run(SimpleMessageListenerContainer.java:1328) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        ... 1 common frames omitted
-Caused by: org.springframework.amqp.AmqpAuthenticationException: com.rabbitmq.client.AuthenticationFailureException: ACCESS_REFUSED - Login was refused using authentication mechanism PLAIN. For details see the broker logfile.
-        at org.springframework.amqp.rabbit.support.RabbitExceptionTranslator.convertRabbitAccessException(RabbitExceptionTranslator.java:64) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.AbstractConnectionFactory.createBareConnection(AbstractConnectionFactory.java:632) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.CachingConnectionFactory.createConnection(CachingConnectionFactory.java:726) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.ConnectionFactoryUtils.createConnection(ConnectionFactoryUtils.java:257) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.ConnectionFactoryUtils$RabbitResourceFactory.createConnection(ConnectionFactoryUtils.java:345) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.ConnectionFactoryUtils.doGetTransactionalResourceHolder(ConnectionFactoryUtils.java:140) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.ConnectionFactoryUtils.getTransactionalResourceHolder(ConnectionFactoryUtils.java:102) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.ConnectionFactoryUtils.getTransactionalResourceHolder(ConnectionFactoryUtils.java:85) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.listener.BlockingQueueConsumer.start(BlockingQueueConsumer.java:625) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        ... 3 common frames omitted
-Caused by: com.rabbitmq.client.AuthenticationFailureException: ACCESS_REFUSED - Login was refused using authentication mechanism PLAIN. For details see the broker logfile.
-        at com.rabbitmq.client.impl.AMQConnection.start(AMQConnection.java:395) ~[amqp-client-5.25.0.jar!/:5.25.0]
-        at com.rabbitmq.client.ConnectionFactory.newConnection(ConnectionFactory.java:1251) ~[amqp-client-5.25.0.jar!/:5.25.0]
-        at com.rabbitmq.client.ConnectionFactory.newConnection(ConnectionFactory.java:1198) ~[amqp-client-5.25.0.jar!/:5.25.0]
-        at org.springframework.amqp.rabbit.connection.AbstractConnectionFactory.connectAddresses(AbstractConnectionFactory.java:678) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.AbstractConnectionFactory.connect(AbstractConnectionFactory.java:647) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        at org.springframework.amqp.rabbit.connection.AbstractConnectionFactory.createBareConnection(AbstractConnectionFactory.java:593) ~[spring-rabbit-3.2.7.jar!/:3.2.7]
-        ... 10 common frames omitted
+{{- if .Values.ingress.enabled }}
+apiVersion: {{ include "common.capabilities.ingress.apiVersion" . }}
+kind: Ingress
+metadata:
+  name: {{ include "common.names.fullname" . }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  {{- $labels := include "common.tplvalues.merge" (dict "values" (list .Values.ingress.labels .Values.commonLabels) "context" .) }}
+  labels: {{- include "common.labels.standard" (dict "customLabels" $labels "context" .) | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+    app.kubernetes.io/part-of: keycloak
+  {{- if or .Values.ingress.annotations .Values.commonAnnotations }}
+  {{- $annotations := include "common.tplvalues.merge" (dict "values" (list .Values.ingress.annotations .Values.commonAnnotations) "context" .) }}
+  annotations: {{- include "common.tplvalues.render" (dict "value" $annotations "context" .) | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.ingressClassName }}
+  ingressClassName: {{ tpl .Values.ingress.ingressClassName . | quote }}
+  {{- end }}
+  rules:
+    {{- if .Values.ingress.hostname }}
+    - host: {{ (tpl .Values.ingress.hostname .) | quote }}
+      http:
+        paths:
+          {{- if .Values.ingress.extraPaths }}
+          {{- toYaml .Values.ingress.extraPaths | nindent 10 }}
+          {{- end }}
+          - path: {{ tpl .Values.ingress.path . | quote }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend: {{- include "common.ingress.backend" (dict "serviceName" (include "common.names.fullname" .) "servicePort" .Values.ingress.servicePort "context" .)  | nindent 14 }}
+    {{- end }}
+    {{- range .Values.ingress.extraHosts }}
+    - host: {{ (tpl .name $) }}
+      http:
+        paths:
+          - path: {{ default "/" .path }}
+            pathType: {{ default "ImplementationSpecific" .pathType }}
+            backend: {{- include "common.ingress.backend" (dict "serviceName" (include "common.names.fullname" $) "servicePort" $.Values.ingress.servicePort "context" $) | nindent 14 }}
+    {{- end }}
+    {{- if .Values.ingress.extraRules }}
+    {{- include "common.tplvalues.render" (dict "value" .Values.ingress.extraRules "context" .) | nindent 4 }}
+    {{- end }}
+  {{- if or (and .Values.ingress.tls (or (include "common.ingress.certManagerRequest" (dict "annotations" .Values.ingress.annotations)) .Values.ingress.selfSigned .Values.ingress.secrets)) .Values.ingress.extraTls }}
+  tls:
+  {{- if and .Values.ingress.tls (or (include "common.ingress.certManagerRequest" (dict "annotations" .Values.ingress.annotations)) .Values.ingress.secrets .Values.ingress.selfSigned) }}
+    - hosts:
+        - {{ (tpl .Values.ingress.hostname .) | quote }}
+      secretName: {{ printf "%s-tls" (tpl .Values.ingress.hostname .) }}
+    {{- end }}
+    {{- if .Values.ingress.extraTls }}
+    {{- include "common.tplvalues.render" (dict "value" .Values.ingress.extraTls "context" .) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
+YAML parse error on keycloak/templates/ingress.yaml: error unmarshaling JSON: while decoding JSON: json: cannot unmarshal object into Go struct field .metadata.annotations of type string
