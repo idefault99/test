@@ -1,0 +1,278 @@
+default:
+  tags:
+    - gl03-docker-1
+
+include:
+  - project: 'sast/sast'
+    ref: master
+    file: 'runSast.yml'
+  - project: 'infrastructure/common/gitlab-ci'
+    ref: master
+    file: '/argocd/push-tag.yaml'
+  - project: 'infrastructure/common/gitlab-ci'
+    ref: master
+    file: '/node/k8s/v100/.gitlab-ci.yml'
+
+variables:
+  GIT_STRATEGY: fetch
+  PYTHON_VERSION: "3.12.7"
+  NEXUS_REGISTRY: nexus.sogaz.ru
+  UV_CACHE_DIR: "${CI_PROJECT_DIR}/.uv-cache"
+  UV_LINK_MODE: "copy"
+  UV_COMPILE_BYTECODE: "1"
+  UV_PYTHON_DOWNLOADS: "0"
+  POSTGRES_IMAGE: ${NEXUS_REGISTRY}/postgres:16.2
+  REDIS_IMAGE: ${NEXUS_REGISTRY}/library/redis:7.4-alpine
+  RABBITMQ_IMAGE: ${NEXUS_REGISTRY}/library/rabbitmq:4.1.1-management-alpine
+  MATTERMOST_WEBHOOK_URL: https://mm.sogaz.ru/hooks/uhrz3p79fbrtugf7o4q16td7bc
+
+.python_test_base:
+  image: ${NEXUS_REGISTRY}/python:${PYTHON_VERSION}-slim-bookworm
+  stage: lint
+  tags:
+    - s00-0000-uk01
+  before_script:
+    - |
+      pip install uv \
+      --index-url http://${NEXUS_REGISTRY}/repository/pypi-group/simple \
+      --trusted-host ${NEXUS_REGISTRY}
+
+    - uv sync --frozen --no-dev
+
+    - source .venv/bin/activate
+    - export PYTHONPATH=src
+
+init:
+  rules:
+    - when: never
+
+lint:
+  rules:
+    - when: never
+
+build:
+  rules:
+    - when: never
+
+deploy-future-bugfix:
+  rules:
+    - when: never
+
+deploy-dev:
+  rules:
+    - when: never
+
+stop_k8s_future-bugfix:
+  rules:
+    - when: never
+
+build-kaniko:
+  rules:
+    - when: never
+
+deploy_test:
+  rules:
+    - when: never
+
+deploy_prod:
+  rules:
+    - when: never
+
+deploy_prod_dmz:
+  rules:
+    - when: never
+
+# Unit тесты
+unit_test:
+  extends: .python_test_base
+  script:
+    - |
+      python -m pytest tests/unit/ -v \
+        --cov=src \
+        --cov-report=term-missing \
+        --cov-report=xml:coverage-unit.xml \
+        --cov-report=html:htmlcov-unit
+  artifacts:
+    paths:
+      - coverage-unit.xml
+      - htmlcov-unit/
+      - .coverage
+    expire_in: 30 days
+    when: always
+
+# Интеграционные тесты
+integration_test:
+  extends: .python_test_base
+  services:
+    - name: ${POSTGRES_IMAGE}
+      alias: test_db
+      variables:
+        POSTGRES_DB: test_db
+        POSTGRES_USER: test_user
+        POSTGRES_PASSWORD: test_password
+    - name: ${REDIS_IMAGE}
+      alias: redis_cluster_dms
+    - name: ${RABBITMQ_IMAGE}
+      alias: rabbitmq
+      variables:
+        RABBITMQ_DEFAULT_USER: guest
+        RABBITMQ_DEFAULT_PASS: guest
+  before_script:
+    - !reference [.python_test_base, before_script]
+    - cat $ENV_FILE > .env.test
+    - |
+      echo "=== Running migrations ==="
+      yoyo apply --database postgresql://test_user:test_password@test_db:5432/test_db migrations --batch
+      echo "=== Migrations completed ==="
+  script:
+    - |
+      python -m pytest tests/integration/ -v \
+        --cov=src \
+        --cov-report=term-missing \
+        --cov-report=xml:coverage-integration.xml \
+        --cov-report=html:htmlcov-integration
+  artifacts:
+    paths:
+      - coverage-integration.xml
+      - htmlcov-integration/
+      - .coverage
+    expire_in: 30 days
+    when: always
+  only:
+#    - merge_requests
+    - dev
+#    - master
+
+# Уведомление при успехе
+notify_success:
+  stage: lint
+  image: ${NEXUS_REGISTRY}/python:${PYTHON_VERSION}-slim-bookworm
+  when: on_success
+  tags:
+    - s00-0000-uk01
+  dependencies:
+    - unit_test
+    - integration_test
+  before_script:
+    - |
+      pip install \
+        --index-url http://nexus.sogaz.ru/repository/pypi-group/simple \
+        --trusted-host nexus.sogaz.ru requests
+    - export PYTHONPATH=src
+  script:
+    - python3 scripts/notify_mattermost.py success
+#  only:
+#    - merge_requests
+#    - dev
+#    - master
+
+# Уведомление при ошибке
+notify_failure:
+  stage: lint
+  image: ${NEXUS_REGISTRY}/python:${PYTHON_VERSION}-slim-bookworm
+  when: on_failure
+  tags:
+    - s00-0000-uk01
+  dependencies:
+    - unit_test
+    - integration_test
+  before_script:
+    - |
+      pip install \
+        --index-url http://nexus.sogaz.ru/repository/pypi-group/simple \
+        --trusted-host nexus.sogaz.ru requests
+    - export PYTHONPATH=src
+  script:
+    - python3 scripts/notify_mattermost.py failure
+#  only:
+#    - merge_requests
+#    - dev
+#    - master
+
+build_app:
+  stage: build
+  image: nexus.sogaz.ru/docker:27
+  services:
+    - name: nexus.sogaz.ru/docker:27-dind
+      command: ["--mtu=1460"]
+  variables:
+    CI_REGISTRY_IMAGE: "harbor.sogaz.ru/kdms/backend-clusters-dms"
+    CI_REGISTRY: "harbor.sogaz.ru"
+    GIT_STRATEGY: fetch
+  script:
+    - CI_REPO_USER=$(echo $CI_REPO_USER_BASE64 | base64 -d)
+    - docker login -u "$CI_REPO_USER" -p "$CI_REPO_PASSWORD" "$CI_REGISTRY"
+    - docker build -t "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}" -t "$CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}" .
+    - echo "$CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}"
+    - echo "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        docker tag "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}" "$CI_REGISTRY_IMAGE:latest"
+      fi
+    - docker push "$CI_REGISTRY_IMAGE:${CI_COMMIT_SHORT_SHA}"
+    - docker push "$CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        docker push "$CI_REGISTRY_IMAGE:latest"
+      fi
+    - echo ${CI_COMMIT_SHORT_SHA}
+
+deploy_stage:
+  stage: deploy
+  image: $CI_REPO_DOCKER/devth/helm:v3.12.3
+  variables:
+    EXCLUDE_FROM_LOGGING: false
+    DEFAULT_RUNNER_TAG: "s00-0000-uk03" 
+    DOCKER_IMAGE: 'harbor.sogaz.ru/kdms/transcription-service-backend'
+    CURRENT_TAG: '${CI_COMMIT_REF_SLUG}'
+
+    HELM_APP_ENV: ${HELM_APP_ENV_STAGE}
+    HOME: /builds_dir
+    CI_ENV_STAGE: stage
+    SERVICE_ENV: ${CI_ENV_STAGE}
+    SERVICE_HOST: ${CI_DOMAIN_STAGE}
+    SERVICE_URL: feature.${CI_PROJECT_NAME}.${CI_DOMAIN_DEV}
+    CI_NAMESPACE_STAGE: service-$CI_ENV_STAGE
+    SERVICE_NAMESPACE: ${CI_NAMESPACE_STAGE}
+    KUBECONFIG_INTERNAL: ${KUBECONFIG_STAGE}
+    VITE_CONFIG: ${VITE_CONFIG_STAGE}
+    VITE_ENV: ${VITE_ENV_STAGE}
+
+  dependencies:
+    - clone_ci_templates
+
+  before_script:
+    - export SERVICE_URL_PATH=${CI_PATH_PREFIX}
+    - echo $SERVICE_URL_PATH
+    - export NEXT_PUBLIC_BASE_PATH=''
+    - export SERVICE_PATH=$(echo "/${CI_PROJECT_NAME}")
+    - echo $SERVICE_PATH
+    - export SHORT_CI_COMMIT_REF_NAME1=$(echo "$CI_COMMIT_REF_NAME" | cut -f1 -d"/" | tr '[:upper:]' '[:lower:]')
+    - export SERVICE_NAME=${CI_PROJECT_NAME}
+    - echo $SERVICE_NAME
+
+  script:
+    - mkdir -p ~/.kube
+    - echo ${KUBECONFIG_INTERNAL} | base64 -d > ~/.kube/config
+    - cp $LOCAL_TEMPLATE_REPO_PATH/helm/custom.json custom.json
+    - envsubst < custom.json > ${HELM_CUSTOM_VALUES_FILE}
+    - echo "${HELM_APP_ENV}" > helm_app_env.yml
+    # begin debug
+    - echo CI_HELM_UPGRADE_FLAGS ${CI_HELM_UPGRADE_FLAGS}
+    - echo SERVICE_NAMESPACE ${SERVICE_NAMESPACE}
+    - echo HELM_CUSTOM_VALUES_FILE ${HELM_CUSTOM_VALUES_FILE}
+    - echo SERVICE_NAME ${SERVICE_NAME}
+    - echo LOCAL_TEMPLATE_REPO_PATH ${LOCAL_TEMPLATE_REPO_PATH}
+    # end debug
+    - helm upgrade --install
+      ${CI_HELM_UPGRADE_FLAGS}
+      --namespace ${SERVICE_NAMESPACE}
+      --create-namespace
+      -f ${HELM_CUSTOM_VALUES_FILE}
+      -f helm_app_env.yml
+      ${SERVICE_NAME} $LOCAL_TEMPLATE_REPO_PATH/helm/
+
+  allow_failure: true
+  when: manual
+  tags:
+    - ${DEFAULT_RUNNER_TAG}
