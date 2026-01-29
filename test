@@ -1,10 +1,28 @@
-SPRING_CLOUD_STREAM_BINDERS_RABBITONEC_ENVIRONMENT_SPRING_RABBITMQ_ADDRESSES: "s00-0000-rt14.sogaz.ru:5671"
-SPRING_CLOUD_STREAM_BINDERS_RABBITONEC_ENVIRONMENT_SPRING_RABBITMQ_USERNAME: "umka"
-SPRING_CLOUD_STREAM_BINDERS_RABBITONEC_ENVIRONMENT_SPRING_RABBITMQ_PASSWORD: "<твoй_пароль>"
-SPRING_CLOUD_STREAM_BINDERS_RABBITONEC_ENVIRONMENT_SPRING_RABBITMQ_VIRTUAL_HOST: "/"
-SPRING_CLOUD_STREAM_BINDERS_RABBITONEC_ENVIRONMENT_SPRING_RABBITMQ_SSL_ENABLED: "true"
-SPRING_CLOUD_STREAM_BINDERS_RABBITUMKA_ENVIRONMENT_SPRING_RABBITMQ_ADDRESSES: "s00-0000-rt14.sogaz.ru:5671"
-SPRING_CLOUD_STREAM_BINDERS_RABBITUMKA_ENVIRONMENT_SPRING_RABBITMQ_USERNAME: "umka"
-SPRING_CLOUD_STREAM_BINDERS_RABBITUMKA_ENVIRONMENT_SPRING_RABBITMQ_PASSWORD: "<твoй_пароль>"
-SPRING_CLOUD_STREAM_BINDERS_RABBITUMKA_ENVIRONMENT_SPRING_RABBITMQ_VIRTUAL_HOST: "/"
-SPRING_CLOUD_STREAM_BINDERS_RABBITUMKA_ENVIRONMENT_SPRING_RABBITMQ_SSL_ENABLED: "true"
+Running with gitlab-runner 18.8.0 (9ffb4aa0)
+  on gitlab-runner-s00-0000-uk03.sogaz.ru YVJ9zfG9C, system ID: r_6FdPR0hHKTbA
+Preparing the "docker" executor
+01:09
+Using Docker executor with image nexus.sogaz.ru/devth/helm:v3.12.3 ...
+Using helper image:  nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0  (overridden, default would be  registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0 )
+Using effective pull policy of [if-not-present] for container nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0
+Pulling docker image nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0 ...
+Using docker image sha256:17d5f2d0b1f87ee1bca4c8fcc744788c28a154e0b7c7a1784de44345efe70a8d for nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0 with digest nexus.sogaz.ru/gitlab/gitlab-runner-helper@sha256:17d5f2d0b1f87ee1bca4c8fcc744788c28a154e0b7c7a1784de44345efe70a8d ...
+Using helper image:  nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0  (overridden, default would be  registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0 )
+Using effective pull policy of [if-not-present] for container nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0
+Using docker image sha256:17d5f2d0b1f87ee1bca4c8fcc744788c28a154e0b7c7a1784de44345efe70a8d for nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0 with digest nexus.sogaz.ru/gitlab/gitlab-runner-helper@sha256:17d5f2d0b1f87ee1bca4c8fcc744788c28a154e0b7c7a1784de44345efe70a8d ...
+Using effective pull policy of [if-not-present] for container nexus.sogaz.ru/devth/helm:v3.12.3
+Pulling docker image nexus.sogaz.ru/devth/helm:v3.12.3 ...
+Using docker image sha256:4fedf9474da3e1c0062cc3a57c9b32a6c671093ba894b60436f2918474679c5f for nexus.sogaz.ru/devth/helm:v3.12.3 with digest nexus.sogaz.ru/devth/helm@sha256:4fedf9474da3e1c0062cc3a57c9b32a6c671093ba894b60436f2918474679c5f ...
+Preparing environment
+00:02
+Using helper image:  nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0  (overridden, default would be  registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0 )
+Using effective pull policy of [if-not-present] for container nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0
+Using docker image sha256:17d5f2d0b1f87ee1bca4c8fcc744788c28a154e0b7c7a1784de44345efe70a8d for nexus.sogaz.ru/gitlab/gitlab-runner-helper:x86_64-v18.8.0 with digest nexus.sogaz.ru/gitlab/gitlab-runner-helper@sha256:17d5f2d0b1f87ee1bca4c8fcc744788c28a154e0b7c7a1784de44345efe70a8d ...
+Using effective pull policy of [if-not-present] for container sha256:17d5f2d0b1f87ee1bca4c8fcc744788c28a154e0b7c7a1784de44345efe70a8d
+Running on runner-yvj9zfg9c-project-1755-concurrent-0 via 214b9dbca528...
+Getting source from Git repository
+00:00
+error: could not lock config file /builds_dir/.gitconfig: No such file or directory
+Cleaning up project directory and file based variables
+00:01
+ERROR: Job failed: exit code 1
