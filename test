@@ -1,3 +1,2 @@
-iptables -I FORWARD -p udp --dport 53 -j ACCEPT
-iptables -I FORWARD -p tcp --dport 53 -j ACCEPT
-
+iptables -I FORWARD 1 -j LOG --log-prefix "FWD-DROP: " --log-level 4
+dmesg | grep FWD-DROP
