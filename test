@@ -1,2 +1,4 @@
-iptables -I FORWARD -s 10.233.77.0/24 -j ACCEPT
-iptables -I FORWARD -d 10.233.77.0/24 -j ACCEPT
+Set-ExecutionPolicy Bypass -Scope Process -Force
+
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
+iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
