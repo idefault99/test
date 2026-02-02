@@ -1,2 +1,2 @@
-iptables -I FORWARD 1 -j LOG --log-prefix "FWD-DROP: " --log-level 4
-dmesg | grep FWD-DROP
+iptables -I FORWARD -s 10.233.77.0/24 -j ACCEPT
+iptables -I FORWARD -d 10.233.77.0/24 -j ACCEPT
