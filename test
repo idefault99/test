@@ -1,4 +1,9 @@
-Set-ExecutionPolicy Bypass -Scope Process -Force
-
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
-iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+weekly_job:
+  stage: maintenance
+  image: alpine:3.20
+  script:
+    - echo "Weekly job is running"
+  rules:
+    - if: '$RUN_WEEKLY_JOB == "true"'
+      when: on_success
+    - when: never
