@@ -1,4 +1,11 @@
-Set-ExecutionPolicy Bypass -Scope Process -Force
-
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
-iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+root@88c299345fb6:/kubespray# grep -R "container_manager" -n inventory/ | head
+inventory/sample/group_vars/all/offline.yml:61:# [Optional] cri-dockerd: only if you set container_manager: docker
+inventory/sample/group_vars/all/offline.yml:64:# [Optional] runc: if you set container_manager to containerd or crio
+inventory/sample/group_vars/all/offline.yml:67:# [Optional] cri-o: only if you set container_manager: crio
+inventory/sample/group_vars/all/etcd.yml:12:# container_manager: containerd
+inventory/sample/group_vars/all/etcd.yml:15:# Set this to docker if you are using container_manager: docker
+inventory/sample/group_vars/k8s_cluster/k8s-cluster.yml:220:container_manager: containerd
+inventory/sample/group_vars/k8s_cluster/k8s-cluster.yml:249:# kubelet_runtime_cgroups: "/{{ kube_service_cgroups }}/{{ container_manager }}.service"
+inventory/sample/group_vars/k8s_cluster/k8s-cluster.yml:253:# kubelet_runtime_cgroups_cgroupfs: "/system.slice/{{ container_manager }}.service"
+inventory/local/group_vars/all/offline.yml:61:# [Optional] cri-dockerd: only if you set container_manager: docker
+inventory/local/group_vars/all/offline.yml:64:# [Optional] runc: if you set container_manager to containerd or crio
