@@ -1,9 +1,6 @@
-weekly_job:
-  stage: maintenance
-  image: alpine:3.20
+build:
+  stage: build
   script:
-    - echo "Weekly job is running"
+    - echo "build"
   rules:
-    - if: '$RUN_WEEKLY_JOB == "true"'
-      when: on_success
-    - when: never
+    - if: '$CI_PIPELINE_SOURCE != "schedule"'
