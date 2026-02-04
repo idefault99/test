@@ -1,8 +1,11 @@
 kubectl get pods -n <ns> -o json \
-| jq '[.items[].spec.containers[].resources.requests] |
-      map({
-        cpu: (.cpu // "0"),
-        memory: (.memory // "0")
-      })'
-
-
+| jq -r '
+  .items[] as $pod
+  | $pod.spec.containers[]
+  | {
+      pod: $pod.metadata.name,
+      container: .name,
+      cpu_limit: (.resources.limits.cpu // "0"),
+      memory_limit: (.resources.limits.memory // "0")
+    }
+'
