@@ -1,11 +1,39 @@
-kubectl get pods -n <ns> -o json \
-| jq -r '
-  .items[] as $pod
-  | $pod.spec.containers[]
-  | {
-      pod: $pod.metadata.name,
-      container: .name,
-      cpu_limit: (.resources.limits.cpu // "0"),
-      memory_limit: (.resources.limits.memory // "0")
-    }
-'
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{18}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="GELF-TCP" class="de.siegmar.logbackgelf.GelfTcpAppender">
+        <graylogHost>s00-0000-lg01.sogaz.ru</graylogHost>
+        <graylogPort>12201</graylogPort>
+        <encoder class="de.siegmar.logbackgelf.GelfEncoder">
+            <originHost>springboot-graylog-app</originHost>
+            <includeRawMessage>false</includeRawMessage>
+            <includeMarker>true</includeMarker>
+            <includeMdcData>true</includeMdcData>
+            <includeCallerData>true</includeCallerData>
+            <includeRootCauseData>true</includeRootCauseData>
+            <includeLevelName>true</includeLevelName>
+            <fullPatternLayout class="ch.qos.logback.classic.PatternLayout">
+                <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{18}) - %msg%n</pattern>
+            </fullPatternLayout>
+            <staticField>application:springboot-graylog-app</staticField>
+        </encoder>
+    </appender>
+
+    <logger name="com" level="INFO"/>
+    <logger name="io" level="INFO"/>
+    <logger name="org" level="INFO"/>
+    <logger name="org.spring" level="INFO"/>
+    <logger name="demo" level="INFO"/>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+        <appender-ref ref="GELF-TCP" />
+    </root>
+
+</configuration>
