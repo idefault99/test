@@ -1,54 +1,35 @@
-plugins {
-    id 'java-library'
-    id 'maven-publish'
-}
+# syntax=docker/dockerfile:1
 
-group = "ru.sogaz.umka"
-version = System.getenv("VERSION") ?: "1.0.0-SNAPSHOT"   // можно переопределять в CI
+FROM gradle:8.7-jdk21 AS publish
+WORKDIR /home/gradle/project
 
-java {
-    toolchain { languageVersion = JavaLanguageVersion.of(21) }
-    withSourcesJar()
-    withJavadocJar()
-}
+# --- build args (придут из CI) ---
+ARG VERSION=1.0.0-SNAPSHOT
+ARG NEXUS_RELEASES_URL
+ARG NEXUS_SNAPSHOTS_URL
+ARG NEXUS_USER
+ARG NEXUS_PASSWORD
 
-repositories {
-    mavenCentral()
-}
+# Чтобы Gradle из build.gradle увидел env-переменные:
+ENV VERSION=$VERSION \
+    NEXUS_RELEASES_URL=$NEXUS_RELEASES_URL \
+    NEXUS_SNAPSHOTS_URL=$NEXUS_SNAPSHOTS_URL \
+    NEXUS_USER=$NEXUS_USER \
+    NEXUS_PASSWORD=$NEXUS_PASSWORD
 
-dependencies {
-    api "com.fasterxml.jackson.core:jackson-annotations:2.17.2"
-}
+# Кеши Gradle (ускорит повторные сборки)
+ENV GRADLE_USER_HOME=/home/gradle/.gradle
 
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
+# Сначала только gradle-файлы (кеш зависимостей)
+COPY --chown=gradle:gradle settings.gradle build.gradle ./
+RUN gradle --no-daemon help
 
-            // если хочешь явно назвать artifactId:
-            artifactId = "umka-dto-lib"
+# Потом исходники
+COPY --chown=gradle:gradle src ./src
 
-            pom {
-                name = "umka-dto-lib"
-                description = "DTO library for Umka services"
-            }
-        }
-    }
+# Публикация в Nexus
+RUN gradle --no-daemon clean publish
 
-    repositories {
-        maven {
-            // ДВА URL: releases и snapshots. Выбор по версии -SNAPSHOT
-            def releasesRepoUrl  = System.getenv("NEXUS_RELEASES_URL")  ?: "https://nexus.example/repository/maven-releases/"
-            def snapshotsRepoUrl = System.getenv("NEXUS_SNAPSHOTS_URL") ?: "https://nexus.example/repository/maven-snapshots/"
-
-            url = version.endsWith("-SNAPSHOT") ? snapshotsRepoUrl : releasesRepoUrl
-
-            credentials {
-                username = System.getenv("NEXUS_USER") ?: ""
-                password = System.getenv("NEXUS_PASSWORD") ?: ""
-            }
-
-            // если у вас самоподписанные сертификаты — лучше решать через доверие JVM, а не "insecure"
-        }
-    }
-}
+# Финальный stage не обязателен, но пусть будет "пустышка"
+FROM alpine:3.20
+CMD ["sh", "-c", "echo Published to Nexus successfully"]
