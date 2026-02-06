@@ -1,40 +1,13 @@
-# syntax=docker/dockerfile:1
-
-FROM gradle:8.7-jdk21 AS build
-WORKDIR /home/gradle/project
-
-# Сначала только gradle-файлы, чтобы лучше работал кеш
-COPY --chown=gradle:gradle settings.gradle build.gradle ./
-
-# Прогреем зависимости (ускорит последующие сборки)
-RUN gradle --no-daemon clean assemble -x test || true
-
-# Теперь исходники
-COPY --chown=gradle:gradle src ./src
-
-# Сборка библиотеки
-RUN gradle --no-daemon clean jar
-
-# Финальный образ-артефакт
-FROM alpine:3.20
-WORKDIR /out
-COPY --from=build /home/gradle/project/build/libs/*.jar ./library.jar
-CMD ["sh", "-c", "ls -l /out && echo 'Jar is in /out/library.jar' && sleep infinity"]
-
-
-rootProject.name = "umka-dto-lib"
-
 plugins {
     id 'java-library'
+    id 'maven-publish'
 }
 
 group = "ru.sogaz.umka"
-version = "1.0.0"
+version = System.getenv("VERSION") ?: "1.0.0-SNAPSHOT"   // можно переопределять в CI
 
 java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
     withSourcesJar()
     withJavadocJar()
 }
@@ -44,19 +17,38 @@ repositories {
 }
 
 dependencies {
-    // Аннотации JsonProperty
     api "com.fasterxml.jackson.core:jackson-annotations:2.17.2"
-
-    // Тесты (можно убрать, если не нужны)
-    testImplementation platform("org.junit:junit-bom:5.10.3")
-    testImplementation "org.junit.jupiter:junit-jupiter"
 }
 
-tasks.test {
-    useJUnitPlatform()
-}
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
 
-// (опционально) чтобы имя jar было стабильным
-tasks.jar {
-    archiveBaseName.set("umka-dto-lib")
+            // если хочешь явно назвать artifactId:
+            artifactId = "umka-dto-lib"
+
+            pom {
+                name = "umka-dto-lib"
+                description = "DTO library for Umka services"
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            // ДВА URL: releases и snapshots. Выбор по версии -SNAPSHOT
+            def releasesRepoUrl  = System.getenv("NEXUS_RELEASES_URL")  ?: "https://nexus.example/repository/maven-releases/"
+            def snapshotsRepoUrl = System.getenv("NEXUS_SNAPSHOTS_URL") ?: "https://nexus.example/repository/maven-snapshots/"
+
+            url = version.endsWith("-SNAPSHOT") ? snapshotsRepoUrl : releasesRepoUrl
+
+            credentials {
+                username = System.getenv("NEXUS_USER") ?: ""
+                password = System.getenv("NEXUS_PASSWORD") ?: ""
+            }
+
+            // если у вас самоподписанные сертификаты — лучше решать через доверие JVM, а не "insecure"
+        }
+    }
 }
