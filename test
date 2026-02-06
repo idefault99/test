@@ -1,39 +1,62 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<configuration>
+# syntax=docker/dockerfile:1
 
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{18}) - %msg%n</pattern>
-        </encoder>
-    </appender>
+FROM gradle:8.7-jdk21 AS build
+WORKDIR /home/gradle/project
 
-    <appender name="GELF-TCP" class="de.siegmar.logbackgelf.GelfTcpAppender">
-        <graylogHost>s00-0000-lg01.sogaz.ru</graylogHost>
-        <graylogPort>12201</graylogPort>
-        <encoder class="de.siegmar.logbackgelf.GelfEncoder">
-            <originHost>springboot-graylog-app</originHost>
-            <includeRawMessage>false</includeRawMessage>
-            <includeMarker>true</includeMarker>
-            <includeMdcData>true</includeMdcData>
-            <includeCallerData>true</includeCallerData>
-            <includeRootCauseData>true</includeRootCauseData>
-            <includeLevelName>true</includeLevelName>
-            <fullPatternLayout class="ch.qos.logback.classic.PatternLayout">
-                <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{18}) - %msg%n</pattern>
-            </fullPatternLayout>
-            <staticField>application:springboot-graylog-app</staticField>
-        </encoder>
-    </appender>
+# Сначала только gradle-файлы, чтобы лучше работал кеш
+COPY --chown=gradle:gradle settings.gradle build.gradle ./
 
-    <logger name="com" level="INFO"/>
-    <logger name="io" level="INFO"/>
-    <logger name="org" level="INFO"/>
-    <logger name="org.spring" level="INFO"/>
-    <logger name="demo" level="INFO"/>
+# Прогреем зависимости (ускорит последующие сборки)
+RUN gradle --no-daemon clean assemble -x test || true
 
-    <root level="INFO">
-        <appender-ref ref="STDOUT" />
-        <appender-ref ref="GELF-TCP" />
-    </root>
+# Теперь исходники
+COPY --chown=gradle:gradle src ./src
 
-</configuration>
+# Сборка библиотеки
+RUN gradle --no-daemon clean jar
+
+# Финальный образ-артефакт
+FROM alpine:3.20
+WORKDIR /out
+COPY --from=build /home/gradle/project/build/libs/*.jar ./library.jar
+CMD ["sh", "-c", "ls -l /out && echo 'Jar is in /out/library.jar' && sleep infinity"]
+
+
+rootProject.name = "umka-dto-lib"
+
+plugins {
+    id 'java-library'
+}
+
+group = "ru.sogaz.umka"
+version = "1.0.0"
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+    withJavadocJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Аннотации JsonProperty
+    api "com.fasterxml.jackson.core:jackson-annotations:2.17.2"
+
+    // Тесты (можно убрать, если не нужны)
+    testImplementation platform("org.junit:junit-bom:5.10.3")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+}
+
+tasks.test {
+    useJUnitPlatform()
+}
+
+// (опционально) чтобы имя jar было стабильным
+tasks.jar {
+    archiveBaseName.set("umka-dto-lib")
+}
