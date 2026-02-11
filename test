@@ -1,2 +1,5 @@
-curl -u "$NEXUS_USER:$NEXUS_PASSWORD" -I \
-  "https://nexus.sogaz.ru/repository/maven-releases/"
+kubectl -n <ns> exec -it <pod> -- sh -lc '
+ls -lah /app/files files 2>/dev/null || true
+echo "EDNA_TRUSTSTORE=$EDNA_TRUSTSTORE"
+echo "EDNA_TRUSTSTORE_PASS len: $(printf %s "$EDNA_TRUSTSTORE_PASS" | wc -c)"
+'
