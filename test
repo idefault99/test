@@ -1,5 +1,48 @@
-kubectl -n <ns> exec -it <pod> -- sh -lc '
-ls -lah /app/files files 2>/dev/null || true
-echo "EDNA_TRUSTSTORE=$EDNA_TRUSTSTORE"
-echo "EDNA_TRUSTSTORE_PASS len: $(printf %s "$EDNA_TRUSTSTORE_PASS" | wc -c)"
-'
+{"environment":"test","appTime":"2026-02-11T12:47:48.273315835","appLevel":"INFO","message":"Starting ServiceApplication v1.0.2 using Java 17.0.18 with PID 2 (/app/sms-delivery-check-service.jar started by root in /app)","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:48.495070469","appLevel":"INFO","message":"The following 1 profile is active: \"test\"","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:49.120122109","appLevel":"INFO","message":"Bootstrapping Spring Data JPA repositories in DEFAULT mode.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:49.310320147","appLevel":"INFO","message":"Finished Spring Data repository scanning in 177 ms. Found 1 JPA repository interfaces.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:49.311741264","appLevel":"INFO","message":"Bootstrapping Spring Data JPA repositories in DEFAULT mode.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:49.318434780","appLevel":"INFO","message":"Finished Spring Data repository scanning in 6 ms. Found 1 JPA repository interfaces.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:49.984567387","appLevel":"INFO","message":"Bean 'org.springframework.ws.config.annotation.DelegatingWsConfiguration' of type [org.springframework.ws.config.annotation.DelegatingWsConfiguration$$SpringCGLIB$$0] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.049207585","appLevel":"INFO","message":"Supporting [WS-Addressing August 2004, WS-Addressing 1.0]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.449838695","appLevel":"INFO","message":"Tomcat initialized with port(s): 8080 (http)","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.459756928","appLevel":"INFO","message":"Initializing ProtocolHandler [\"http-nio-8080\"]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.462430195","appLevel":"INFO","message":"Starting service [Tomcat]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.464231672","appLevel":"INFO","message":"Starting Servlet engine: [Apache Tomcat/10.1.13]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.547970206","appLevel":"INFO","message":"Initializing Spring embedded WebApplicationContext","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.549692175","appLevel":"INFO","message":"Root WebApplicationContext: initialization completed in 2203 ms","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:50.758583866","appLevel":"INFO","message":"{} - Starting...","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:51.256233101","appLevel":"INFO","message":"{} - Added connection {}","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:51.258539013","appLevel":"INFO","message":"{} - Start completed.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:51.453387806","appLevel":"INFO","message":"Set default schema name to public","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:51.664798606","appLevel":"INFO","message":"Reading from public.databasechangelog","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:51.674672191","appLevel":"INFO","message":"Changelog query completed.","project_name":"sms-delivery-check-service"}
+Database is up to date, no changesets to execute
+{"environment":"test","appTime":"2026-02-11T12:47:51.759479810","appLevel":"INFO","message":"HHH000204: Processing PersistenceUnitInfo [name: default]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:51.834137350","appLevel":"INFO","message":"HHH000412: Hibernate ORM core version 6.2.9.Final","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:51.836338157","appLevel":"INFO","message":"HHH000406: Using bytecode reflection optimizer","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:52.333663565","appLevel":"INFO","message":"HHH000021: Bytecode provider name : bytebuddy","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:52.470705888","appLevel":"INFO","message":"No LoadTimeWeaver setup: ignoring JPA class transformer","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:52.702895846","appLevel":"INFO","message":"HHH000021: Bytecode provider name : bytebuddy","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.316200513","appLevel":"INFO","message":"HHH000490: Using JtaPlatform implementation: [org.hibernate.engine.transaction.jta.platform.internal.NoJtaPlatform]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.319153446","appLevel":"INFO","message":"Initialized JPA EntityManagerFactory for persistence unit 'default'","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.332573416","appLevel":"INFO","message":"{} - Starting...","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.354050909","appLevel":"INFO","message":"{} - Added connection {}","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.354646736","appLevel":"INFO","message":"{} - Start completed.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.358841226","appLevel":"INFO","message":"HHH000204: Processing PersistenceUnitInfo [name: default]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.460799553","appLevel":"INFO","message":"HHH000021: Bytecode provider name : bytebuddy","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.461532051","appLevel":"INFO","message":"No LoadTimeWeaver setup: ignoring JPA class transformer","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.483672324","appLevel":"INFO","message":"HHH000021: Bytecode provider name : bytebuddy","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.535635605","appLevel":"INFO","message":"HHH000490: Using JtaPlatform implementation: [org.hibernate.engine.transaction.jta.platform.internal.NoJtaPlatform]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.538010447","appLevel":"INFO","message":"Initialized JPA EntityManagerFactory for persistence unit 'default'","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.620496454","appLevel":"WARN","message":"Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'clientService' defined in URL [jar:file:/app/sms-delivery-check-service.jar!/BOOT-INF/classes!/ru/sogaz/esb/client/ClientService.class]: Unsatisfied dependency expressed through constructor parameter 0: Error creating bean with name 'webClientSSL' defined in class path resource [ru/sogaz/esb/configuration/WebClientConfiguration.class]: Failed to instantiate [org.springframework.web.reactive.function.client.WebClient]: Factory method 'webClientSSL' threw exception with message: SSL context creation exception: KeyStore prepare exception: keystore password was incorrect","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.621343526","appLevel":"INFO","message":"Closing JPA EntityManagerFactory for persistence unit 'default'","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.621811074","appLevel":"INFO","message":"{} - Shutdown initiated...","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.629208913","appLevel":"INFO","message":"{} - Shutdown completed.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.629883623","appLevel":"INFO","message":"Closing JPA EntityManagerFactory for persistence unit 'default'","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.630180298","appLevel":"INFO","message":"{} - Shutdown initiated...","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.637586469","appLevel":"INFO","message":"{} - Shutdown completed.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.639826025","appLevel":"INFO","message":"Stopping service [Tomcat]","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.653591641","appLevel":"INFO","message":"\nError starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.","project_name":"sms-delivery-check-service"}
+{"environment":"test","appTime":"2026-02-11T12:47:53.671571973","appLevel":"ERROR","message":"Application run failed","project_name":"sms-delivery-check-service"}
