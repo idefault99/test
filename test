@@ -1,8 +1,25 @@
-@Bean
-public GoogleCredentials googleCredentials(
-        @Value("classpath:firebase-config.json") Resource resource
-) throws IOException {
-    try (InputStream is = resource.getInputStream()) {
-        return GoogleCredentials.fromStream(is);
+@Configuration
+public class FirebaseConfiguration {
+
+    @Bean
+    public FirebaseMessaging firebaseMessaging(FirebaseApp firebaseApp) {
+        return FirebaseMessaging.getInstance(firebaseApp);
+    }
+
+    @Bean
+    public FirebaseApp firebaseApp(GoogleCredentials credentials) {
+        FirebaseOptions options = FirebaseOptions.builder()
+                .setCredentials(credentials)
+                .build();
+        return FirebaseApp.initializeApp(options);
+    }
+
+    @Bean
+    public GoogleCredentials googleCredentials(
+            @Value("classpath:firebase-config.json") Resource resource
+    ) throws IOException {
+        try (InputStream is = resource.getInputStream()) {
+            return GoogleCredentials.fromStream(is);
+        }
     }
 }
