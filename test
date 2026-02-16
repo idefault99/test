@@ -1,2 +1,4 @@
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
+python3 - <<EOF
+import ssl
+print(ssl.get_default_verify_paths())
+EOF
