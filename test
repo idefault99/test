@@ -2,19 +2,18 @@ curl -s --header "PRIVATE-TOKEN: $TOKEN" \
 "https://gitlab.com/api/v4/projects/$OLD_PROJECT_ID/variables?per_page=100" \
 | jq -c '.[]' | while read var; do
 
-  key=$(echo $var | jq -r '.key')
-  value=$(echo $var | jq -r '.value')
-  protected=$(echo $var | jq -r '.protected')
-  masked=$(echo $var | jq -r '.masked')
-  scope=$(echo $var | jq -r '.environment_scope')
+  payload=$(echo "$var" | jq '{
+    key: .key,
+    value: .value,
+    protected: .protected,
+    masked: .masked,
+    environment_scope: .environment_scope
+  }')
 
   curl --request POST \
     --header "PRIVATE-TOKEN: $TOKEN" \
-    --form "key=$key" \
-    --form "value=$value" \
-    --form "protected=$protected" \
-    --form "masked=$masked" \
-    --form "environment_scope=$scope" \
+    --header "Content-Type: application/json" \
+    --data "$payload" \
     "https://gitlab.com/api/v4/projects/$NEW_PROJECT_ID/variables"
 
 done
