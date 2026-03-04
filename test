@@ -1,15 +1,2 @@
-export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-
-
-
-python3 - <<EOF
-import certifi
-print(certifi.where())
-EOF
-
-
-python3 - <<EOF
-import ssl
-print(ssl.get_default_verify_paths())
-EOF
+curl --header "PRIVATE-TOKEN: TOKEN" \
+"https://gitlab.com/api/v4/projects/PROJECT_ID/registry/repositories/123/tags"
