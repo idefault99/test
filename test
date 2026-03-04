@@ -1,2 +1,12 @@
-curl --header "PRIVATE-TOKEN: TOKEN" \
-"https://gitlab.com/api/v4/projects/PROJECT_ID/registry/repositories/123/tags"
+OLD_IMAGE="registry.gitlab.com/old-group/project/backend"
+NEW_IMAGE="registry.gitlab.com/new-group/project/backend"
+
+for tag in $(curl -s --header "PRIVATE-TOKEN: TOKEN" \
+"https://gitlab.com/api/v4/projects/PROJECT_ID/registry/repositories/REPO_ID/tags" \
+| jq -r '.[].name'); do
+
+  docker pull $OLD_IMAGE:$tag
+  docker tag $OLD_IMAGE:$tag $NEW_IMAGE:$tag
+  docker push $NEW_IMAGE:$tag
+
+done
