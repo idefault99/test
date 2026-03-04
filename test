@@ -1,22 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ========= CONFIG =========
+GITLAB_URL="https://gitlab.com"          # если self-hosted: https://gitlab.example.com
+TOKEN="glpat-xxxxxxxxxxxxxxxx"           # PAT с правами api/read_registry/write_registry (для push)
+
+PROJECT_ID="12345678"                    # ID проекта-источника (где registry)
+REPO_ID="987654"                         # ID registry repository (не project!)
+OLD_IMAGE="registry.gitlab.com/old-group/project/backend"
+
+NEW_IMAGE="registry.gitlab.com/new-group/project/backend"  # новый путь образа
+
+# С какой страницы продолжать (page=2 если уже перенёс первые 20 при per_page=20)
 page=2
 per_page=20
 
+# ========= OPTIONAL: sanity checks =========
+command -v curl >/dev/null
+command -v jq >/dev/null
+command -v docker >/dev/null
+
+# ========= MAIN =========
 while :; do
-  headers="$(mktemp)"; body="$(mktemp)"
+  headers="$(mktemp)"
+  body="$(mktemp)"
 
   curl -sS -D "$headers" -o "$body" \
     -H "PRIVATE-TOKEN: $TOKEN" \
     "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPO_ID/tags?per_page=$per_page&page=$page"
 
+  # Если вдруг API вернул не массив (например ошибку), покажем и остановимся
+  if ! jq -e 'type=="array"' "$body" >/dev/null 2>&1; then
+    echo "GitLab API returned non-array response on page=$page:" >&2
+    cat "$body" >&2
+    rm -f "$headers" "$body"
+    exit 1
+  fi
+
+  # Перенос тегов со страницы
   jq -r '.[].name' "$body" | while IFS= read -r tag; do
+    [[ -z "$tag" ]] && continue
+    echo "COPY: $tag"
+
     docker pull "$OLD_IMAGE:$tag"
-    docker tag "$OLD_IMAGE:$tag" "$NEW_IMAGE:$tag"
+    docker tag  "$OLD_IMAGE:$tag" "$NEW_IMAGE:$tag"
     docker push "$NEW_IMAGE:$tag"
+
+    # (опционально) чистим локальные теги, чтобы не забить диск
+    docker rmi "$OLD_IMAGE:$tag" "$NEW_IMAGE:$tag" >/dev/null 2>&1 || true
   done
 
+  # Пагинация: GitLab отдаёт следующий номер страницы в заголовке X-Next-Page
   next_page="$(awk -F': ' 'tolower($1)=="x-next-page"{gsub("\r","",$2); print $2}' "$headers")"
+
   rm -f "$headers" "$body"
 
-  [[ -z "$next_page" ]] && break
+  if [[ -z "$next_page" ]]; then
+    echo "DONE"
+    break
+  fi
+
   page="$next_page"
 done
