@@ -1,19 +1,102 @@
-curl -s --header "PRIVATE-TOKEN: $TOKEN" \
-"https://gitlab.com/api/v4/projects/$OLD_PROJECT_ID/variables?per_page=100" \
-| jq -c '.[]' | while read var; do
+#!/usr/bin/env bash
+set -euo pipefail
 
-  payload=$(echo "$var" | jq '{
-    key: .key,
-    value: .value,
-    protected: .protected,
-    masked: .masked,
-    environment_scope: .environment_scope
-  }')
+# ====== CONFIG ======
+GITLAB_URL="https://gitlab.com"          # или https://gitlab.example.com
+TOKEN="glpat-xxxxxxxxxxxxxxxx"           # PAT с scope: api
+OLD_PROJECT_ID="12345678"
+NEW_PROJECT_ID="87654321"
+PER_PAGE="100"
 
-  curl --request POST \
-    --header "PRIVATE-TOKEN: $TOKEN" \
-    --header "Content-Type: application/json" \
+# ====== HELPERS ======
+api_get_page() {
+  local url="$1"
+  curl -sS -D /tmp/headers.txt \
+    -H "PRIVATE-TOKEN: $TOKEN" \
+    "$url" -o /tmp/body.json
+}
+
+next_page() {
+  # GitLab пагинация: X-Next-Page: <n>
+  awk -F': ' 'tolower($1)=="x-next-page"{gsub("\r","",$2); print $2}' /tmp/headers.txt
+}
+
+create_or_update_var() {
+  local payload="$1"
+  local key
+  key="$(echo "$payload" | jq -r '.key')"
+
+  # POST (create)
+  http_code="$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+    -X POST \
+    -H "PRIVATE-TOKEN: $TOKEN" \
+    -H "Content-Type: application/json" \
     --data "$payload" \
-    "https://gitlab.com/api/v4/projects/$NEW_PROJECT_ID/variables"
+    "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/variables")"
 
+  if [[ "$http_code" == "201" ]]; then
+    echo "CREATED: $key"
+    return 0
+  fi
+
+  # Если уже существует — PUT (update)
+  # GitLab обычно возвращает 400 и сообщение что key taken / already exists
+  if [[ "$http_code" == "400" ]] || [[ "$http_code" == "409" ]]; then
+    http_code2="$(curl -sS -o /tmp/resp2.json -w "%{http_code}" \
+      -X PUT \
+      -H "PRIVATE-TOKEN: $TOKEN" \
+      -H "Content-Type: application/json" \
+      --data "$payload" \
+      "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/variables/$key")"
+
+    if [[ "$http_code2" == "200" ]]; then
+      echo "UPDATED: $key"
+      return 0
+    fi
+
+    echo "ERROR updating $key (HTTP $http_code2): $(cat /tmp/resp2.json)" >&2
+    return 1
+  fi
+
+  echo "ERROR creating $key (HTTP $http_code): $(cat /tmp/resp.json)" >&2
+  return 1
+}
+
+# ====== MAIN ======
+page="1"
+while :; do
+  url="$GITLAB_URL/api/v4/projects/$OLD_PROJECT_ID/variables?per_page=$PER_PAGE&page=$page"
+  api_get_page "$url"
+
+  # Собираем payload так, чтобы YAML/multiline не ломался:
+  # jq корректно экранирует \n внутри JSON строки.
+  # Переносим variable_type (env_var/file) + окружение + флаги.
+  jq -c '.[] | {
+      key,
+      value,
+      protected,
+      masked,
+      environment_scope,
+      variable_type
+    }' /tmp/body.json | while IFS= read -r payload; do
+
+      # Если GitLab не отдал value (например masked) — будет null/пусто.
+      # Тогда лучше явно остановиться, иначе ты перезатрёшь переменную пустым.
+      val="$(echo "$payload" | jq -r '.value // empty')"
+      if [[ -z "$val" ]]; then
+        k="$(echo "$payload" | jq -r '.key')"
+        echo "SKIP (empty value, likely masked/not readable): $k" >&2
+        continue
+      fi
+
+      create_or_update_var "$payload"
+    done
+
+  np="$(next_page)"
+  if [[ -z "$np" ]]; then
+    break
+  fi
+  page="$np"
 done
+
+echo "DONE"
