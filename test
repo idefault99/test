@@ -1,48 +1,22 @@
-create_or_update_var() {
-  local payload="$1"
+page=2
+per_page=20
 
-  local key scope
-  key="$(echo "$payload" | jq -r '.key')"
-  scope="$(echo "$payload" | jq -r '.environment_scope')"
+while :; do
+  headers="$(mktemp)"; body="$(mktemp)"
 
-  # url-encode только для '*'
-  local scope_q="$scope"
-  if [[ "$scope_q" == "*" ]]; then
-    scope_q="%2A"
-  fi
-
-  # 1) Try UPDATE конкретно по key+scope
-  local code
-  code="$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
-    -X PUT \
+  curl -sS -D "$headers" -o "$body" \
     -H "PRIVATE-TOKEN: $TOKEN" \
-    -H "Content-Type: application/json" \
-    --data "$payload" \
-    "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/variables/$key?filter[environment_scope]=$scope_q")"
+    "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$REPO_ID/tags?per_page=$per_page&page=$page"
 
-  if [[ "$code" == "200" ]]; then
-    echo "UPDATED: $key (scope=$scope)"
-    return 0
-  fi
+  jq -r '.[].name' "$body" | while IFS= read -r tag; do
+    docker pull "$OLD_IMAGE:$tag"
+    docker tag "$OLD_IMAGE:$tag" "$NEW_IMAGE:$tag"
+    docker push "$NEW_IMAGE:$tag"
+  done
 
-  # 2) Если не нашли (404) — создаём
-  if [[ "$code" == "404" ]]; then
-    code2="$(curl -sS -o /tmp/resp2.json -w "%{http_code}" \
-      -X POST \
-      -H "PRIVATE-TOKEN: $TOKEN" \
-      -H "Content-Type: application/json" \
-      --data "$payload" \
-      "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/variables")"
+  next_page="$(awk -F': ' 'tolower($1)=="x-next-page"{gsub("\r","",$2); print $2}' "$headers")"
+  rm -f "$headers" "$body"
 
-    if [[ "$code2" == "201" ]]; then
-      echo "CREATED: $key (scope=$scope)"
-      return 0
-    fi
-
-    echo "ERROR creating $key (scope=$scope) HTTP $code2: $(cat /tmp/resp2.json)" >&2
-    return 1
-  fi
-
-  echo "ERROR updating $key (scope=$scope) HTTP $code: $(cat /tmp/resp.json)" >&2
-  return 1
-}
+  [[ -z "$next_page" ]] && break
+  page="$next_page"
+done
