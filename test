@@ -1,34 +1,5 @@
----
-- name: Dump probegi database
-  hosts: db
-  gather_facts: false
+[db]
+db-server ansible_host=10.10.10.20 ansible_user=backup
 
-  vars:
-    container_name: probegi-db
-    pg_user: db-user
-    dump_dir: dump
-    remote_tmp: /tmp
-
-  tasks:
-
-    - name: Generate dump filename
-      set_fact:
-        dump_name: "probegi_{{ lookup('pipe','date +%d-%m-%Y%H%M_%S') }}.sql.gz"
-
-    - name: Create dump on server
-      shell: |
-        docker exec {{ container_name }} pg_dumpall -c -U {{ pg_user }} \
-        | gzip > {{ remote_tmp }}/{{ dump_name }}
-      args:
-        executable: /bin/bash
-
-    - name: Fetch dump to GitLab runner
-      fetch:
-        src: "{{ remote_tmp }}/{{ dump_name }}"
-        dest: "{{ dump_dir }}/"
-        flat: yes
-
-    - name: Remove remote dump
-      file:
-        path: "{{ remote_tmp }}/{{ dump_name }}"
-        state: absent
+[db:vars]
+ansible_ssh_private_key_file=/home/gitlab-runner/.ssh/id_rsa
