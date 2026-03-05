@@ -1,2 +1,1 @@
-На данный момент дампы probegi хранятся локально, необходимо предоставить место для сохранения дампов в s3
-Подготовить s3 для хранения дампов probegi
+docker exec -t probegi-db pg_dumpall -c -U db-user > dump_date +%d-%m-%Y""%H%M_%S.sql
