@@ -1,5 +1,22 @@
-[db]
-db-server ansible_host=10.10.10.20 ansible_user=backup
+stages:
+  - dump
+  - upload
 
-[db:vars]
-ansible_ssh_private_key_file=/home/gitlab-runner/.ssh/id_rsa
+dump:
+  stage: dump
+  image: python:3.12
+  before_script:
+    - pip install ansible
+  script:
+    - ansible-playbook ansible/backup_probegi.yml
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - dump/*.sql.gz
+
+upload:
+  stage: upload
+  image: minio/mc
+  script:
+    - mc alias set minio $MINIO_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
+    - mc cp dump/*.sql.gz minio/$MINIO_BUCKET/
