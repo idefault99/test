@@ -1,12 +1,11 @@
-Local file `pipeline/backup-probegi.yml` does not exist!
-
-# BACKUP
 trigger-probegi-backup:
   stage: backup
   when: manual
   trigger:
     include:
-      - local: pipeline/backup-probegi.yml
+      - project: 'dpm/probegi/infra'
+        ref: 'master'
+        file: '/pipeline/backup.gitlab-ci.yml'
     strategy: depend
   rules:
     - when: manual
