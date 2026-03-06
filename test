@@ -5,23 +5,26 @@
 
   vars:
     backup_tmp_dir: /tmp
-    backup_timestamp: "{{ lookup('pipe', 'date +%d-%m-%Y_%H%M_%S') }}"
-    backup_file_name: "probegi_{{ backup_timestamp }}.sql.gz"
-    backup_remote_path: "{{ backup_tmp_dir }}/{{ backup_file_name }}"
+    backup_local_dir: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump"
 
   tasks:
-    - name: Create local metadata directory on runner
+    - name: Generate backup filename
+      set_fact:
+        backup_file_name: "probegi_{{ lookup('pipe', 'date +%d-%m-%Y_%H%M_%S') }}.sql.gz"
+        backup_remote_path: "{{ backup_tmp_dir }}/probegi_{{ lookup('pipe', 'date +%d-%m-%Y_%H%M_%S') }}.sql.gz"
+
+    - name: Ensure local dump directory exists on runner
       delegate_to: localhost
       become: false
       file:
-        path: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump-meta"
+        path: "{{ backup_local_dir }}"
         state: directory
         mode: "0755"
 
     - name: Create dump on remote host from docker container
       shell: |
         set -euo pipefail
-        docker exec probegi-db pg_dumpall -c -U db-user | gzip -9 -c > {{ backup_remote_path }}
+        docker exec {{ probegi_pg_container }} pg_dumpall -c -U {{ probegi_pg_user }} | gzip -c > {{ backup_remote_path }}
       args:
         executable: /bin/bash
 
@@ -62,97 +65,3 @@
       copy:
         content: "{{ ansible_user }}\n"
         dest: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump-meta/dump_user.txt"
-
----
-stages:
-  - backup
-  - upload
-
-default:
-  tags:
-    - docker
-  image:
-    name: registry.test.model.svo.aero/dpm/iac/infra/ansible:ansible-pip
-    entrypoint: [ "" ]
-  before_script:
-    - chmod 400 "$SSH_PRIVATE_KEY"
-    - git -c http.sslVerify=false clone --single-branch --branch master https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/probegi/infra.git
-
-.backup:
-  stage: backup
-  variables:
-    ANSIBLE_HOST_KEY_CHECKING: "False"
-    ANSIBLE_STDOUT_CALLBACK: "debug"
-  when: manual
-
-.upload:
-  stage: upload
-  when: manual
-
-backup-probegi-dev:
-  extends: .backup
-  environment: dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/backup/backup.yml
-    - ls -la dump-meta/
-    - cat dump-meta/dump_name.txt
-    - cat dump-meta/dump_path.txt
-    - cat dump-meta/dump_host.txt
-    - cat dump-meta/dump_user.txt
-  artifacts:
-    expire_in: 1 day
-    paths:
-      - dump-meta/*
-
-upload-probegi-dev:
-  extends: .upload
-  environment: dev
-  image:
-    name: registry.test.model.svo.aero/dpm/iac/infra:s3publisher-1.0.0
-    entrypoint: [ "" ]
-  variables:
-    S3_CONNECTOR: ${S3_HOST_IP}:${S3_API_PORT}
-    S3_BUCKET: ${S3_BUCKET}
-    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-    S3_SECRET_KEY: ${S3_SECRET_KEY}
-    S3_SECURE: "False"
-    SOURCE_PATH: ./dump
-  needs:
-    - job: backup-probegi-dev
-      artifacts: true
-  script:
-    - chmod 400 "$SSH_PRIVATE_KEY"
-    - mkdir -p dump
-    - DUMP_NAME="$(tr -d '\r\n' < dump-meta/dump_name.txt)"
-    - DUMP_PATH="$(tr -d '\r\n' < dump-meta/dump_path.txt)"
-    - DUMP_HOST="$(tr -d '\r\n' < dump-meta/dump_host.txt)"
-    - DUMP_USER="$(tr -d '\r\n' < dump-meta/dump_user.txt)"
-    - echo "DUMP_NAME=$DUMP_NAME"
-    - echo "DUMP_PATH=$DUMP_PATH"
-    - echo "DUMP_HOST=$DUMP_HOST"
-    - echo "DUMP_USER=$DUMP_USER"
-    - |
-      if command -v apt-get >/dev/null 2>&1; then
-        apt-get update && apt-get install -y openssh-client
-      elif command -v apk >/dev/null 2>&1; then
-        apk add --no-cache openssh-client
-      else
-        echo "openssh-client install skipped: unknown package manager"
-      fi
-    - scp -i "$SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no "${DUMP_USER}@${DUMP_HOST}:${DUMP_PATH}" "./dump/${DUMP_NAME}"
-    - ls -lh ./dump
-    - /app/code/main.bin
-    - ssh -i "$SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no "${DUMP_USER}@${DUMP_HOST}" "rm -f '${DUMP_PATH}'"
-
----
-trigger-probegi-backup:
-  stage: backup
-  when: manual
-  trigger:
-    include:
-      - project: 'dpm/probegi/infra'
-        ref: 'master'
-        file: '/pipeline/backup.gitlab-ci.yml'
-    strategy: depend
-  rules:
-    - when: manual
