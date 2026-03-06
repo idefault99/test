@@ -1,6 +1,63 @@
+---
+- name: Backup probegi PostgreSQL from docker container
+  hosts: probegi_db
+  gather_facts: false
+
+  vars:
+    backup_tmp_dir: /tmp
+    backup_local_dir: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump"
+
+  tasks:
+    - name: Generate backup filename
+      set_fact:
+        backup_file_name: "probegi_{{ lookup('pipe', 'date +%d-%m-%Y_%H%M_%S') }}.sql.gz"
+        backup_remote_path: "{{ backup_tmp_dir }}/probegi_{{ lookup('pipe', 'date +%d-%m-%Y_%H%M_%S') }}.sql.gz"
+
+    - name: Ensure local dump directory exists on runner
+      delegate_to: localhost
+      become: false
+      file:
+        path: "{{ backup_local_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Create dump on remote host from docker container
+      shell: |
+        set -euo pipefail
+        docker exec {{ probegi_pg_container }} pg_dumpall -c -U {{ probegi_pg_user }} | gzip -c > {{ backup_remote_path }}
+      args:
+        executable: /bin/bash
+
+    - name: Check remote dump exists
+      stat:
+        path: "{{ backup_remote_path }}"
+      register: backup_stat
+
+    - name: Fail if dump was not created
+      fail:
+        msg: "Backup file was not created on remote host: {{ backup_remote_path }}"
+      when: not backup_stat.stat.exists
+
+    - name: Fetch dump from remote host to runner
+      fetch:
+        src: "{{ backup_remote_path }}"
+        dest: "{{ backup_local_dir }}/"
+        flat: true
+
+    - name: Remove remote temporary dump
+      file:
+        path: "{{ backup_remote_path }}"
+        state: absent
+
+---
+---
+probegi_pg_container: "probegi-db"
+probegi_pg_user: "db-user"
+
+---
 stages:
-    - build
-    - deploy
+  - backup
+  - upload
 
 default:
   tags:
@@ -12,94 +69,43 @@ default:
     - chmod 400 "$SSH_PRIVATE_KEY"
     - git -c http.sslVerify=false clone --single-branch --branch master https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/probegi/infra.git
 
-# BUILD
-.build:
-  stage: build
+.backup:
+  stage: backup
   variables:
     ANSIBLE_HOST_KEY_CHECKING: "False"
     ANSIBLE_STDOUT_CALLBACK: "debug"
   when: manual
 
-.build-demo:
-  extends: .build
-  environment: demo
-
-.build-dev:
-  extends: .build
-  environment: dev
-
-build-demo-server:
-  extends: .build-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,client,dev"
-
-build-demo-geo-server:
-  extends: .build-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "server,client,dev"
-
-build-demo-client:
-  extends: .build-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,server,dev"
-
-build-dev-server:
-  extends: .build-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,client,demo"
-
-build-dev-client:
-  extends: .build-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,server,demo"
-
-build-dev-geo-server:
-  extends: .build-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "client,server,demo"
-
-# DEPLOY
-.deploy:
-  stage: deploy
-  variables:
-    ANSIBLE_HOST_KEY_CHECKING: "False"
-    ANSIBLE_STDOUT_CALLBACK: "debug"
+.upload:
+  stage: upload
   when: manual
 
-.deploy-demo:
-  extends: .deploy
-  environment: demo
-
-.deploy-dev:
-  extends: .deploy
+backup-probegi-dev:
+  extends: .backup
   environment: dev
-
-deploy-demo-server:
-  extends: .deploy-demo
   script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,client,dev"
+    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/backup/backup.yml
+    - ls -lh dump/
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - dump/*.sql.gz
 
-deploy-demo-client:
-  extends: .deploy-demo
+upload-probegi-dev:
+  extends: .upload
+  environment: dev
+  image:
+    name: minio/mc:RELEASE.2025-01-17T23-25-50Z
+    entrypoint: [ "" ]
+  needs:
+    - job: backup-probegi-dev
+      artifacts: true
   script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,server,dev"
+    - mc alias set minio "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+    - mc ls "minio/$MINIO_BUCKET" >/dev/null 2>&1 || mc mb "minio/$MINIO_BUCKET"
+    - FILE="$(ls -1 dump/*.sql.gz | head -n 1)"
+    - echo "Uploading $FILE to minio/$MINIO_BUCKET/"
+    - mc cp "$FILE" "minio/$MINIO_BUCKET/$(basename "$FILE")"
+    - mc stat "minio/$MINIO_BUCKET/$(basename "$FILE")"
 
-deploy-demo-geo-server:
-  extends: .deploy-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "server,client,dev"
-
-deploy-dev-server:
-  extends: .deploy-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,client,demo"
-
-deploy-dev-client:
-  extends: .deploy-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,server,demo"
-
-deploy-dev-geo-server:
-  extends: .deploy-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "client,server,demo"
+---
