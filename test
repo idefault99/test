@@ -1,109 +1,4 @@
-stages:
-  - build
-  - deploy
-  - backup
-
-default:
-  tags:
-    - docker
-  image:
-    name: registry.test.model.svo.aero/dpm/iac/infra/ansible:ansible-pip
-    entrypoint: [ "" ]
-  before_script:
-    - chmod 400 "$SSH_PRIVATE_KEY"
-    - git -c http.sslVerify=false clone --single-branch --branch master https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/probegi/infra.git
-
-# BUILD
-.build:
-  stage: build
-  variables:
-    ANSIBLE_HOST_KEY_CHECKING: "False"
-    ANSIBLE_STDOUT_CALLBACK: "debug"
-  when: manual
-
-.build-demo:
-  extends: .build
-  environment: demo
-
-.build-dev:
-  extends: .build
-  environment: dev
-
-build-demo-server:
-  extends: .build-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,client,dev"
-
-build-demo-geo-server:
-  extends: .build-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "server,client,dev"
-
-build-demo-client:
-  extends: .build-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,server,dev"
-
-build-dev-server:
-  extends: .build-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,client,demo"
-
-build-dev-client:
-  extends: .build-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "geo-server,server,demo"
-
-build-dev-geo-server:
-  extends: .build-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/build/build.yml --skip-tags "client,server,demo"
-
-# DEPLOY
-.deploy:
-  stage: deploy
-  variables:
-    ANSIBLE_HOST_KEY_CHECKING: "False"
-    ANSIBLE_STDOUT_CALLBACK: "debug"
-  when: manual
-
-.deploy-demo:
-  extends: .deploy
-  environment: demo
-
-.deploy-dev:
-  extends: .deploy
-  environment: dev
-
-deploy-demo-server:
-  extends: .deploy-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,client,dev"
-
-deploy-demo-client:
-  extends: .deploy-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,server,dev"
-
-deploy-demo-geo-server:
-  extends: .deploy-demo
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "server,client,dev"
-
-deploy-dev-server:
-  extends: .deploy-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,client,demo"
-
-deploy-dev-client:
-  extends: .deploy-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "geo-server,server,demo"
-
-deploy-dev-geo-server:
-  extends: .deploy-dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy/deploy.yml --skip-tags "client,server,demo"
+Local file `pipeline/backup-probegi.yml` does not exist!
 
 # BACKUP
 trigger-probegi-backup:
@@ -111,7 +6,7 @@ trigger-probegi-backup:
   when: manual
   trigger:
     include:
-      - local: .gitlab/backup-probegi.yml
+      - local: pipeline/backup-probegi.yml
     strategy: depend
   rules:
     - when: manual
