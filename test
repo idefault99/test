@@ -1,22 +1,725 @@
+# GENERAL OPTIONS
 stages:
-  - dump
-  - upload
+  - build
+  - lint_and_test
+  - deploy
+  - publish_helm_releases
+  - publish_image
+  - publish_helm
 
-dump:
-  stage: dump
-  image: python:3.12
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE != "web"
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+default:
+  interruptible: true # TODO возможно стоит сделать не все джобы interruptible, а только некоторые
   before_script:
-    - pip install ansible
-  script:
-    - ansible-playbook ansible/backup_probegi.yml
-  artifacts:
-    expire_in: 7 days
-    paths:
-      - dump/*.sql.gz
+    - export TAG=$(eval $TAG_SCRIPT) # TAG variable definition
 
-upload:
-  stage: upload
-  image: minio/mc
+variables:
+  TAG_SCRIPT: '(if [ "$${CI_COMMIT_TAG}" == "" ]; then echo "$${CI_COMMIT_REF_SLUG}"; else echo "$${CI_COMMIT_TAG}"; fi);'
+  KUBECONFIG: $KUBE_CONF_2
+  SONAR_HOST_URL: 'https://sonarqube.code-discovery.ru'
+
+# STAGES
+
+############### BUILD ###############
+.buildkit_build:
+  stage: build
+  allow_failure: true
+  tags:
+    - docker 
+  image:
+    name: registry.test.model.svo.aero/dpm/iac/infra/docker:28.5.0-rc.1-cli-alpine3.22
+  services: 
+    - registry.test.model.svo.aero/dpm/iac/infra/docker:28.5.0-rc.1-dind-alpine3.22
+  variables:
+    TARGET: production
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "unix:///runner/services/docker/docker.sock"
+  before_script:
+    - mkdir -p $HOME/.docker/
+    - echo "${CI_JOB_TOKEN}" | docker login registry.test.model.svo.aero --username gitlab-ci-token --password-stdin
+    - export TAG=$(eval $TAG_SCRIPT)
+    - docker context create my-builder
+    - docker buildx create my-builder --driver docker-container --use --buildkitd-config ${BUILDKITD_CONFIG}
+  after_script:
+     - docker context rm my-builder
+
+.buildkit_bin:
+  extends: .buildkit_build
+  variables:
+    TARGET: production
+    PACKAGE_GROUPS: main
   script:
-    - mc alias set minio $MINIO_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
-    - mc cp dump/*.sql.gz minio/$MINIO_BUCKET/
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG}.bin \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --target ${TARGET}  \
+      --build-arg POETRY_PACKAGE_GROUPS=${PACKAGE_GROUPS} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg GITLAB_USERNAME=gitlab-ci-token \
+      --build-arg GITLAB_TOKEN=${CI_JOB_TOKEN} \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: on_success
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: on_success
+    - when: manual
+
+.buildkit_migrations:
+  extends: .buildkit_build
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/migrations.Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG}.migrations \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
+
+.buildkit_source:
+  extends: .buildkit_build
+  variables:
+    TARGET: source
+    PACKAGE_GROUPS: main,dev,test
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG} \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --target ${TARGET}  \
+      --build-arg POETRY_PACKAGE_GROUPS=${PACKAGE_GROUPS} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg GITLAB_USERNAME=gitlab-ci-token \
+      --build-arg GITLAB_TOKEN=${CI_JOB_TOKEN} \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
+  rules:
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: on_success
+    - if: $CI_COMMIT_TAG == null && $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
+      when: manual
+
+# Appsec tests
+sast_bandit:
+  stage: lint_and_test
+  allow_failure: true
+  tags:
+    - docker 
+  image: registry.test.model.svo.aero/dpm/is/sast/bandit:1.8.6
+  script:
+    - bandit -r . --severity-level high -f txt -o report.txt && true
+    - cat report.txt
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - when: never
+  artifacts:
+    when: always
+    paths: 
+      - report.txt
+
+############### LINT & TEST ###############
+.docker_compose_test:
+  stage: lint_and_test
+  tags:
+    - shell
+  needs:
+    - job: build_source
+  before_script:
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - export TAG=$(eval $TAG_SCRIPT)
+    - cat .env.example > .env
+    - docker compose -f docker-compose.test.yml pull
+  after_script:
+    - >
+      if [ $CI_JOB_STATUS == 'failed' ]; then
+        docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} logs
+      fi
+    - export TAG=$(eval $TAG_SCRIPT)
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} down
+    - docker volume prune -f
+  rules:
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: on_success
+    - if: $CI_COMMIT_TAG == null && $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
+      when: on_success
+
+.linter:
+  extends: .docker_compose_test
+  allow_failure: true
+  script:
+    - touch ./code_quality.json
+    - export TAG=$(eval $TAG_SCRIPT)
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --renew-anon-volumes --exit-code-from ruff ruff
+  artifacts:
+    when: always
+    reports:
+      codequality: ./code_quality.json
+
+.test:
+  extends: .docker_compose_test
+  variables:
+    TEST_SERVICES: ""
+  script:
+    - touch ./report.xml
+    - touch ./coverage.xml
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up -d --renew-anon-volumes --force-recreate --remove-orphans ${TEST_SERVICES}
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test
+    - sed -i 's|" filename="|" filename="src/|g' ./coverage.xml || true
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: ./report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: ./coverage.xml
+
+# SonarQube
+sonarqube-check:
+  tags:
+    - docker
+  stage: lint_and_test
+  image:
+    name: registry.test.model.svo.aero/dpm/iac/infra/sonarqube:sonar-scanner_self-truststore
+    entrypoint: [""]
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - sonar-scanner
+      -Dsonar.host.url=$SONAR_HOST_URL
+      -Dsonar.token=$SONAR_TOKEN
+      -Dsonar.projectKey="$CI_PROJECT_NAME-$CI_PROJECT_ID"
+      -Dsonar.projectName="$CI_PROJECT_TITLE"
+      -Dsonar.scanner.skipSystemTruststore=true
+      -Dsonar.scanner.truststorePath="/opt/sonar-scanner/.sonar/ssl/gitlab.test.model.svo.aero__truststore.p12"
+      -Dsonar.scanner.truststorePassword="$SONAR_SCANNER_TRUSTSTORE_PASSWORD"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: always
+      allow_failure: true
+
+############### DEPLOY ###############
+.deploy:
+  stage: deploy
+  tags:
+    - docker
+  image:
+    name: registry.test.model.svo.aero/dpm/iac/infra:helm
+    pull_policy: [always, if-not-present]
+    entrypoint: [""]
+  variables:
+    REGISTRY: "${CI_REGISTRY_IMAGE}"
+    IMAGE_POSTFIX: ".bin" # для фронта будем указывать "", для прочего просто менять эту переменную
+  before_script:
+    - export TAG=$(eval $TAG_SCRIPT)
+    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
+    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
+    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
+    - cp -r ./dev-infra/templates/utils ./Helm/templates
+  script:
+    - |
+      helm upgrade -i -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
+      --set "image=${REGISTRY}:${TAG}${IMAGE_POSTFIX}"
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: manual
+      # needs: ["linter", "test"]
+    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
+      when: manual
+    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
+      when: manual
+
+aos_develop:
+  extends: .deploy
+  environment: aos_dev
+  variables:
+    NAMESPACE: develop
+
+aos_tgo:
+  extends: .deploy
+  environment: aos_tgo
+  variables:
+    NAMESPACE: tgo
+
+aos_gis_2:
+  extends: .deploy
+  environment: aos_gis_2
+  variables:
+    NAMESPACE: gis-2
+
+aos_rms:
+  extends: .deploy
+  environment: aos_rms
+  variables:
+    NAMESPACE: rms
+
+aos_variation_dev:
+  extends: .deploy
+  environment: aos_variation_dev
+  variables:
+    NAMESPACE: variation-dev
+
+aos_auth_dev:
+  extends: .deploy
+  environment: aos_auth_dev
+  variables:
+    NAMESPACE: auth-dev
+
+aos_telegram_dev:
+  extends: .deploy
+  environment: aos_telegram_dev
+  variables:
+    NAMESPACE: telegram-dev
+
+aos_schedule_dev:
+  extends: .deploy
+  environment: aos_schedule_dev
+  variables:
+    NAMESPACE: schedule-dev
+
+aos_rms_sh_demo:
+  extends: .deploy
+  environment: aos_rms_sh_demo
+  variables:
+    NAMESPACE: rms-sh-demo
+
+aos_test_isua_svo:
+  extends: .deploy
+  environment: aos_test_isua_svo
+  variables:
+    NAMESPACE: test-isua-svo
+
+aos_test_isua_svo_prod:
+  extends: .deploy
+  environment: aos_test_isua_svo_prod
+  variables:
+    NAMESPACE: test-isua-svo-prod
+
+aos_test_isua_led:
+  extends: .deploy
+  environment: aos_test_isua_led
+  variables:
+    NAMESPACE: test-isua-led
+
+aos_test_isua_load:
+  extends: .deploy
+  environment: aos_test_isua_load
+  variables:
+    NAMESPACE: test-isua-load
+
+aos_test_isua_sochi:
+  extends: .deploy
+  environment: aos_test_isua_sochi
+  variables:
+    NAMESPACE: test-isua-sochi
+
+aos_dev_dt:
+  extends: .deploy
+  environment: aos_dev_dt
+  variables:
+    NAMESPACE: dev-dt
+
+aos_dev_sis:
+  extends: .deploy
+  environment: aos_dev_sis
+  variables:
+    NAMESPACE: dev-sis
+
+aos_test_gis_svo:
+  extends: .deploy
+  environment: aos_test_gis_svo
+  variables:
+    NAMESPACE: test-gis-svo
+
+aos_demo_isua:
+  extends: .deploy
+  environment: aos_demo_isua
+  variables:
+    NAMESPACE: demo-isua
+
+aos_test_aloms:
+  extends: .deploy
+  environment: aos_test_aloms
+  variables:
+    NAMESPACE: test-aloms
+
+aos_dev_aloms:
+  extends: .deploy
+  environment: aos_dev_aloms
+  variables:
+    NAMESPACE: dev-aloms
+
+aos_demo_aloms:
+  extends: .deploy
+  environment: aos_demo_aloms
+  variables:
+    NAMESPACE: demo-aloms
+
+.deploy_aerps_dev:
+  extends: .deploy
+  environment: aerps_dev
+  variables:
+    NAMESPACE: aerps-dev
+
+.deploy_aerps_test:
+  extends: .deploy
+  environment: aerps_test
+  variables:
+    NAMESPACE: aerps-test
+
+aos_rms_eurochem_dev:
+  extends: .deploy
+  environment: aos_rms_eurochem_dev
+  variables:
+    NAMESPACE: rms-eurochem-dev
+
+aos_is_isua_svo:
+  extends: .deploy
+  environment: aos_is_isua_svo
+  variables:
+    NAMESPACE: is-isua-svo
+
+aos_dev_devops:
+  extends: .deploy
+  environment: aos_dev_devops
+  variables:
+    NAMESPACE: dev-devops
+
+aos_dev_sochi:
+  extends: .deploy
+  environment: aos_dev_sochi
+  variables:
+    NAMESPACE: dev-sochi
+
+aos_test_isua_prod_led:
+  extends: .deploy
+  environment: aos_test_isua_prod_led
+  variables:
+    NAMESPACE: test-isua-prod-led
+
+aos_aos_svo_test_02:
+  extends: .deploy
+  environment: aos_aos_svo_test_02
+  variables:
+    NAMESPACE: aos-svo-test-02
+
+aos_test_isua_auto:
+  extends: .deploy
+  environment: aos_test_isua_auto
+  variables:
+    NAMESPACE: test-isua-auto
+
+aos_rms_dev_02:
+  extends: .deploy
+  environment: aos_rms_dev_02
+  variables:
+    NAMESPACE: rms-dev-02
+
+.deploy_aoshub_main:
+  extends: .deploy
+  environment: aoushub_main
+  variables:
+    KUBECONFIG: $KUBE_CONF_3
+    REGISTRY: "${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}"
+    NAMESPACE: main
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+aoshub_sochi:
+  extends: .deploy_aoshub_main
+  environment: aoshub_sochi
+  variables:
+    NAMESPACE: sochi
+    EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+
+aoshub_rms_eurochem_demo:
+  extends: .deploy_aoshub_main
+  variables:
+    NAMESPACE: rms-eurochem-demo
+    EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+  environment: aoushub_rms_eurochem_demo
+
+aoshub_coreon_demo:
+  extends: .deploy_aoshub_main
+  variables:
+    NAMESPACE: coreon-demo
+    EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+  environment: aoushub_coreon_demo
+
+################ PUBLISH HELM RELEASES ###############
+.publish_helm:
+  stage: publish_helm
+  tags:
+    - docker
+  image:
+    name: registry.test.model.svo.aero/dpm/iac/infra/py-publish-charts:latest
+    pull_policy: [always, always]
+  variables:
+    DEFAULT_TARGET: main
+  script:
+    - echo $CI_COMMIT_TAG | grep -qE '^([a-z]+\-)?[0-9]+\.[0-9]+\.[0-9]+$' || { echo -e "\033[31m[ERROR] Тег '$CI_COMMIT_TAG' не соответствует паттерну [заказчик-]1.2.3\033[0m\nПодробнее https://wiki.yandex.ru/homepage/krap-projects/2131-test-stands/gajjdy/dlja-razrabotchikov/pravila-formirovanija-tegov-v-gitlab/"; exit 1; }
+    - if [ -z "$BRANCH" ]; then echo "Переменная BRANCH не задана"; exit 1; fi
+    - if [ -z "$TARGET" ]; then TARGET=$DEFAULT_TARGET; fi
+    - git config --global http.sslverify false
+    - git clone $CHARTS_ORIGIN
+    - cd $CHARTS_ROOT_DIR
+    - git switch $TARGET
+    - git config --global user.name "Helm publishing job"
+    - git config --global user.email "ci-cd-bot@cd-it.ru"
+    - git fetch origin
+    - git switch $BRANCH || git checkout -b $BRANCH # Try checkout to remote, else create local
+    - cd ../
+    - python3 /app/publish_charts.py $CI_PROJECT_PATH $CHARTS_ROOT_DIR $CHARTS_REGISTRY
+    - cd $CHARTS_ROOT_DIR
+    - git add .
+    - GIT_COMMIT_EXIT_CODE=0
+    - git commit -m "Update Helm charts from $CI_PROJECT_NAME" || export GIT_COMMIT_EXIT_CODE=$?
+    - if [ $GIT_COMMIT_EXIT_CODE -ne 0 ]; then echo "nothing to change"; exit 1; fi
+    - |
+      if [ -z "$MR_TITLE" ];
+      then git push origin $BRANCH -o merge_request.create -o merge_request.target="$TARGET" -o merge_request.remove_source_branch -o merge_request.squash;
+      else git push origin $BRANCH -o merge_request.create -o merge_request.target="$TARGET" -o merge_request.title="$MR_TITLE" -o merge_request.remove_source_branch -o merge_request.squash
+      fi
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+.helm_internal_releases:
+  extends: .publish_helm
+  stage: publish_helm_releases
+  variables:
+      CHARTS_PRIVATE_TOKEN_KEY: $RELEASES_ACCESS_TOKEN
+      CHARTS_URL: "gitlab.test.model.svo.aero/dpm/releases/${CUSTOMER}/${CHARTS_ROOT_DIR}.git"
+      CHARTS_ORIGIN: "https://gitlab-ci-token:${CHARTS_PRIVATE_TOKEN_KEY}@${CHARTS_URL}"
+      CHARTS_REGISTRY: internal
+  parallel:
+    matrix:
+      - CUSTOMER: sheremetyevo
+        CHARTS_ROOT_DIR:
+          - aos
+          - gis
+          - sis
+      - CUSTOMER: pulkovo
+        CHARTS_ROOT_DIR:
+          - aos
+      # - CUSTOMER: sochi
+      #   CHARTS_ROOT_DIR:
+      #     - aos
+      # - CUSTOMER: eurochem
+      #   CHARTS_ROOT_DIR:
+      #     - coreon
+      # - CUSTOMER: sheremetyevo_handling
+      #   CHARTS_ROOT_DIR:
+      #     - aloms
+
+DONT_USE_THIS_helm_releases:
+  extends: .helm_internal_releases
+  allow_failure: true
+
+############### PUBLISH IMAGE ###############
+.base_publish_image:
+  tags:
+    - shell
+  stage: publish_image
+  script:
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - echo ${REGISTRY_PASSWORD} | docker login -u ${REGISTRY_LOGIN} $EXTERNAL_REGISTRY --password-stdin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}.bin
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.bin ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin
+    - docker push ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin
+    - docker image rm ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG}.bin || exit 0
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+.base_publish_image_svo:
+  tags:
+    - shell
+  stage: publish_image
+  script:
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - echo ${REGISTRY_PASSWORD} | docker login -u ${REGISTRY_LOGIN} $EXTERNAL_REGISTRY --password-stdin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}.bin
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.bin ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG}.bin
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.bin ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE,,}:${TAG}.bin
+    - docker push ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG}.bin
+    - docker push ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE,,}:${TAG}.bin
+    - docker image rm ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG}.bin || exit 0
+    - docker image rm ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE,,}:${TAG}.bin || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG}.bin || exit 0
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+.base_front_publish:
+  tags:
+    - shell
+  stage: publish_image
+  script:
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - echo ${REGISTRY_PASSWORD} | docker login -u ${REGISTRY_LOGIN} $EXTERNAL_REGISTRY --password-stdin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG} ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG}
+    - docker push ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG}
+    - docker image rm ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG} || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG} || exit 0
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+.base_front_publish_svo:
+  tags:
+    - shell
+  stage: publish_image
+  script:
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - echo ${REGISTRY_PASSWORD} | docker login -u ${REGISTRY_LOGIN} $EXTERNAL_REGISTRY --password-stdin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG} ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG}
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG} ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE,,}:${TAG}
+    - docker push ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG}
+    - docker push ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE,,}:${TAG}
+    - docker image rm ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH,,}:${TAG} || exit 0
+    - docker image rm ${EXTERNAL_REGISTRY,,}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE,,}:${TAG} || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG} || exit 0
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+.publish_image:
+  extends: .base_publish_image
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+.publish_image_svo:
+  extends: .base_publish_image_svo
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+image_svo:
+  extends: .publish_image_svo
+  variables:
+    EXTERNAL_REGISTRY_PATH: ${CI_PROJECT_PATH}
+    REGISTRY_LOGIN: ${ROBOT_LOGIN_SVO}
+    REGISTRY_PASSWORD: ${ROBOT_PASSWORD_SVO}
+    EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE: dpm/airport_digital_ecosystem/iac/images/${REGISTRY_PATH}
+  before_script:
+    - export TAG=$(eval $TAG_SCRIPT)
+    - EXTERNAL_REGISTRY=registry.svo.aero:443
+
+image_etc:
+  extends: .publish_image
+  variables:
+    EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+    REGISTRY_LOGIN: ${ROBOT_LOGIN}
+    REGISTRY_PASSWORD: ${ROBOT_PASSWORD}
+
+############### PUBLISH HELM ###############
+helm_svo:
+  extends: .publish_helm
+  variables:
+      DEFAULT_TARGET: master
+      CHARTS_URL: 'gitlab.svo.aero/dpm/airport_digital_ecosystem/code_discovery/charts.git'
+      CHARTS_PRIVATE_TOKEN_KEY: $SVO_PRIVATE_TOKEN_KEY
+      CHARTS_ORIGIN: "https://gitlab-ci-token:${CHARTS_PRIVATE_TOKEN_KEY}@${CHARTS_URL}"
+      CHARTS_ROOT_DIR: charts
+      CHARTS_REGISTRY: external
+      EXTERNAL_REGISTRY_PATH: ${CI_PROJECT_PATH}
+  needs:
+    - job: image_svo
+  before_script:
+    - export TAG=$(eval $TAG_SCRIPT)
+    - EXTERNAL_REGISTRY=registry.svo.aero:443
+
+helm_led:
+  extends: .publish_helm
+  variables:
+      CHARTS_URL: 'gitlab.code-discovery.ru/builds/pulkovo.git'
+      CHARTS_PRIVATE_TOKEN_KEY: $LED_PRIVATE_TOKEN_KEY
+      CHARTS_ORIGIN: "https://gitlab-ci-token:${CHARTS_PRIVATE_TOKEN_KEY}@${CHARTS_URL}"
+      CHARTS_ROOT_DIR: pulkovo
+      CHARTS_REGISTRY: external
+      EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+  needs:
+    - job: image_etc
+
+helm_sochi:
+  extends: .publish_helm
+  variables:
+      CHARTS_URL: 'gitlab.code-discovery.ru/builds/sochi.git'
+      CHARTS_PRIVATE_TOKEN_KEY: $AER_PRIVATE_TOKEN_KEY
+      CHARTS_ORIGIN: "https://gitlab-ci-token:${CHARTS_PRIVATE_TOKEN_KEY}@${CHARTS_URL}"
+      CHARTS_ROOT_DIR: sochi
+      CHARTS_REGISTRY: external
+      EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+  needs:
+    - job: image_etc
+
+helm_aloms:
+  extends: .publish_helm
+  variables:
+      CHARTS_URL: 'gitlab.code-discovery.ru/builds/aloms.git'
+      CHARTS_PRIVATE_TOKEN_KEY: $ALOMS_PRIVATE_TOKEN_KEY
+      CHARTS_ORIGIN: "https://gitlab-ci-token:${CHARTS_PRIVATE_TOKEN_KEY}@${CHARTS_URL}"
+      CHARTS_ROOT_DIR: aloms
+      CHARTS_REGISTRY: external
+      EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+  needs:
+    - job: image_etc
+
+# helm_aloms:
+#   extends: .publish_helm
+#   variables:
+#       CHARTS_URL: 'gitlab.test.model.svo.aero/dpm/releases/sheremetyevo_handling/aloms.git'
+#       CHARTS_PRIVATE_TOKEN_KEY: $INTERNAL_PRIVATE_TOKEN_KEY
+#       CHARTS_ORIGIN: "https://gitlab-ci-token:${CHARTS_PRIVATE_TOKEN_KEY}@${CHARTS_URL}"
+#       CHARTS_ROOT_DIR: aloms
+#       CHARTS_REGISTRY: internal
+#       EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
+#   needs:
+#     - job: image_etc
