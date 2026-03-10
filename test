@@ -1,67 +1,344 @@
----
-- name: Backup probegi-db
-  hosts: develop
-  gather_facts: false
+#!/usr/bin/env bash
+set -euo pipefail
 
-  vars:
-    backup_tmp_dir: /tmp
-    backup_local_dir: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump"
+# =========================================================
+# CONFIG
+# =========================================================
+GITLAB_URL="https://gitlab.com"
+TOKEN="glpat-xxxxxxxxxxxxxxxx"
 
-  tasks:
-    - name: Generate backup filename
-      set_fact:
-        backup_file_name: "probegi_{{ lookup('pipe', 'date +%d-%m-%Y_%H%M_%S') }}.sql.gz"
-        backup_remote_path: "{{ backup_tmp_dir }}/probegi_{{ lookup('pipe', 'date +%d-%m-%Y_%H%M_%S') }}.sql.gz"
+OLD_PROJECT_ID="12345678"
+NEW_PROJECT_ID="87654321"
 
-    - name: Ensure local dump directory exists on runner
-      delegate_to: localhost
-      become: false
-      file:
-        path: "{{ backup_local_dir }}"
-        state: directory
-        mode: "0755"
+PER_PAGE="100"
+DRY_RUN="false"   # true = только показать, что будет сделано
 
-    - name: Create dump on remote host from docker container
-      shell: |
-        set -euo pipefail
-        docker exec {{ probegi_pg_container }} pg_dumpall -c -U {{ probegi_pg_user }} | gzip -c > {{ backup_remote_path }}
-      args:
-        executable: /bin/bash
+# opened | merged | closed | locked | all
+MR_STATE="all"
 
-    - name: Check remote dump exists
-      stat:
-        path: "{{ backup_remote_path }}"
-      register: backup_stat
+# =========================================================
+# REQS
+# =========================================================
+command -v curl >/dev/null
+command -v jq >/dev/null
 
-    - name: Fail if dump was not created
-      fail:
-        msg: "Backup file was not created on remote host: {{ backup_remote_path }}"
-      when: not backup_stat.stat.exists
+# =========================================================
+# HELPERS
+# =========================================================
+api_get() {
+  local url="$1"
+  curl -sS --header "PRIVATE-TOKEN: $TOKEN" "$url"
+}
 
-    - name: Save dump filename for next job
-      delegate_to: localhost
-      become: false
-      copy:
-        content: "{{ backup_file_name }}\n"
-        dest: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump-meta/dump_name.txt"
+api_post_json() {
+  local url="$1"
+  local payload="$2"
+  curl -sS \
+    --request POST \
+    --header "PRIVATE-TOKEN: $TOKEN" \
+    --header "Content-Type: application/json" \
+    --data "$payload" \
+    "$url"
+}
 
-    - name: Save dump remote path for next job
-      delegate_to: localhost
-      become: false
-      copy:
-        content: "{{ backup_remote_path }}\n"
-        dest: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump-meta/dump_path.txt"
+api_post_form() {
+  local url="$1"
+  shift
+  curl -sS \
+    --request POST \
+    --header "PRIVATE-TOKEN: $TOKEN" \
+    "$@" \
+    "$url"
+}
 
-    - name: Save dump remote host for next job
-      delegate_to: localhost
-      become: false
-      copy:
-        content: "{{ ansible_host | default(inventory_hostname) }}\n"
-        dest: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump-meta/dump_host.txt"
+api_put_json() {
+  local url="$1"
+  local payload="$2"
+  curl -sS \
+    --request PUT \
+    --header "PRIVATE-TOKEN: $TOKEN" \
+    --header "Content-Type: application/json" \
+    --data "$payload" \
+    "$url"
+}
 
-    - name: Save dump remote ssh user for next job
-      delegate_to: localhost
-      become: false
-      copy:
-        content: "{{ ansible_user }}\n"
-        dest: "{{ lookup('env', 'CI_PROJECT_DIR') }}/dump-meta/dump_user.txt"
+urlencode() {
+  jq -nr --arg v "$1" '$v|@uri'
+}
+
+branch_exists() {
+  local project_id="$1"
+  local branch="$2"
+  local code
+  code="$(curl -sS -o /dev/null -w "%{http_code}" \
+    --header "PRIVATE-TOKEN: $TOKEN" \
+    "$GITLAB_URL/api/v4/projects/$project_id/repository/branches/$(urlencode "$branch")")"
+  [[ "$code" == "200" ]]
+}
+
+mr_exists_in_new_project() {
+  local source_branch="$1"
+  local target_branch="$2"
+  local title="$3"
+
+  local page=1
+  while :; do
+    local resp
+    resp="$(api_get "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/merge_requests?state=all&per_page=$PER_PAGE&page=$page")"
+
+    local count
+    count="$(echo "$resp" | jq 'length')"
+    [[ "$count" == "0" ]] && break
+
+    local found
+    found="$(echo "$resp" | jq --arg sb "$source_branch" --arg tb "$target_branch" --arg tt "$title" '
+      map(select(.source_branch == $sb and .target_branch == $tb and .title == $tt)) | length
+    ')"
+
+    [[ "$found" != "0" ]] && return 0
+    ((page++))
+  done
+
+  return 1
+}
+
+build_mr_payload() {
+  local mr="$1"
+
+  echo "$mr" | jq '
+    {
+      source_branch: .source_branch,
+      target_branch: .target_branch,
+      title: .title,
+      description:
+        (
+          (.description // "")
+          + "\n\n---\n"
+          + "Migrated from old project.\n"
+          + "Original MR: " + (.web_url // "unknown") + "\n"
+          + "Original IID: !" + (.iid|tostring) + "\n"
+          + "Original state: " + (.state // "unknown") + "\n"
+          + "Original author: " + (.author.username // "unknown") + "\n"
+          + "Original created_at: " + (.created_at // "unknown") + "\n"
+          + "Original updated_at: " + (.updated_at // "unknown")
+        )
+    }
+    + (if (.remove_source_branch != null) then { remove_source_branch: .remove_source_branch } else {} end)
+    + (if .squash != null then { squash: .squash } else {} end)
+    + (if .assignees and (.assignees|length > 0)
+       then { assignee_ids: (.assignees | map(.id)) }
+       else {}
+       end)
+    + (if .reviewers and (.reviewers|length > 0)
+       then { reviewer_ids: (.reviewers | map(.id)) }
+       else {}
+       end)
+    + (if .labels and (.labels|length > 0)
+       then { labels: (.labels | join(",")) }
+       else {}
+       end)
+  '
+}
+
+create_mr() {
+  local payload="$1"
+  api_post_json "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/merge_requests" "$payload"
+}
+
+close_mr_if_needed() {
+  local new_iid="$1"
+  local old_state="$2"
+
+  if [[ "$old_state" == "closed" ]]; then
+    local payload='{"state_event":"close"}'
+    api_put_json "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/merge_requests/$new_iid" "$payload" >/dev/null
+    echo "  -> closed"
+  fi
+}
+
+notes_for_mr() {
+  local project_id="$1"
+  local mr_iid="$2"
+  local page=1
+
+  while :; do
+    local resp
+    resp="$(api_get "$GITLAB_URL/api/v4/projects/$project_id/merge_requests/$mr_iid/notes?sort=asc&order_by=created_at&per_page=$PER_PAGE&page=$page")"
+
+    local count
+    count="$(echo "$resp" | jq 'length')"
+    [[ "$count" == "0" ]] && break
+
+    echo "$resp" | jq -c '.[]'
+    ((page++))
+  done
+}
+
+discussions_for_mr() {
+  local project_id="$1"
+  local mr_iid="$2"
+  local page=1
+
+  while :; do
+    local resp
+    resp="$(api_get "$GITLAB_URL/api/v4/projects/$project_id/merge_requests/$mr_iid/discussions?per_page=$PER_PAGE&page=$page")"
+
+    local count
+    count="$(echo "$resp" | jq 'length')"
+    [[ "$count" == "0" ]] && break
+
+    echo "$resp" | jq -c '.[]'
+    ((page++))
+  done
+}
+
+create_note_on_new_mr() {
+  local new_mr_iid="$1"
+  local note_json="$2"
+
+  local body
+  body="$(echo "$note_json" | jq -r '
+    (
+      "Migrated note from old MR\n"
+      + "Author: " + (.author.username // "unknown") + "\n"
+      + "Created at: " + (.created_at // "unknown") + "\n"
+      + "---\n"
+      + (.body // "")
+    )
+  ')"
+
+  [[ -z "$body" ]] && return 0
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "    NOTE -> would create"
+    return 0
+  fi
+
+  api_post_form \
+    "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/merge_requests/$new_mr_iid/notes" \
+    --form-string "body=$body" >/dev/null
+}
+
+create_discussion_on_new_mr() {
+  local new_mr_iid="$1"
+  local discussion_json="$2"
+
+  local body
+  body="$(echo "$discussion_json" | jq -r '
+    .notes
+    | map(
+        "Author: " + (.author.username // "unknown") + "\n"
+        + "Created at: " + (.created_at // "unknown") + "\n"
+        + "---\n"
+        + (.body // "")
+      )
+    | join("\n\n====================\n\n")
+  ')"
+
+  [[ -z "$body" ]] && return 0
+
+  body="Migrated discussion from old MR\n\n$body"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "    DISCUSSION -> would create"
+    return 0
+  fi
+
+  api_post_form \
+    "$GITLAB_URL/api/v4/projects/$NEW_PROJECT_ID/merge_requests/$new_mr_iid/discussions" \
+    --form-string "body=$body" >/dev/null
+}
+
+# =========================================================
+# MAIN
+# =========================================================
+page=1
+
+while :; do
+  mr_resp="$(api_get "$GITLAB_URL/api/v4/projects/$OLD_PROJECT_ID/merge_requests?state=$MR_STATE&scope=all&per_page=$PER_PAGE&page=$page")"
+
+  mr_count="$(echo "$mr_resp" | jq 'length')"
+  [[ "$mr_count" == "0" ]] && break
+
+  echo "$mr_resp" | jq -c '.[]' | while IFS= read -r old_mr; do
+    old_iid="$(echo "$old_mr" | jq -r '.iid')"
+    title="$(echo "$old_mr" | jq -r '.title')"
+    source_branch="$(echo "$old_mr" | jq -r '.source_branch')"
+    target_branch="$(echo "$old_mr" | jq -r '.target_branch')"
+    old_state="$(echo "$old_mr" | jq -r '.state')"
+    web_url="$(echo "$old_mr" | jq -r '.web_url')"
+
+    echo "MR !${old_iid}: $source_branch -> $target_branch | $title"
+
+    if ! branch_exists "$NEW_PROJECT_ID" "$source_branch"; then
+      echo "  SKIP: source branch not found in new project"
+      continue
+    fi
+
+    if ! branch_exists "$NEW_PROJECT_ID" "$target_branch"; then
+      echo "  SKIP: target branch not found in new project"
+      continue
+    fi
+
+    if mr_exists_in_new_project "$source_branch" "$target_branch" "$title"; then
+      echo "  SKIP: similar MR already exists in new project"
+      continue
+    fi
+
+    payload="$(build_mr_payload "$old_mr")"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "$payload" | jq .
+      echo
+      continue
+    fi
+
+    create_resp="$(create_mr "$payload")"
+    new_iid="$(echo "$create_resp" | jq -r '.iid // empty')"
+
+    if [[ -z "$new_iid" ]]; then
+      echo "  ERROR creating MR"
+      echo "$create_resp" | jq .
+      continue
+    fi
+
+    new_url="$(echo "$create_resp" | jq -r '.web_url // empty')"
+    echo "  CREATED: !${new_iid} -> ${new_url}"
+
+    # Перенос обычных notes
+    while IFS= read -r note; do
+      [[ -z "$note" ]] && continue
+
+      # system notes пропускаем, они не переносятся нормально
+      system_flag="$(echo "$note" | jq -r '.system // false')"
+      if [[ "$system_flag" == "true" ]]; then
+        echo "    SKIP system note"
+        continue
+      fi
+
+      create_note_on_new_mr "$new_iid" "$note"
+    done < <(notes_for_mr "$OLD_PROJECT_ID" "$old_iid")
+
+    # Перенос discussions
+    while IFS= read -r discussion; do
+      [[ -z "$discussion" ]] && continue
+      create_discussion_on_new_mr "$new_iid" "$discussion"
+    done < <(discussions_for_mr "$OLD_PROJECT_ID" "$old_iid")
+
+    # Если старый MR был closed — закрываем новый
+    close_mr_if_needed "$new_iid" "$old_state"
+
+    # merged восстановить “как merged” через обычное создание нельзя надёжно:
+    # оставляем note в описании и можно закрыть вручную/отдельной логикой.
+    if [[ "$old_state" == "merged" ]]; then
+      echo "  NOTE: old MR was merged; new MR stays open unless you close/merge it manually."
+    fi
+
+    echo "  FROM: $web_url"
+    echo
+  done
+
+  ((page++))
+done
+
+echo "DONE"
