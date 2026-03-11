@@ -1,3 +1,218 @@
-script:
-  - export ENVIRONMENT=prod
-  - echo $ENVIRONMENT
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =========================
+# Настройки подключения
+# =========================
+PGHOST="${PGHOST:-127.0.0.1}"
+PGPORT="${PGPORT:-5000}"          # порт HAProxy
+PGUSER="${PGUSER:-postgres}"
+PGPASSWORD="${PGPASSWORD:-postgres}"
+export PGPASSWORD
+
+# Сколько БД/таблиц/строк показывать
+MAX_DBS="${MAX_DBS:-20}"
+MAX_TABLES_PER_DB="${MAX_TABLES_PER_DB:-10}"
+SAMPLE_ROWS="${SAMPLE_ROWS:-5}"
+
+# Если нужно ограничить только одной БД:
+TARGET_DB="${TARGET_DB:-}"
+
+# =========================
+# Вспомогательные функции
+# =========================
+log() {
+  echo
+  echo "============================================================"
+  echo "$1"
+  echo "============================================================"
+}
+
+run_psql() {
+  local db="$1"
+  local sql="$2"
+
+  psql \
+    -h "$PGHOST" \
+    -p "$PGPORT" \
+    -U "$PGUSER" \
+    -d "$db" \
+    -X \
+    -v ON_ERROR_STOP=1 \
+    -P pager=off \
+    -c "$sql"
+}
+
+run_psql_quiet() {
+  local db="$1"
+  local sql="$2"
+
+  psql \
+    -h "$PGHOST" \
+    -p "$PGPORT" \
+    -U "$PGUSER" \
+    -d "$db" \
+    -X \
+    -A \
+    -t \
+    -v ON_ERROR_STOP=1 \
+    -P pager=off \
+    -c "$sql"
+}
+
+# =========================
+# Проверка подключения
+# =========================
+log "Проверка подключения к Postgres через HAProxy"
+
+run_psql postgres "
+select
+  current_user as current_user,
+  current_database() as current_database,
+  inet_server_addr() as server_ip,
+  inet_server_port() as server_port,
+  version() as postgres_version;
+"
+
+log "Статус инстанса"
+run_psql postgres "
+select
+  pg_is_in_recovery() as is_replica,
+  now() as server_time;
+"
+
+log "Активные подключения"
+run_psql postgres "
+select
+  datname,
+  usename,
+  state,
+  count(*) as connections
+from pg_stat_activity
+where datname is not null
+group by datname, usename, state
+order by connections desc, datname, usename, state;
+"
+
+# =========================
+# Список БД
+# =========================
+log "Список БД и размеры"
+
+run_psql postgres "
+select
+  d.datname as database_name,
+  pg_size_pretty(pg_database_size(d.datname)) as size,
+  pg_database_size(d.datname) as size_bytes
+from pg_database d
+where d.datistemplate = false
+order by pg_database_size(d.datname) desc
+limit ${MAX_DBS};
+"
+
+if [[ -n "$TARGET_DB" ]]; then
+  DBS="$TARGET_DB"
+else
+  DBS="$(run_psql_quiet postgres "
+    select datname
+    from pg_database
+    where datistemplate = false
+    order by pg_database_size(datname) desc
+    limit ${MAX_DBS};
+  ")"
+fi
+
+# =========================
+# Обход БД
+# =========================
+for db in $DBS; do
+  log "База: $db"
+
+  echo "[1] Основная информация по БД"
+  run_psql "$db" "
+  select
+    current_database() as database_name,
+    pg_size_pretty(pg_database_size(current_database())) as database_size,
+    pg_database_size(current_database()) as database_size_bytes;
+  "
+
+  echo "[2] Схемы"
+  run_psql "$db" "
+  select schema_name
+  from information_schema.schemata
+  where schema_name not in ('pg_catalog', 'information_schema')
+  order by schema_name;
+  "
+
+  echo "[3] Таблицы и их размеры"
+  run_psql "$db" "
+  select
+    n.nspname as schema_name,
+    c.relname as table_name,
+    pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
+    pg_total_relation_size(c.oid) as total_size_bytes,
+    c.reltuples::bigint as estimated_rows
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where c.relkind = 'r'
+    and n.nspname not in ('pg_catalog', 'information_schema')
+  order by pg_total_relation_size(c.oid) desc
+  limit ${MAX_TABLES_PER_DB};
+  "
+
+  TABLES="$(run_psql_quiet "$db" "
+    select n.nspname || '|' || c.relname
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where c.relkind = 'r'
+      and n.nspname not in ('pg_catalog', 'information_schema')
+    order by pg_total_relation_size(c.oid) desc
+    limit ${MAX_TABLES_PER_DB};
+  ")"
+
+  while IFS='|' read -r schema table; do
+    [[ -z "${schema:-}" || -z "${table:-}" ]] && continue
+
+    echo
+    echo "------------------------------------------------------------"
+    echo "Таблица: ${schema}.${table}"
+    echo "------------------------------------------------------------"
+
+    echo "[4] Колонки"
+    run_psql "$db" "
+    select
+      ordinal_position,
+      column_name,
+      data_type,
+      is_nullable,
+      coalesce(character_maximum_length::text, '') as max_length,
+      coalesce(column_default, '') as default_value
+    from information_schema.columns
+    where table_schema = '${schema}'
+      and table_name = '${table}'
+    order by ordinal_position;
+    "
+
+    echo "[5] Оценка количества строк"
+    run_psql "$db" "
+    select
+      '${schema}.${table}' as table_name,
+      c.reltuples::bigint as estimated_rows
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = '${schema}'
+      and c.relname = '${table}';
+    "
+
+    echo "[6] Первые ${SAMPLE_ROWS} строк"
+    run_psql "$db" "
+    select *
+    from \"${schema}\".\"${table}\"
+    limit ${SAMPLE_ROWS};
+    " || echo "Не удалось прочитать данные из ${schema}.${table} (возможно, нет прав или специфичная таблица)."
+
+  done <<< "$TABLES"
+
+done
+
+log "Готово"
