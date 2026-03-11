@@ -1,297 +1,28 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-PGHOST="${PGHOST:-127.0.0.1}"
-PGPORT="${PGPORT:-5000}"
-PGUSER="${PGUSER:-postgres}"
-PGPASSWORD="${PGPASSWORD:-postgres}"
-export PGPASSWORD
-
-DEFAULT_DB="${DEFAULT_DB:-postgres}"
-CURRENT_DB="$DEFAULT_DB"
-SAMPLE_ROWS="${SAMPLE_ROWS:-5}"
-
-PSQL_BASE=(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -X -v ON_ERROR_STOP=1 -P pager=off)
-
-header() {
+run_custom_sql() {
+  header "Выполнить SQL в БД: $CURRENT_DB"
+  echo "Введи SQL-запрос одной строкой."
+  echo "Пример:"
+  echo "  select now();"
+  echo "  select * from public.my_table limit 10;"
   echo
-  echo "============================================================"
-  echo "$1"
-  echo "============================================================"
-}
 
-run_sql() {
-  local db="$1"
-  local sql="$2"
-  "${PSQL_BASE[@]}" -d "$db" -c "$sql"
-}
+  read -r -p "SQL> " user_sql
 
-run_sql_quiet() {
-  local db="$1"
-  local sql="$2"
-  "${PSQL_BASE[@]}" -d "$db" -A -t -c "$sql"
-}
-
-pause() {
-  echo
-  read -r -p "Нажми Enter для продолжения..." _
-}
-
-check_connection() {
-  header "Проверка подключения"
-  run_sql "$DEFAULT_DB" "
-    select
-      current_user as current_user,
-      current_database() as current_database,
-      inet_server_addr() as server_ip,
-      inet_server_port() as server_port,
-      version() as postgres_version;
-  "
-}
-
-list_databases() {
-  header "Список БД"
-  run_sql "$DEFAULT_DB" "
-    select
-      datname as database_name,
-      pg_size_pretty(pg_database_size(datname)) as size
-    from pg_database
-    where datistemplate = false
-    order by datname;
-  "
-}
-
-select_database() {
-  header "Выбор БД"
-
-  mapfile -t DBS < <(run_sql_quiet "$DEFAULT_DB" "
-    select datname
-    from pg_database
-    where datistemplate = false
-    order by datname;
-  ")
-
-  if [[ ${#DBS[@]} -eq 0 ]]; then
-    echo "Базы данных не найдены."
+  if [[ -z "${user_sql// }" ]]; then
+    echo "Пустой запрос."
     return
   fi
 
-  echo "Доступные БД:"
-  local i=1
-  for db in "${DBS[@]}"; do
-    echo "  $i) $db"
-    ((i++))
-  done
-
   echo
-  read -r -p "Введи номер БД: " db_num
-
-  if [[ ! "$db_num" =~ ^[0-9]+$ ]]; then
-    echo "Некорректный ввод."
-    return
-  fi
-
-  if (( db_num < 1 || db_num > ${#DBS[@]} )); then
-    echo "Нет такого номера."
-    return
-  fi
-
-  CURRENT_DB="${DBS[$((db_num-1))]}"
-  echo "Выбрана БД: $CURRENT_DB"
-}
-
-show_current_db() {
-  header "Текущая БД"
-  echo "Сейчас выбрана: $CURRENT_DB"
-}
-
-list_schemas() {
-  header "Схемы в БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select schema_name
-    from information_schema.schemata
-    where schema_name not in ('pg_catalog', 'information_schema')
-    order by schema_name;
-  "
-}
-
-list_tables() {
-  header "Таблицы в БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      table_schema,
-      table_name
-    from information_schema.tables
-    where table_type = 'BASE TABLE'
-      and table_schema not in ('pg_catalog', 'information_schema')
-    order by table_schema, table_name;
-  "
-}
-
-table_sizes() {
-  header "Размеры таблиц в БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      n.nspname as schema_name,
-      c.relname as table_name,
-      pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
-      c.reltuples::bigint as estimated_rows
-    from pg_class c
-    join pg_namespace n on n.oid = c.relnamespace
-    where c.relkind = 'r'
-      and n.nspname not in ('pg_catalog', 'information_schema')
-    order by pg_total_relation_size(c.oid) desc
-    limit 100;
-  "
-}
-
-pick_table() {
-  mapfile -t TABLES < <(run_sql_quiet "$CURRENT_DB" "
-    select n.nspname || '|' || c.relname
-    from pg_class c
-    join pg_namespace n on n.oid = c.relnamespace
-    where c.relkind = 'r'
-      and n.nspname not in ('pg_catalog', 'information_schema')
-    order by n.nspname, c.relname;
-  ")
-
-  if [[ ${#TABLES[@]} -eq 0 ]]; then
-    echo "В БД $CURRENT_DB нет пользовательских таблиц."
-    return 1
-  fi
-
-  echo "Доступные таблицы:"
-  local i=1
-  local item schema table
-  for item in "${TABLES[@]}"; do
-    schema="${item%%|*}"
-    table="${item##*|}"
-    echo "  $i) ${schema}.${table}"
-    ((i++))
-  done
-
+  echo "Будет выполнено в БД: $CURRENT_DB"
+  echo "Запрос:"
+  echo "$user_sql"
   echo
-  read -r -p "Введи номер таблицы: " tbl_num
 
-  if [[ ! "$tbl_num" =~ ^[0-9]+$ ]]; then
-    echo "Некорректный ввод."
-    return 1
-  fi
-
-  if (( tbl_num < 1 || tbl_num > ${#TABLES[@]} )); then
-    echo "Нет такого номера."
-    return 1
-  fi
-
-  SELECTED_ITEM="${TABLES[$((tbl_num-1))]}"
-  SELECTED_SCHEMA="${SELECTED_ITEM%%|*}"
-  SELECTED_TABLE="${SELECTED_ITEM##*|}"
-  return 0
+  run_sql "$CURRENT_DB" "$user_sql"
 }
 
-table_columns() {
-  header "Выбор таблицы для просмотра колонок"
-  pick_table || return
-
-  header "Колонки таблицы ${SELECTED_SCHEMA}.${SELECTED_TABLE}"
-  run_sql "$CURRENT_DB" "
-    select
-      ordinal_position,
-      column_name,
-      data_type,
-      is_nullable,
-      coalesce(character_maximum_length::text, '') as max_length,
-      coalesce(column_default, '') as default_value
-    from information_schema.columns
-    where table_schema = '${SELECTED_SCHEMA}'
-      and table_name = '${SELECTED_TABLE}'
-    order by ordinal_position;
-  "
-}
-
-table_sample() {
-  header "Выбор таблицы для просмотра строк"
-  pick_table || return
-
-  header "Первые ${SAMPLE_ROWS} строк из ${SELECTED_SCHEMA}.${SELECTED_TABLE}"
-  run_sql "$CURRENT_DB" "
-    select *
-    from \"${SELECTED_SCHEMA}\".\"${SELECTED_TABLE}\"
-    limit ${SAMPLE_ROWS};
-  "
-}
-
-database_size() {
-  header "Размер БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      current_database() as database_name,
-      pg_size_pretty(pg_database_size(current_database())) as size,
-      pg_database_size(current_database()) as size_bytes;
-  "
-}
-
-connections() {
-  header "Активные подключения"
-  run_sql "$DEFAULT_DB" "
-    select
-      datname,
-      usename,
-      state,
-      count(*) as connections
-    from pg_stat_activity
-    where datname is not null
-    group by datname, usename, state
-    order by connections desc, datname, usename, state;
-  "
-}
-
-long_queries() {
-  header "Долгие запросы"
-  run_sql "$DEFAULT_DB" "
-    select
-      pid,
-      usename,
-      datname,
-      state,
-      now() - query_start as duration,
-      left(query, 300) as query
-    from pg_stat_activity
-    where state <> 'idle'
-      and query not ilike '%pg_stat_activity%'
-    order by query_start asc;
-  "
-}
-
-vacuum_stats() {
-  header "Vacuum/Analyze статистика по БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      schemaname,
-      relname,
-      n_live_tup,
-      n_dead_tup,
-      last_vacuum,
-      last_autovacuum,
-      last_analyze,
-      last_autoanalyze
-    from pg_stat_user_tables
-    order by n_dead_tup desc
-    limit 50;
-  "
-}
-
-change_sample_rows() {
-  echo
-  read -r -p "Сколько строк показывать (текущее значение: $SAMPLE_ROWS): " new_rows
-  if [[ "$new_rows" =~ ^[0-9]+$ ]] && (( new_rows > 0 )); then
-    SAMPLE_ROWS="$new_rows"
-    echo "Новое значение SAMPLE_ROWS: $SAMPLE_ROWS"
-  else
-    echo "Некорректное число."
-  fi
-}
-
+---
 main_menu() {
   while true; do
     header "Postgres menu | host=$PGHOST port=$PGPORT user=$PGUSER current_db=$CURRENT_DB sample_rows=$SAMPLE_ROWS"
@@ -309,6 +40,7 @@ main_menu() {
     echo "12) Показать долгие запросы"
     echo "13) Показать vacuum/analyze статистику"
     echo "14) Изменить лимит строк sample"
+    echo "15) Выполнить SQL-запрос"
     echo "0) Выход"
     echo
 
@@ -329,10 +61,10 @@ main_menu() {
       12) long_queries; pause ;;
       13) vacuum_stats; pause ;;
       14) change_sample_rows; pause ;;
+      15) run_custom_sql; pause ;;
       0) echo "Выход."; exit 0 ;;
       *) echo "Неизвестный пункт меню."; pause ;;
     esac
   done
 }
 
-main_menu
