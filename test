@@ -1,9 +1,354 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PGHOST="${PGHOST:-127.0.0.1}"
+PGPORT="${PGPORT:-5000}"
+PGUSER="${PGUSER:-postgres}"
+PGPASSWORD="${PGPASSWORD:-postgres}"
+export PGPASSWORD
+
+DEFAULT_DB="${DEFAULT_DB:-postgres}"
+CURRENT_DB="$DEFAULT_DB"
+LIMIT_ROWS="${LIMIT_ROWS:-50}"
+
+PSQL_BASE=(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -X -v ON_ERROR_STOP=1 -P pager=off)
+
+header() {
+  echo
+  echo "============================================================"
+  echo "$1"
+  echo "============================================================"
+}
+
+run_sql() {
+  local db="$1"
+  local sql="$2"
+  "${PSQL_BASE[@]}" -d "$db" -c "$sql"
+}
+
+run_sql_quiet() {
+  local db="$1"
+  local sql="$2"
+  "${PSQL_BASE[@]}" -d "$db" -A -t -c "$sql"
+}
+
+pause() {
+  echo
+  read -r -p "Нажми Enter для продолжения..." _
+}
+
+check_connection() {
+  header "Проверка подключения"
+  run_sql "$CURRENT_DB" "
+    select
+      current_user as current_user,
+      current_database() as current_database,
+      inet_server_addr() as server_ip,
+      inet_server_port() as server_port,
+      version() as postgres_version,
+      pg_is_in_recovery() as is_replica,
+      now() as server_time;
+  "
+}
+
+select_database() {
+  header "Выбор БД"
+
+  mapfile -t DBS < <(run_sql_quiet postgres "
+    select datname
+    from pg_database
+    where datistemplate = false
+    order by datname;
+  ")
+
+  if [[ ${#DBS[@]} -eq 0 ]]; then
+    echo "Базы данных не найдены."
+    return
+  fi
+
+  local i=1
+  for db in "${DBS[@]}"; do
+    echo "  $i) $db"
+    ((i++))
+  done
+
+  echo
+  read -r -p "Введи номер БД: " db_num
+
+  if [[ ! "$db_num" =~ ^[0-9]+$ ]]; then
+    echo "Некорректный ввод."
+    return
+  fi
+
+  if (( db_num < 1 || db_num > ${#DBS[@]} )); then
+    echo "Нет такого номера."
+    return
+  fi
+
+  CURRENT_DB="${DBS[$((db_num-1))]}"
+  echo "Выбрана БД: $CURRENT_DB"
+}
+
+show_pg_stats() {
+  header "pg_stats | БД: $CURRENT_DB | limit $LIMIT_ROWS"
+  run_sql "$CURRENT_DB" "
+    select
+      schemaname,
+      tablename,
+      attname,
+      inherited,
+      null_frac,
+      n_distinct,
+      most_common_vals,
+      most_common_freqs,
+      histogram_bounds,
+      correlation
+    from pg_stats
+    order by schemaname, tablename, attname
+    limit ${LIMIT_ROWS};
+  "
+}
+
+show_pg_stats_table() {
+  header "pg_stats по конкретной таблице"
+
+  read -r -p "Схема [public]: " schema
+  schema="${schema:-public}"
+
+  read -r -p "Имя таблицы: " table
+
+  if [[ -z "${table// }" ]]; then
+    echo "Имя таблицы не задано."
+    return
+  fi
+
+  run_sql "$CURRENT_DB" "
+    select
+      schemaname,
+      tablename,
+      attname,
+      inherited,
+      null_frac,
+      n_distinct,
+      avg_width,
+      correlation,
+      most_common_vals,
+      most_common_freqs,
+      histogram_bounds
+    from pg_stats
+    where schemaname = '${schema}'
+      and tablename = '${table}'
+    order by attname;
+  "
+}
+
+show_pg_stat_activity() {
+  header "pg_stat_activity"
+  run_sql "$CURRENT_DB" "
+    select
+      pid,
+      usename,
+      datname,
+      application_name,
+      client_addr,
+      state,
+      wait_event_type,
+      wait_event,
+      now() - query_start as duration,
+      left(query, 250) as query
+    from pg_stat_activity
+    order by query_start nulls last
+    limit ${LIMIT_ROWS};
+  "
+}
+
+show_pg_stat_database() {
+  header "pg_stat_database"
+  run_sql "$CURRENT_DB" "
+    select
+      datname,
+      numbackends,
+      xact_commit,
+      xact_rollback,
+      blks_read,
+      blks_hit,
+      tup_returned,
+      tup_fetched,
+      tup_inserted,
+      tup_updated,
+      tup_deleted,
+      conflicts,
+      temp_files,
+      temp_bytes,
+      deadlocks,
+      checksum_failures,
+      blk_read_time,
+      blk_write_time,
+      stats_reset
+    from pg_stat_database
+    order by datname;
+  "
+}
+
+show_pg_stat_user_tables() {
+  header "pg_stat_user_tables | БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      schemaname,
+      relname,
+      seq_scan,
+      seq_tup_read,
+      idx_scan,
+      idx_tup_fetch,
+      n_tup_ins,
+      n_tup_upd,
+      n_tup_del,
+      n_live_tup,
+      n_dead_tup,
+      vacuum_count,
+      autovacuum_count,
+      analyze_count,
+      autoanalyze_count,
+      last_vacuum,
+      last_autovacuum,
+      last_analyze,
+      last_autoanalyze
+    from pg_stat_user_tables
+    order by n_dead_tup desc nulls last
+    limit ${LIMIT_ROWS};
+  "
+}
+
+show_pg_stat_user_indexes() {
+  header "pg_stat_user_indexes | БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      schemaname,
+      relname as table_name,
+      indexrelname as index_name,
+      idx_scan,
+      idx_tup_read,
+      idx_tup_fetch
+    from pg_stat_user_indexes
+    order by idx_scan desc nulls last
+    limit ${LIMIT_ROWS};
+  "
+}
+
+show_pg_statio_user_tables() {
+  header "pg_statio_user_tables | БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      schemaname,
+      relname,
+      heap_blks_read,
+      heap_blks_hit,
+      idx_blks_read,
+      idx_blks_hit,
+      toast_blks_read,
+      toast_blks_hit,
+      tidx_blks_read,
+      tidx_blks_hit
+    from pg_statio_user_tables
+    order by heap_blks_read desc nulls last
+    limit ${LIMIT_ROWS};
+  "
+}
+
+show_pg_statio_user_indexes() {
+  header "pg_statio_user_indexes | БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      schemaname,
+      relname as table_name,
+      indexrelname as index_name,
+      idx_blks_read,
+      idx_blks_hit
+    from pg_statio_user_indexes
+    order by idx_blks_read desc nulls last
+    limit ${LIMIT_ROWS};
+  "
+}
+
+show_pg_stat_bgwriter() {
+  header "pg_stat_bgwriter"
+  run_sql "$CURRENT_DB" "
+    select *
+    from pg_stat_bgwriter;
+  "
+}
+
+show_pg_stat_wal() {
+  header "pg_stat_wal"
+  run_sql "$CURRENT_DB" "
+    select *
+    from pg_stat_wal;
+  "
+}
+
+show_pg_stat_replication() {
+  header "pg_stat_replication"
+  run_sql "$CURRENT_DB" "
+    select *
+    from pg_stat_replication;
+  "
+}
+
+show_pg_stat_archiver() {
+  header "pg_stat_archiver"
+  run_sql "$CURRENT_DB" "
+    select *
+    from pg_stat_archiver;
+  "
+}
+
+show_pg_stat_ssl() {
+  header "pg_stat_ssl"
+  run_sql "$CURRENT_DB" "
+    select *
+    from pg_stat_ssl
+    limit ${LIMIT_ROWS};
+  "
+}
+
+show_pg_stat_statements() {
+  header "pg_stat_statements"
+
+  local exists
+  exists="$(run_sql_quiet "$CURRENT_DB" "
+    select count(*)
+    from pg_extension
+    where extname = 'pg_stat_statements';
+  ")"
+
+  if [[ "${exists:-0}" != "1" ]]; then
+    echo "Расширение pg_stat_statements не установлено в БД $CURRENT_DB."
+    echo "Нужно создать extension и обычно добавить его в shared_preload_libraries."
+    return
+  fi
+
+  run_sql "$CURRENT_DB" "
+    select
+      userid,
+      dbid,
+      queryid,
+      calls,
+      total_exec_time,
+      mean_exec_time,
+      rows,
+      shared_blks_hit,
+      shared_blks_read,
+      temp_blks_written,
+      left(query, 250) as query
+    from pg_stat_statements
+    order by total_exec_time desc
+    limit ${LIMIT_ROWS};
+  "
+}
+
 run_custom_sql() {
   header "Выполнить SQL в БД: $CURRENT_DB"
-  echo "Введи SQL-запрос одной строкой."
-  echo "Пример:"
-  echo "  select now();"
-  echo "  select * from public.my_table limit 10;"
+  echo "Введи SQL одной строкой."
   echo
 
   read -r -p "SQL> " user_sql
@@ -13,34 +358,41 @@ run_custom_sql() {
     return
   fi
 
-  echo
-  echo "Будет выполнено в БД: $CURRENT_DB"
-  echo "Запрос:"
-  echo "$user_sql"
-  echo
-
   run_sql "$CURRENT_DB" "$user_sql"
 }
 
----
+change_limit() {
+  echo
+  read -r -p "Новый LIMIT_ROWS (текущее: $LIMIT_ROWS): " new_limit
+  if [[ "$new_limit" =~ ^[0-9]+$ ]] && (( new_limit > 0 )); then
+    LIMIT_ROWS="$new_limit"
+    echo "Новое значение LIMIT_ROWS: $LIMIT_ROWS"
+  else
+    echo "Некорректное число."
+  fi
+}
+
 main_menu() {
   while true; do
-    header "Postgres menu | host=$PGHOST port=$PGPORT user=$PGUSER current_db=$CURRENT_DB sample_rows=$SAMPLE_ROWS"
+    header "Postgres stats menu | host=$PGHOST port=$PGPORT user=$PGUSER current_db=$CURRENT_DB limit=$LIMIT_ROWS"
     echo "1) Проверить подключение"
-    echo "2) Показать список БД"
-    echo "3) Выбрать БД"
-    echo "4) Показать текущую БД"
-    echo "5) Показать схемы"
-    echo "6) Показать таблицы"
-    echo "7) Показать размеры таблиц"
-    echo "8) Показать колонки таблицы"
-    echo "9) Показать первые N строк таблицы"
-    echo "10) Показать размер текущей БД"
-    echo "11) Показать активные подключения"
-    echo "12) Показать долгие запросы"
-    echo "13) Показать vacuum/analyze статистику"
-    echo "14) Изменить лимит строк sample"
-    echo "15) Выполнить SQL-запрос"
+    echo "2) Показать pg_stats"
+    echo "3) Показать pg_stats по конкретной таблице"
+    echo "4) Показать pg_stat_activity"
+    echo "5) Показать pg_stat_database"
+    echo "6) Показать pg_stat_user_tables"
+    echo "7) Показать pg_stat_user_indexes"
+    echo "8) Показать pg_statio_user_tables"
+    echo "9) Показать pg_statio_user_indexes"
+    echo "10) Показать pg_stat_bgwriter"
+    echo "11) Показать pg_stat_wal"
+    echo "12) Показать pg_stat_replication"
+    echo "13) Показать pg_stat_archiver"
+    echo "14) Показать pg_stat_ssl"
+    echo "15) Показать pg_stat_statements"
+    echo "16) Выполнить SQL"
+    echo "17) Сменить БД"
+    echo "18) Изменить LIMIT"
     echo "0) Выход"
     echo
 
@@ -48,23 +400,27 @@ main_menu() {
 
     case "$choice" in
       1) check_connection; pause ;;
-      2) list_databases; pause ;;
-      3) select_database; pause ;;
-      4) show_current_db; pause ;;
-      5) list_schemas; pause ;;
-      6) list_tables; pause ;;
-      7) table_sizes; pause ;;
-      8) table_columns; pause ;;
-      9) table_sample; pause ;;
-      10) database_size; pause ;;
-      11) connections; pause ;;
-      12) long_queries; pause ;;
-      13) vacuum_stats; pause ;;
-      14) change_sample_rows; pause ;;
-      15) run_custom_sql; pause ;;
+      2) show_pg_stats; pause ;;
+      3) show_pg_stats_table; pause ;;
+      4) show_pg_stat_activity; pause ;;
+      5) show_pg_stat_database; pause ;;
+      6) show_pg_stat_user_tables; pause ;;
+      7) show_pg_stat_user_indexes; pause ;;
+      8) show_pg_statio_user_tables; pause ;;
+      9) show_pg_statio_user_indexes; pause ;;
+      10) show_pg_stat_bgwriter; pause ;;
+      11) show_pg_stat_wal; pause ;;
+      12) show_pg_stat_replication; pause ;;
+      13) show_pg_stat_archiver; pause ;;
+      14) show_pg_stat_ssl; pause ;;
+      15) show_pg_stat_statements; pause ;;
+      16) run_custom_sql; pause ;;
+      17) select_database; pause ;;
+      18) change_limit; pause ;;
       0) echo "Выход."; exit 0 ;;
       *) echo "Неизвестный пункт меню."; pause ;;
     esac
   done
 }
 
+main_menu
