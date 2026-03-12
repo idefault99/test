@@ -5,11 +5,15 @@
     - touch ./report.xml ./coverage.xml
     - chmod 666 ./report.xml ./coverage.xml
     - export TAG=$(eval $TAG_SCRIPT)
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test
-    - ls -lah ./report.xml ./coverage.xml
+    - TEST_EXIT_CODE=0
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test || TEST_EXIT_CODE=$?
+    - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
+    - ls -lah ./report.xml ./coverage.xml || true
     - wc -c ./report.xml ./coverage.xml || true
-    - sed -n '1,80p' ./report.xml || true
+    - sed -n '1,120p' ./report.xml || true
+    - sed -n '1,120p' ./coverage.xml || true
     - sed -i 's|" filename="|" filename="src/|g' ./coverage.xml || true
+    - exit $TEST_EXIT_CODE
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
