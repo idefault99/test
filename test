@@ -1,4 +1,1060 @@
-Hello
- World
+# PostgreSQL monitoring по `pg_stat_*` / `pg_stat_statements` + Prometheus + Grafana
 
+Этот файл — готовый шаблон решения для Kubernetes.
 
+Он покрывает:
+- включение `pg_stat_statements` в PostgreSQL;
+- создание отдельного read-only пользователя мониторинга;
+- разворачивание `sql_exporter` в Kubernetes;
+- публикацию кастомных метрик в формате Prometheus;
+- подключение exporter к Prometheus через `ServiceMonitor`;
+- готовый Grafana dashboard через `ConfigMap`;
+- базовые алерты через `PrometheusRule`;
+- стратегию сброса статистики;
+- команды проверки и troubleshooting.
+
+---
+
+## 1. Архитектура решения
+
+Используем **лучший для этой задачи вариант**:
+
+`PostgreSQL -> sql_exporter -> Prometheus -> Grafana`
+
+Почему именно так:
+- `pg_stat_statements` и большинство `pg_stat_*` представлений — это **накопительные** счетчики;
+- при наличии Prometheus их **не нужно регулярно сбрасывать**, потому что Grafana строит корректные графики по `rate()` / `increase()`;
+- это дает нормальную историю, алерты и разрез **по каждой БД**;
+- для твоего кейса с кастомной агрегацией по `datname` это удобнее, чем стандартный `postgres_exporter`.
+
+**Рекомендация по reset:**
+- **по умолчанию автоматический reset не делать**;
+- reset нужен только вручную при обслуживании или при разборе переполнения/деаллокаций `pg_stat_statements`;
+- weekly/dayly auto-reset для этого варианта **не нужен**.
+
+---
+
+## 2. Что в итоге будет в Grafana
+
+### Основные панели
+1. `SQL calls/sec by DB`
+2. `SQL execution time ms/sec by DB`
+3. `Average SQL execution time by DB`
+4. `Rows/sec by DB`
+5. `Transactions/sec by DB`
+6. `Cache hit ratio by DB`
+7. `Temp bytes/sec by DB`
+8. `Deadlocks by DB`
+9. `Sessions by DB and state`
+10. `Dead tuples by table`
+11. `Autovacuum age by table`
+12. `pg_stat_statements deallocations`
+
+### Что это дает
+- видно, **какая БД реально нагружает инстанс**;
+- видно, у какой БД проседает latency;
+- видно temp spill, блокировки/сессии, autovacuum lag и накопление dead tuples;
+- видно, не начал ли `pg_stat_statements` выкидывать старые записи из-за недостаточного `pg_stat_statements.max`.
+
+---
+
+## 3. Предпосылки
+
+Предполагается, что у тебя уже есть:
+- Kubernetes кластер;
+- Prometheus Operator / `kube-prometheus-stack`;
+- Grafana из того же стека;
+- доступ к PostgreSQL из кластера;
+- доступ на изменение параметров PostgreSQL.
+
+Примеры ниже используют:
+- namespace мониторинга: `monitoring`
+- namespace БД не важен, exporter будет ходить по сети в PostgreSQL
+- Prometheus datasource в Grafana называется `Prometheus`
+
+Если у тебя другое имя datasource или другой selector у Prometheus Operator — просто поправь соответствующие поля.
+
+---
+
+## 4. Настройка PostgreSQL
+
+### 4.1. Включить `pg_stat_statements`
+
+Нужно добавить параметры в `postgresql.conf` / Patroni / Helm values PostgreSQL:
+
+```ini
+shared_preload_libraries = 'pg_stat_statements'
+compute_query_id = auto
+pg_stat_statements.max = 20000
+pg_stat_statements.track = all
+pg_stat_statements.track_utility = on
+pg_stat_statements.track_planning = on
+track_io_timing = on
+```
+
+> Если инстанс очень загруженный и SQL очень разнообразный, `pg_stat_statements.max` можно поднять до `30000-50000`.
+> Стартовать лучше с `20000` и смотреть на метрику deallocations.
+
+После изменения `shared_preload_libraries` требуется **restart PostgreSQL**.
+
+### 4.2. Создать extension
+
+Подключись к административной БД (обычно `postgres`) и выполни:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+### 4.3. Создать пользователя мониторинга
+
+```sql
+CREATE USER monitor_exporter WITH PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
+GRANT CONNECT ON DATABASE postgres TO monitor_exporter;
+GRANT pg_monitor TO monitor_exporter;
+GRANT pg_read_all_stats TO monitor_exporter;
+```
+
+> Для чтения SQL text / `queryid` других пользователей нужен `pg_read_all_stats`. Для нашего дашборда текст запросов не используется, но роль оставить полезно.
+
+### 4.4. Проверка
+
+```sql
+SHOW shared_preload_libraries;
+SHOW compute_query_id;
+SHOW track_io_timing;
+SHOW pg_stat_statements.max;
+SHOW pg_stat_statements.track;
+
+SELECT * FROM pg_stat_statements_info;
+SELECT count(*) FROM pg_stat_statements;
+```
+
+---
+
+## 5. Kubernetes manifests
+
+Ниже полный набор manifest-ов. Их можно положить в один файл, например:
+
+```bash
+mkdir -p pg-db-monitoring
+cd pg-db-monitoring
+cat > 00-all-in-one.yaml <<'YAML'
+# сюда вставляешь содержимое секции ниже
+YAML
+```
+
+Потом применяешь:
+
+```bash
+kubectl apply -f 00-all-in-one.yaml
+```
+
+---
+
+## 6. Полный all-in-one YAML
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sql-exporter-postgres-secret
+  namespace: monitoring
+type: Opaque
+stringData:
+  SQL_EXPORTER_DSN: "postgresql://monitor_exporter:CHANGE_ME_STRONG_PASSWORD@POSTGRES_HOST_OR_VIP:5432/postgres?sslmode=require"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sql-exporter-config
+  namespace: monitoring
+data:
+  sql_exporter.yml: |
+    global:
+      scrape_timeout_offset: 500ms
+      min_interval: 30s
+      max_connections: 3
+      max_idle_connections: 3
+
+    target:
+      data_source_name: "{{ env \"SQL_EXPORTER_DSN\" }}"
+      collectors: [pg_db_statements, pg_db_database_stats, pg_db_sessions, pg_db_tables, pg_db_statements_info]
+
+    collectors:
+      - collector_name: pg_db_statements
+        min_interval: 30s
+        metrics:
+          - metric_name: pg_db_statements_calls_total
+            type: counter
+            help: "Total SQL calls aggregated by database from pg_stat_statements"
+            key_labels: [db]
+            values: [calls]
+            query: |
+              SELECT
+                d.datname AS db,
+                COALESCE(sum(s.calls), 0)::double precision AS calls
+              FROM pg_database d
+              LEFT JOIN pg_stat_statements s ON s.dbid = d.oid
+              WHERE d.datistemplate = false
+              GROUP BY d.datname;
+
+          - metric_name: pg_db_statements_total_exec_time_ms_total
+            type: counter
+            help: "Total execution time in ms aggregated by database from pg_stat_statements"
+            key_labels: [db]
+            values: [total_exec_time_ms]
+            query: |
+              SELECT
+                d.datname AS db,
+                COALESCE(sum(s.total_exec_time), 0)::double precision AS total_exec_time_ms
+              FROM pg_database d
+              LEFT JOIN pg_stat_statements s ON s.dbid = d.oid
+              WHERE d.datistemplate = false
+              GROUP BY d.datname;
+
+          - metric_name: pg_db_statements_rows_total
+            type: counter
+            help: "Total returned/affected rows aggregated by database from pg_stat_statements"
+            key_labels: [db]
+            values: [rows_total]
+            query: |
+              SELECT
+                d.datname AS db,
+                COALESCE(sum(s.rows), 0)::double precision AS rows_total
+              FROM pg_database d
+              LEFT JOIN pg_stat_statements s ON s.dbid = d.oid
+              WHERE d.datistemplate = false
+              GROUP BY d.datname;
+
+          - metric_name: pg_db_statements_avg_exec_time_ms
+            type: gauge
+            help: "Current weighted average execution time in ms aggregated by database from pg_stat_statements"
+            key_labels: [db]
+            values: [avg_exec_time_ms]
+            query: |
+              SELECT
+                d.datname AS db,
+                CASE
+                  WHEN COALESCE(sum(s.calls), 0) = 0 THEN 0::double precision
+                  ELSE (sum(s.total_exec_time) / sum(s.calls))::double precision
+                END AS avg_exec_time_ms
+              FROM pg_database d
+              LEFT JOIN pg_stat_statements s ON s.dbid = d.oid
+              WHERE d.datistemplate = false
+              GROUP BY d.datname;
+
+      - collector_name: pg_db_database_stats
+        min_interval: 30s
+        metrics:
+          - metric_name: pg_db_xact_commit_total
+            type: counter
+            help: "Committed transactions by database"
+            key_labels: [db]
+            values: [xact_commit]
+            query: |
+              SELECT datname AS db, xact_commit::double precision AS xact_commit
+              FROM pg_stat_database
+              WHERE datname IS NOT NULL;
+
+          - metric_name: pg_db_xact_rollback_total
+            type: counter
+            help: "Rolled back transactions by database"
+            key_labels: [db]
+            values: [xact_rollback]
+            query: |
+              SELECT datname AS db, xact_rollback::double precision AS xact_rollback
+              FROM pg_stat_database
+              WHERE datname IS NOT NULL;
+
+          - metric_name: pg_db_blks_read_total
+            type: counter
+            help: "Disk blocks read by database"
+            key_labels: [db]
+            values: [blks_read]
+            query: |
+              SELECT datname AS db, blks_read::double precision AS blks_read
+              FROM pg_stat_database
+              WHERE datname IS NOT NULL;
+
+          - metric_name: pg_db_blks_hit_total
+            type: counter
+            help: "Buffer hits by database"
+            key_labels: [db]
+            values: [blks_hit]
+            query: |
+              SELECT datname AS db, blks_hit::double precision AS blks_hit
+              FROM pg_stat_database
+              WHERE datname IS NOT NULL;
+
+          - metric_name: pg_db_temp_bytes_total
+            type: counter
+            help: "Temp bytes by database"
+            key_labels: [db]
+            values: [temp_bytes]
+            query: |
+              SELECT datname AS db, temp_bytes::double precision AS temp_bytes
+              FROM pg_stat_database
+              WHERE datname IS NOT NULL;
+
+          - metric_name: pg_db_deadlocks_total
+            type: counter
+            help: "Deadlocks by database"
+            key_labels: [db]
+            values: [deadlocks]
+            query: |
+              SELECT datname AS db, deadlocks::double precision AS deadlocks
+              FROM pg_stat_database
+              WHERE datname IS NOT NULL;
+
+          - metric_name: pg_db_checksum_failures_total
+            type: counter
+            help: "Checksum failures by database"
+            key_labels: [db]
+            values: [checksum_failures]
+            query: |
+              SELECT datname AS db, COALESCE(checksum_failures, 0)::double precision AS checksum_failures
+              FROM pg_stat_database
+              WHERE datname IS NOT NULL;
+
+      - collector_name: pg_db_sessions
+        min_interval: 15s
+        metrics:
+          - metric_name: pg_db_sessions
+            type: gauge
+            help: "Current sessions by database and state"
+            key_labels: [db, state]
+            values: [sessions]
+            query: |
+              SELECT
+                COALESCE(datname, 'unknown') AS db,
+                COALESCE(state, 'unknown') AS state,
+                count(*)::double precision AS sessions
+              FROM pg_stat_activity
+              GROUP BY COALESCE(datname, 'unknown'), COALESCE(state, 'unknown');
+
+          - metric_name: pg_db_waiting_sessions
+            type: gauge
+            help: "Current waiting sessions by database and wait event type"
+            key_labels: [db, wait_event_type]
+            values: [sessions]
+            query: |
+              SELECT
+                COALESCE(datname, 'unknown') AS db,
+                COALESCE(wait_event_type, 'none') AS wait_event_type,
+                count(*)::double precision AS sessions
+              FROM pg_stat_activity
+              WHERE wait_event_type IS NOT NULL
+              GROUP BY COALESCE(datname, 'unknown'), COALESCE(wait_event_type, 'none');
+
+      - collector_name: pg_db_tables
+        min_interval: 60s
+        metrics:
+          - metric_name: pg_db_table_n_dead_tup
+            type: gauge
+            help: "Estimated dead tuples by table"
+            key_labels: [db, schema, table]
+            values: [n_dead_tup]
+            query: |
+              SELECT
+                current_database() AS db,
+                schemaname AS schema,
+                relname AS table,
+                n_dead_tup::double precision AS n_dead_tup
+              FROM pg_stat_user_tables;
+
+          - metric_name: pg_db_table_n_live_tup
+            type: gauge
+            help: "Estimated live tuples by table"
+            key_labels: [db, schema, table]
+            values: [n_live_tup]
+            query: |
+              SELECT
+                current_database() AS db,
+                schemaname AS schema,
+                relname AS table,
+                n_live_tup::double precision AS n_live_tup
+              FROM pg_stat_user_tables;
+
+          - metric_name: pg_db_table_last_autovacuum_age_seconds
+            type: gauge
+            help: "Seconds since last autovacuum by table"
+            key_labels: [db, schema, table]
+            values: [seconds_since_last_autovacuum]
+            query: |
+              SELECT
+                current_database() AS db,
+                schemaname AS schema,
+                relname AS table,
+                CASE
+                  WHEN last_autovacuum IS NULL THEN -1::double precision
+                  ELSE EXTRACT(EPOCH FROM (now() - last_autovacuum))::double precision
+                END AS seconds_since_last_autovacuum
+              FROM pg_stat_user_tables;
+
+          - metric_name: pg_db_table_last_autoanalyze_age_seconds
+            type: gauge
+            help: "Seconds since last autoanalyze by table"
+            key_labels: [db, schema, table]
+            values: [seconds_since_last_autoanalyze]
+            query: |
+              SELECT
+                current_database() AS db,
+                schemaname AS schema,
+                relname AS table,
+                CASE
+                  WHEN last_autoanalyze IS NULL THEN -1::double precision
+                  ELSE EXTRACT(EPOCH FROM (now() - last_autoanalyze))::double precision
+                END AS seconds_since_last_autoanalyze
+              FROM pg_stat_user_tables;
+
+      - collector_name: pg_db_statements_info
+        min_interval: 60s
+        metrics:
+          - metric_name: pg_db_statements_dealloc_total
+            type: counter
+            help: "Total statement deallocations due to pg_stat_statements.max pressure"
+            values: [dealloc]
+            query: |
+              SELECT dealloc::double precision AS dealloc
+              FROM pg_stat_statements_info;
+
+          - metric_name: pg_db_statements_stats_reset_epoch_seconds
+            type: gauge
+            help: "Epoch time of last pg_stat_statements reset"
+            values: [stats_reset]
+            query: |
+              SELECT EXTRACT(EPOCH FROM stats_reset)::double precision AS stats_reset
+              FROM pg_stat_statements_info;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sql-exporter-postgres
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: sql-exporter-postgres
+    app.kubernetes.io/component: exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sql-exporter-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sql-exporter-postgres
+        app.kubernetes.io/component: exporter
+    spec:
+      containers:
+        - name: sql-exporter
+          image: burningalchemist/sql_exporter:0.18.6
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-config.file=/etc/sql-exporter/sql_exporter.yml"
+            - "-web.listen-address=:9399"
+          env:
+            - name: SQL_EXPORTER_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: sql-exporter-postgres-secret
+                  key: SQL_EXPORTER_DSN
+          ports:
+            - name: http-metrics
+              containerPort: 9399
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: http-metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: http-metrics
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          volumeMounts:
+            - name: sql-exporter-config
+              mountPath: /etc/sql-exporter
+              readOnly: true
+      volumes:
+        - name: sql-exporter-config
+          configMap:
+            name: sql-exporter-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sql-exporter-postgres
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: sql-exporter-postgres
+    app.kubernetes.io/component: exporter
+spec:
+  selector:
+    app.kubernetes.io/name: sql-exporter-postgres
+  ports:
+    - name: http-metrics
+      port: 9399
+      targetPort: http-metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sql-exporter-postgres
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sql-exporter-postgres
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 25s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: postgres-pgstats-rules
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: postgres-pgstats-alerts
+      rules:
+        - alert: PostgresPgStatStatementsDeallocGrowing
+          expr: increase(pg_db_statements_dealloc_total[30m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "pg_stat_statements deallocations are growing"
+            description: "Exporter sees pg_stat_statements entries being evicted. Consider increasing pg_stat_statements.max or resetting stats manually after analysis."
+
+        - alert: PostgresHighAverageSqlLatency
+          expr: max by (db) (pg_db_statements_avg_exec_time_ms) > 500
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High average SQL latency in database {{ $labels.db }}"
+            description: "Weighted average SQL execution time is above 500 ms."
+
+        - alert: PostgresDeadlocksGrowing
+          expr: increase(pg_db_deadlocks_total[15m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Deadlocks detected in database {{ $labels.db }}"
+            description: "Deadlocks increased during the last 15 minutes."
+
+        - alert: PostgresTempBytesGrowingFast
+          expr: increase(pg_db_temp_bytes_total[15m]) > 1073741824
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High temp file usage in database {{ $labels.db }}"
+            description: "More than 1 GiB temp bytes generated during the last 15 minutes."
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-postgres-pgstats
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  postgres-pgstats-overview.json: |
+    {
+      "annotations": {"list":[]},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (rate(pg_db_statements_calls_total[$__rate_interval]))", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "SQL calls/sec by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "id": 2,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (rate(pg_db_statements_total_exec_time_ms_total[$__rate_interval]))", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "SQL execution time ms/sec by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 3,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (increase(pg_db_statements_total_exec_time_ms_total[$__rate_interval])) / clamp_min(sum by (db) (increase(pg_db_statements_calls_total[$__rate_interval])), 1)", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "Average SQL execution time by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "id": 4,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (rate(pg_db_statements_rows_total[$__rate_interval]))", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "Rows/sec by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "id": 5,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (rate(pg_db_xact_commit_total[$__rate_interval]) + rate(pg_db_xact_rollback_total[$__rate_interval]))", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "Transactions/sec by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "id": 6,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (rate(pg_db_blks_hit_total[$__rate_interval])) / clamp_min(sum by (db) (rate(pg_db_blks_hit_total[$__rate_interval]) + rate(pg_db_blks_read_total[$__rate_interval])), 1)", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "Cache hit ratio by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "id": 7,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (rate(pg_db_temp_bytes_total[$__rate_interval]))", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "Temp bytes/sec by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+          "id": 8,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db) (increase(pg_db_deadlocks_total[$__rate_interval]))", "legendFormat": "{{db}}", "refId": "A"}],
+          "title": "Deadlocks by DB",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+          "id": 9,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (db, state) (pg_db_sessions)", "legendFormat": "{{db}} / {{state}}", "refId": "A"}],
+          "title": "Sessions by DB and state",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+          "id": 10,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "topk(20, pg_db_table_n_dead_tup)", "legendFormat": "{{schema}}.{{table}}", "refId": "A"}],
+          "title": "Top dead tuples by table",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+          "id": 11,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "topk(20, pg_db_table_last_autovacuum_age_seconds > 0)", "legendFormat": "{{schema}}.{{table}}", "refId": "A"}],
+          "title": "Autovacuum age by table",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+          "id": 12,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+          "targets": [{"expr": "pg_db_statements_dealloc_total", "legendFormat": "dealloc", "refId": "A"}],
+          "title": "pg_stat_statements deallocations",
+          "type": "timeseries"
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["postgres", "pg_stat_statements", "prometheus"],
+      "templating": {"list":[]},
+      "time": {"from": "now-6h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "PostgreSQL pg_stat_* overview",
+      "uid": "postgres-pgstats-overview",
+      "version": 1,
+      "weekStart": ""
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-pgstatstatements-reset-manual
+  namespace: monitoring
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: psql-reset
+          image: postgres:17
+          env:
+            - name: PGHOST
+              value: "POSTGRES_HOST_OR_VIP"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: "postgres"
+            - name: PGUSER
+              value: "monitor_exporter"
+            - name: PGPASSWORD
+              value: "CHANGE_ME_STRONG_PASSWORD"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              psql -v ON_ERROR_STOP=1 -c "SELECT pg_stat_statements_reset();"
+```
+
+---
+
+## 7. Что обязательно поменять перед apply
+
+### В Secret
+Замени:
+- `CHANGE_ME_STRONG_PASSWORD`
+- `POSTGRES_HOST_OR_VIP`
+- `sslmode=require` при необходимости на `verify-full`, `prefer`, `disable`
+
+Пример:
+
+```yaml
+stringData:
+  SQL_EXPORTER_DSN: "postgresql://monitor_exporter:MyStrongPass@patroni-vip.db.svc.cluster.local:5432/postgres?sslmode=prefer"
+```
+
+### В ServiceMonitor
+Если у твоего Prometheus Operator другой label selector, поменяй:
+
+```yaml
+metadata:
+  labels:
+    release: kube-prometheus-stack
+```
+
+Обычно именно этот label нужен, если Prometheus установлен через `kube-prometheus-stack`.
+
+### В Job reset
+Оставь как manual-only. Автоматически его **не запускаем**.
+
+Если надо запустить вручную:
+
+```bash
+kubectl create job --from=job/postgres-pgstatstatements-reset-manual \
+  postgres-pgstatstatements-reset-manual-$(date +%s) -n monitoring
+```
+
+---
+
+## 8. Применение
+
+```bash
+kubectl apply -f 00-all-in-one.yaml
+```
+
+Проверка:
+
+```bash
+kubectl get pods -n monitoring
+kubectl get svc -n monitoring
+kubectl get servicemonitor -n monitoring
+kubectl get prometheusrule -n monitoring
+kubectl get configmap grafana-dashboard-postgres-pgstats -n monitoring
+```
+
+Логи exporter:
+
+```bash
+kubectl logs -n monitoring deploy/sql-exporter-postgres -f
+```
+
+Проверить метрики локально:
+
+```bash
+kubectl port-forward -n monitoring svc/sql-exporter-postgres 9399:9399
+curl -s http://127.0.0.1:9399/metrics | grep '^pg_db_'
+```
+
+---
+
+## 9. Что должно появиться в Prometheus
+
+Примеры запросов в Prometheus UI:
+
+```promql
+pg_db_statements_calls_total
+pg_db_statements_total_exec_time_ms_total
+pg_db_statements_avg_exec_time_ms
+pg_db_xact_commit_total
+pg_db_blks_hit_total
+pg_db_sessions
+pg_db_table_n_dead_tup
+pg_db_statements_dealloc_total
+```
+
+Если они есть — exporter работает.
+
+---
+
+## 10. Что делать в Grafana
+
+### Вариант A — если у тебя kube-prometheus-stack
+Обычно sidecar Grafana автоматически подхватывает `ConfigMap` с label:
+
+```yaml
+labels:
+  grafana_dashboard: "1"
+```
+
+Тогда dashboard появится сам.
+
+### Вариант B — если автоподхвата нет
+1. Открой Grafana.
+2. Убедись, что datasource `Prometheus` уже существует.
+3. Зайди в `Dashboards -> Import`.
+4. Скопируй JSON из `ConfigMap` `postgres-pgstats-overview.json`.
+5. Импортируй dashboard вручную.
+
+Проверка PromQL в Grafana:
+
+```promql
+sum by (db) (rate(pg_db_statements_calls_total[$__rate_interval]))
+```
+
+Если график строится — всё ок.
+
+---
+
+## 11. Почему reset по умолчанию не нужен
+
+Для Prometheus это накопительные счетчики. Значит правильные панели строятся через:
+
+```promql
+rate(metric[$__rate_interval])
+increase(metric[$__rate_interval])
+```
+
+Именно поэтому:
+- `calls_total` не сбрасываем;
+- `total_exec_time_ms_total` не сбрасываем;
+- `rows_total` не сбрасываем;
+- `xact_commit_total`, `blks_hit_total`, `temp_bytes_total` не сбрасываем.
+
+### Когда reset всё-таки можно делать
+Только в двух случаях:
+
+1. **Вручную после анализа**, когда нужно начать “с чистого листа”.
+2. Когда растет `pg_db_statements_dealloc_total`, и ты временно хочешь очистить накопленную статистику после увеличения `pg_stat_statements.max`.
+
+Но сначала лучше:
+- посмотреть `pg_db_statements_dealloc_total`;
+- увеличить `pg_stat_statements.max`;
+- только потом решать, нужен ли reset.
+
+---
+
+## 12. Как интерпретировать метрики
+
+### `SQL calls/sec by DB`
+Показывает, какая БД генерирует основной поток SQL.
+
+### `SQL execution time ms/sec by DB`
+Суммарная “стоимость” SQL во времени. Если растет — БД тратит больше времени на выполнение запросов.
+
+### `Average SQL execution time by DB`
+Считается корректно как:
+
+```promql
+increase(total_exec_time_ms_total) / increase(calls_total)
+```
+
+а не как “среднее из mean_exec_time”.
+
+### `Cache hit ratio by DB`
+Если начинает падать, возможны проблемы с кешированием, рост чтений с диска или изменение профиля запросов.
+
+### `Temp bytes/sec by DB`
+Хороший индикатор тяжелых sort/hash операций с выносом во временные файлы.
+
+### `Dead tuples` и `Autovacuum age`
+Нужны для контроля vacuum/analyze и общего здоровья таблиц.
+
+### `pg_stat_statements deallocations`
+Если растет — `pg_stat_statements.max` недостаточен, и старые statement entries вытесняются.
+
+---
+
+## 13. Команды для обслуживания
+
+### Проверить текущее состояние pg_stat_statements
+
+```sql
+SELECT * FROM pg_stat_statements_info;
+```
+
+### Проверить топ БД по общей SQL-нагрузке
+
+```sql
+SELECT
+    d.datname,
+    sum(s.calls) AS calls,
+    round(sum(s.total_exec_time)::numeric, 2) AS total_exec_time_ms,
+    round(
+      CASE WHEN sum(s.calls) = 0 THEN 0
+      ELSE sum(s.total_exec_time) / sum(s.calls)
+      END::numeric,
+      2
+    ) AS avg_exec_time_ms,
+    sum(s.rows) AS rows_total
+FROM pg_stat_statements s
+JOIN pg_database d ON d.oid = s.dbid
+GROUP BY d.datname
+ORDER BY total_exec_time_ms DESC;
+```
+
+### Ручной reset
+
+```sql
+SELECT pg_stat_statements_reset();
+```
+
+### Reset только min/max статистики (если версия PostgreSQL это поддерживает)
+
+```sql
+SELECT pg_stat_statements_reset(0, 0, 0, true);
+```
+
+---
+
+## 14. Troubleshooting
+
+### 14.1. В exporter нет метрик
+Проверить:
+
+```bash
+kubectl logs -n monitoring deploy/sql-exporter-postgres
+```
+
+Частые причины:
+- неверный DSN;
+- нет сетевой доступности до PostgreSQL;
+- неправильный `sslmode`;
+- у пользователя нет прав;
+- extension `pg_stat_statements` не создана в БД `postgres`.
+
+### 14.2. ServiceMonitor есть, но Prometheus не скрейпит
+Проверь:
+- selector label у `ServiceMonitor`;
+- label selector у самого Prometheus;
+- namespace selection;
+- target status в Prometheus UI.
+
+### 14.3. Dashboard не появился в Grafana
+Проверь:
+- есть ли sidecar для dashboard provisioning;
+- есть ли label `grafana_dashboard: "1"`;
+- есть ли datasource с именем `Prometheus`.
+
+### 14.4. Метрика deallocations растет
+Сделай так:
+1. увеличить `pg_stat_statements.max`;
+2. перезапустить PostgreSQL;
+3. посмотреть, прекратился ли рост `pg_db_statements_dealloc_total`;
+4. только потом при необходимости сделать manual reset.
+
+---
+
+## 15. Что я бы рекомендовал улучшить следующим этапом
+
+Когда базовый мониторинг заработает, можно добавить:
+- отдельный exporter/dashboard по `pg_stat_progress_vacuum`;
+- отдельный dashboard по replication lag;
+- collector по lock wait-ам;
+- collector по table/index size;
+- top-N normalized queries по `queryid` в отдельный SQL dashboard;
+- алерты на long idle in transaction.
+
+---
+
+## 16. Минимальный rollout plan
+
+1. Включить `pg_stat_statements` в PostgreSQL.
+2. Создать extension и пользователя мониторинга.
+3. Подставить реальные значения в Secret/Job.
+4. `kubectl apply -f 00-all-in-one.yaml`
+5. Проверить `/metrics` у exporter.
+6. Проверить targets в Prometheus.
+7. Проверить dashboard в Grafana.
+8. Несколько дней посмотреть на:
+   - latency,
+   - temp bytes,
+   - dead tuples,
+   - deallocations.
+9. При необходимости увеличить `pg_stat_statements.max`.
+10. Auto-reset **не включать**, пока не появится реальная причина.
+
+---
+
+## 17. Итоговое решение по reset
+
+**Для этого продового варианта правильная настройка такая:**
+- Prometheus собирает накопительные метрики;
+- Grafana строит rate/increase;
+- автоматический reset отключен;
+- reset только manual по необходимости.
+
+Это дает наиболее корректное отображение нагрузки **по каждой БД** без искажения графиков.
