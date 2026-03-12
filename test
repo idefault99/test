@@ -1,51 +1,9 @@
-test:
-  image: registry.test.model.svo.aero/dpm/airport_digital_ecosystem/aodb/mail-service:${TAG}
-  working_dir: /code/app
-  command: >
-    bash -c "pytest --junitxml=/code/app/artifacts/report.xml -v --cov --cov-report term --cov-report xml:/code/app/artifacts/coverage.xml"
-  volumes:
-    - ./.env:/code/.env
-    - ./artifacts:/code/app/artifacts
-  depends_on:
-    backend:
-      condition: service_healthy
-  env_file:
-    - .env
-  links:
-    - backend
-
----
-.test:
-  extends: .docker_compose_test
-  script:
-    - rm -rf ./artifacts
-    - mkdir -p ./artifacts
-    - chmod 777 ./artifacts
-    - export TAG=$(eval $TAG_SCRIPT)
-    - TEST_EXIT_CODE=0
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test || TEST_EXIT_CODE=$?
-    - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
-    - ls -lah ./artifacts || true
-    - wc -c ./artifacts/report.xml ./artifacts/coverage.xml || true
-    - sed -n '1,120p' ./artifacts/report.xml || true
-    - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
-    - exit $TEST_EXIT_CODE
-  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-  artifacts:
-    when: always
-    paths:
-      - ./artifacts/report.xml
-      - ./artifacts/coverage.xml
-    reports:
-      junit: ./artifacts/report.xml
-      coverage_report:
-        coverage_format: cobertura
-        path: ./artifacts/coverage.xml
-  after_script:
-    - >
-      if [ "$CI_JOB_STATUS" = "failed" ]; then
-        docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} logs
-      fi
-    - export TAG=$(eval $TAG_SCRIPT)
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} down
-    - docker volume prune -f
+SELECT pg_database.datname,
+sum(calls) as calls,
+TRUNC(sum(total_exec_time)::bigint) as sum_total_exec_time, 
+TRUNC(avg( min_exec_time )::bigint) as avg_min_exec_time,
+TRUNC(avg( max_exec_time )::bigint) as avg_max_exec_time,
+TRUNC(avg( mean_exec_time )::bigint) as avg_mean_exec_time
+FROM pg_stat_statements join pg_database on (pg_database.oid = pg_stat_statements.dbid)
+group by pg_database.datname
+order by sum_total_exec_time desc;
