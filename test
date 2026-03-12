@@ -1,426 +1,234 @@
-#!/usr/bin/env bash
-set -euo pipefail
+# https://gitlab.test.model.svo.aero/dpm/airport_digital_ecosystem/aodb/mail-service
+include:
+  - project: 'dpm/iac/infra'
+    ref: develop
+    file: 'cicd/basic.gitlab-ci.yml'
 
-PGHOST="${PGHOST:-127.0.0.1}"
-PGPORT="${PGPORT:-5000}"
-PGUSER="${PGUSER:-postgres}"
-PGPASSWORD="${PGPASSWORD:-postgres}"
-export PGPASSWORD
+variables:
+  RELEASE_NAME: mailservice
+  REGISTRY_PATH: mailservice/mailservice
 
-DEFAULT_DB="${DEFAULT_DB:-postgres}"
-CURRENT_DB="$DEFAULT_DB"
-LIMIT_ROWS="${LIMIT_ROWS:-50}"
+.buildkit_bin:
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG}.bin \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --target ${TARGET} \
+      --build-arg POETRY_PACKAGE_GROUPS=${PACKAGE_GROUPS} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg GITLAB_USERNAME=gitlab-ci-token \
+      --build-arg GITLAB_TOKEN=${CI_JOB_TOKEN} \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
 
-PSQL_BASE=(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -X -v ON_ERROR_STOP=1 -P pager=off)
+build_bin:
+  extends: .buildkit_bin
+  variables:
+    TARGET: production
+    PACKAGE_GROUPS: main,dev,test
 
-header() {
-  echo
-  echo "============================================================"
-  echo "$1"
-  echo "============================================================"
-}
+.buildkit_source:
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG} \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --target ${TARGET} \
+      --build-arg POETRY_PACKAGE_GROUPS=${PACKAGE_GROUPS} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg GITLAB_USERNAME=gitlab-ci-token \
+      --build-arg GITLAB_TOKEN=${CI_JOB_TOKEN} \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
 
-run_sql() {
-  local db="$1"
-  local sql="$2"
-  "${PSQL_BASE[@]}" -d "$db" -c "$sql"
-}
+build_source:
+  extends: .buildkit_source
+  variables:
+    TARGET: source
+    PACKAGE_GROUPS: main,dev,test
 
-run_sql_quiet() {
-  local db="$1"
-  local sql="$2"
-  "${PSQL_BASE[@]}" -d "$db" -A -t -c "$sql"
-}
+build_migrations:
+  extends: .buildkit_migrations
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/migrations.Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG}.migrations \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
 
-pause() {
-  echo
-  read -r -p "Нажми Enter для продолжения..." _
-}
+.test:
+  script:
+    - touch ./report.xml
+    - touch ./coverage.xml
+    - export TAG=$(eval $TAG_SCRIPT)
+    # Строка ниже явно не нужна, при поднятии test он поднимит все сервисы в depends on
+    # - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up -d --renew-anon-volumes --force-recreate --remove-orphans redis db web
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: ./report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: ./coverage.xml
+  after_script:
+    - >
+      if [ $CI_JOB_STATUS == 'failed' ]; then
+        docker compose -p ${CI_JOB_ID} logs $(docker compose -p ${CI_JOB_ID} ps --format json --status=exited | jq -r 'select(.ExitCode!=0) | .Service')
+      fi
+    - export TAG=$(eval $TAG_SCRIPT)
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} down
+    - docker volume prune -f
 
-check_connection() {
-  header "Проверка подключения"
-  run_sql "$CURRENT_DB" "
-    select
-      current_user as current_user,
-      current_database() as current_database,
-      inet_server_addr() as server_ip,
-      inet_server_port() as server_port,
-      version() as postgres_version,
-      pg_is_in_recovery() as is_replica,
-      now() as server_time;
-  "
-}
+test:
+  extends: .test
 
-select_database() {
-  header "Выбор БД"
+linter:
+  extends: .linter
 
-  mapfile -t DBS < <(run_sql_quiet postgres "
-    select datname
-    from pg_database
-    where datistemplate = false
-    order by datname;
-  ")
+.deploy:
+  script:
+    - |
+      helm upgrade -i -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
+        --set "images.main=${REGISTRY}:${TAG}.bin" \
+        --set "images.migrations=${REGISTRY}:${TAG}.migrations"
 
-  if [[ ${#DBS[@]} -eq 0 ]]; then
-    echo "Базы данных не найдены."
-    return
-  fi
+.base_publish_image:
+  script:
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - echo ${REGISTRY_PASSWORD} | docker login -u ${REGISTRY_LOGIN} $EXTERNAL_REGISTRY --password-stdin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}.bin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}.migrations
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.bin ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.migrations ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.migrations
+    - docker push ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin
+    - docker push ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.migrations
+    - docker image rm ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin || exit 0
+    - docker image rm ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.migrations || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG}.bin || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG}.migrations || exit 0
 
-  local i=1
-  for db in "${DBS[@]}"; do
-    echo "  $i) $db"
-    ((i++))
-  done
+# Задача DEVOPS-310
+.base_publish_image_svo:
+  script:
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - echo ${REGISTRY_PASSWORD} | docker login -u ${REGISTRY_LOGIN} $EXTERNAL_REGISTRY --password-stdin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}.bin
+    - docker pull ${CI_REGISTRY_IMAGE}:${TAG}.migrations
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.bin ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.migrations ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.migrations
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.bin ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE}:${TAG}.bin
+    - docker tag ${CI_REGISTRY_IMAGE}:${TAG}.migrations ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE}:${TAG}.migrations
+    - docker push ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin
+    - docker push ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.migrations
+    - docker push ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE}:${TAG}.bin
+    - docker push ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE}:${TAG}.migrations
+    - docker image rm ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.bin || exit 0
+    - docker image rm ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}:${TAG}.migrations || exit 0
+    - docker image rm ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE}:${TAG}.bin || exit 0
+    - docker image rm ${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH_TO_REP_IMAGE}:${TAG}.migrations || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG}.bin || exit 0
+    - docker image rm ${CI_REGISTRY_IMAGE}:${TAG}.migrations || exit 0
 
-  echo
-  read -r -p "Введи номер БД: " db_num
+---
+services:
+  backend:
+    image: registry.test.model.svo.aero/dpm/airport_digital_ecosystem/aodb/mail-service:${TAG}
+    working_dir: /code/app
+    command: bash -c "uvicorn main:app --host 0.0.0.0 --port ${APP_PORT}"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    healthcheck:
+      test: wget --no-verbose -O /dev/null --tries=1 http://localhost:8000${APP_API_PREFIX}/healthcheck || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  if [[ ! "$db_num" =~ ^[0-9]+$ ]]; then
-    echo "Некорректный ввод."
-    return
-  fi
+  migrations:
+    image: registry.test.model.svo.aero/dpm/airport_digital_ecosystem/aodb/mail-service:${TAG}.migrations
+    working_dir: /code
+    command: bash -c "alembic upgrade head"
+    volumes:
+      - ./.env:/code/.env
+      - ./alembic.ini:/code/alembic.ini
+      - ./migrations/:/code/migrations/
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
 
-  if (( db_num < 1 || db_num > ${#DBS[@]} )); then
-    echo "Нет такого номера."
-    return
-  fi
+  test:
+    image: registry.test.model.svo.aero/dpm/airport_digital_ecosystem/aodb/mail-service:${TAG}
+    working_dir: /code/app
+    command: bash -c "pytest --junitxml=report.xml -v --cov --cov-report term --cov-report xml:coverage.xml"
+    volumes:
+      - ./.env:/code/.env
+      - ./report.xml:/code/app/report.xml
+      - ./coverage.xml:/code/app/coverage.xml
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - .env
+    links:
+      - backend
 
-  CURRENT_DB="${DBS[$((db_num-1))]}"
-  echo "Выбрана БД: $CURRENT_DB"
-}
+  ruff:
+    image: registry.test.model.svo.aero/dpm/airport_digital_ecosystem/aodb/mail-service:${TAG}
+    working_dir: /code
+    command: bash -c "ruff check . --output-format gitlab > code_quality.json"
+    volumes:
+      - ./code_quality.json:/code/code_quality.json
+      - ./ruff.toml:/code/ruff.toml
 
-show_pg_stats() {
-  header "pg_stats | БД: $CURRENT_DB | limit $LIMIT_ROWS"
-  run_sql "$CURRENT_DB" "
-    select
-      schemaname,
-      tablename,
-      attname,
-      inherited,
-      null_frac,
-      n_distinct,
-      most_common_vals,
-      most_common_freqs,
-      histogram_bounds,
-      correlation
-    from pg_stats
-    order by schemaname, tablename, attname
-    limit ${LIMIT_ROWS};
-  "
-}
+  db:
+    image: registry.test.model.svo.aero/dpm/iac/infra:postgres-16-alpine
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "${DB_NAME}", "-U", "${DB_USER}" ]
+      interval: 2s
+      timeout: 2s
+      retries: 20
 
-show_pg_stats_table() {
-  header "pg_stats по конкретной таблице"
-
-  read -r -p "Схема [public]: " schema
-  schema="${schema:-public}"
-
-  read -r -p "Имя таблицы: " table
-
-  if [[ -z "${table// }" ]]; then
-    echo "Имя таблицы не задано."
-    return
-  fi
-
-  run_sql "$CURRENT_DB" "
-    select
-      schemaname,
-      tablename,
-      attname,
-      inherited,
-      null_frac,
-      n_distinct,
-      avg_width,
-      correlation,
-      most_common_vals,
-      most_common_freqs,
-      histogram_bounds
-    from pg_stats
-    where schemaname = '${schema}'
-      and tablename = '${table}'
-    order by attname;
-  "
-}
-
-show_pg_stat_activity() {
-  header "pg_stat_activity"
-  run_sql "$CURRENT_DB" "
-    select
-      pid,
-      usename,
-      datname,
-      application_name,
-      client_addr,
-      state,
-      wait_event_type,
-      wait_event,
-      now() - query_start as duration,
-      left(query, 250) as query
-    from pg_stat_activity
-    order by query_start nulls last
-    limit ${LIMIT_ROWS};
-  "
-}
-
-show_pg_stat_database() {
-  header "pg_stat_database"
-  run_sql "$CURRENT_DB" "
-    select
-      datname,
-      numbackends,
-      xact_commit,
-      xact_rollback,
-      blks_read,
-      blks_hit,
-      tup_returned,
-      tup_fetched,
-      tup_inserted,
-      tup_updated,
-      tup_deleted,
-      conflicts,
-      temp_files,
-      temp_bytes,
-      deadlocks,
-      checksum_failures,
-      blk_read_time,
-      blk_write_time,
-      stats_reset
-    from pg_stat_database
-    order by datname;
-  "
-}
-
-show_pg_stat_user_tables() {
-  header "pg_stat_user_tables | БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      schemaname,
-      relname,
-      seq_scan,
-      seq_tup_read,
-      idx_scan,
-      idx_tup_fetch,
-      n_tup_ins,
-      n_tup_upd,
-      n_tup_del,
-      n_live_tup,
-      n_dead_tup,
-      vacuum_count,
-      autovacuum_count,
-      analyze_count,
-      autoanalyze_count,
-      last_vacuum,
-      last_autovacuum,
-      last_analyze,
-      last_autoanalyze
-    from pg_stat_user_tables
-    order by n_dead_tup desc nulls last
-    limit ${LIMIT_ROWS};
-  "
-}
-
-show_pg_stat_user_indexes() {
-  header "pg_stat_user_indexes | БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      schemaname,
-      relname as table_name,
-      indexrelname as index_name,
-      idx_scan,
-      idx_tup_read,
-      idx_tup_fetch
-    from pg_stat_user_indexes
-    order by idx_scan desc nulls last
-    limit ${LIMIT_ROWS};
-  "
-}
-
-show_pg_statio_user_tables() {
-  header "pg_statio_user_tables | БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      schemaname,
-      relname,
-      heap_blks_read,
-      heap_blks_hit,
-      idx_blks_read,
-      idx_blks_hit,
-      toast_blks_read,
-      toast_blks_hit,
-      tidx_blks_read,
-      tidx_blks_hit
-    from pg_statio_user_tables
-    order by heap_blks_read desc nulls last
-    limit ${LIMIT_ROWS};
-  "
-}
-
-show_pg_statio_user_indexes() {
-  header "pg_statio_user_indexes | БД: $CURRENT_DB"
-  run_sql "$CURRENT_DB" "
-    select
-      schemaname,
-      relname as table_name,
-      indexrelname as index_name,
-      idx_blks_read,
-      idx_blks_hit
-    from pg_statio_user_indexes
-    order by idx_blks_read desc nulls last
-    limit ${LIMIT_ROWS};
-  "
-}
-
-show_pg_stat_bgwriter() {
-  header "pg_stat_bgwriter"
-  run_sql "$CURRENT_DB" "
-    select *
-    from pg_stat_bgwriter;
-  "
-}
-
-show_pg_stat_wal() {
-  header "pg_stat_wal"
-  run_sql "$CURRENT_DB" "
-    select *
-    from pg_stat_wal;
-  "
-}
-
-show_pg_stat_replication() {
-  header "pg_stat_replication"
-  run_sql "$CURRENT_DB" "
-    select *
-    from pg_stat_replication;
-  "
-}
-
-show_pg_stat_archiver() {
-  header "pg_stat_archiver"
-  run_sql "$CURRENT_DB" "
-    select *
-    from pg_stat_archiver;
-  "
-}
-
-show_pg_stat_ssl() {
-  header "pg_stat_ssl"
-  run_sql "$CURRENT_DB" "
-    select *
-    from pg_stat_ssl
-    limit ${LIMIT_ROWS};
-  "
-}
-
-show_pg_stat_statements() {
-  header "pg_stat_statements"
-
-  local exists
-  exists="$(run_sql_quiet "$CURRENT_DB" "
-    select count(*)
-    from pg_extension
-    where extname = 'pg_stat_statements';
-  ")"
-
-  if [[ "${exists:-0}" != "1" ]]; then
-    echo "Расширение pg_stat_statements не установлено в БД $CURRENT_DB."
-    echo "Нужно создать extension и обычно добавить его в shared_preload_libraries."
-    return
-  fi
-
-  run_sql "$CURRENT_DB" "
-    select
-      userid,
-      dbid,
-      queryid,
-      calls,
-      total_exec_time,
-      mean_exec_time,
-      rows,
-      shared_blks_hit,
-      shared_blks_read,
-      temp_blks_written,
-      left(query, 250) as query
-    from pg_stat_statements
-    order by total_exec_time desc
-    limit ${LIMIT_ROWS};
-  "
-}
-
-run_custom_sql() {
-  header "Выполнить SQL в БД: $CURRENT_DB"
-  echo "Введи SQL одной строкой."
-  echo
-
-  read -r -p "SQL> " user_sql
-
-  if [[ -z "${user_sql// }" ]]; then
-    echo "Пустой запрос."
-    return
-  fi
-
-  run_sql "$CURRENT_DB" "$user_sql"
-}
-
-change_limit() {
-  echo
-  read -r -p "Новый LIMIT_ROWS (текущее: $LIMIT_ROWS): " new_limit
-  if [[ "$new_limit" =~ ^[0-9]+$ ]] && (( new_limit > 0 )); then
-    LIMIT_ROWS="$new_limit"
-    echo "Новое значение LIMIT_ROWS: $LIMIT_ROWS"
-  else
-    echo "Некорректное число."
-  fi
-}
-
-main_menu() {
-  while true; do
-    header "Postgres stats menu | host=$PGHOST port=$PGPORT user=$PGUSER current_db=$CURRENT_DB limit=$LIMIT_ROWS"
-    echo "1) Проверить подключение"
-    echo "2) Показать pg_stats"
-    echo "3) Показать pg_stats по конкретной таблице"
-    echo "4) Показать pg_stat_activity"
-    echo "5) Показать pg_stat_database"
-    echo "6) Показать pg_stat_user_tables"
-    echo "7) Показать pg_stat_user_indexes"
-    echo "8) Показать pg_statio_user_tables"
-    echo "9) Показать pg_statio_user_indexes"
-    echo "10) Показать pg_stat_bgwriter"
-    echo "11) Показать pg_stat_wal"
-    echo "12) Показать pg_stat_replication"
-    echo "13) Показать pg_stat_archiver"
-    echo "14) Показать pg_stat_ssl"
-    echo "15) Показать pg_stat_statements"
-    echo "16) Выполнить SQL"
-    echo "17) Сменить БД"
-    echo "18) Изменить LIMIT"
-    echo "0) Выход"
-    echo
-
-    read -r -p "Выбери пункт меню: " choice
-
-    case "$choice" in
-      1) check_connection; pause ;;
-      2) show_pg_stats; pause ;;
-      3) show_pg_stats_table; pause ;;
-      4) show_pg_stat_activity; pause ;;
-      5) show_pg_stat_database; pause ;;
-      6) show_pg_stat_user_tables; pause ;;
-      7) show_pg_stat_user_indexes; pause ;;
-      8) show_pg_statio_user_tables; pause ;;
-      9) show_pg_statio_user_indexes; pause ;;
-      10) show_pg_stat_bgwriter; pause ;;
-      11) show_pg_stat_wal; pause ;;
-      12) show_pg_stat_replication; pause ;;
-      13) show_pg_stat_archiver; pause ;;
-      14) show_pg_stat_ssl; pause ;;
-      15) show_pg_stat_statements; pause ;;
-      16) run_custom_sql; pause ;;
-      17) select_database; pause ;;
-      18) change_limit; pause ;;
-      0) echo "Выход."; exit 0 ;;
-      *) echo "Неизвестный пункт меню."; pause ;;
-    esac
-  done
-}
-
-main_menu
+  redis:
+    image: registry.test.model.svo.aero/dpm/iac/infra:redis-7.0.11
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
