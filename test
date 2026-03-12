@@ -1,9 +1,25 @@
-SELECT pg_database.datname,
-sum(calls) as calls,
-TRUNC(sum(total_exec_time)::bigint) as sum_total_exec_time, 
-TRUNC(avg( min_exec_time )::bigint) as avg_min_exec_time,
-TRUNC(avg( max_exec_time )::bigint) as avg_max_exec_time,
-TRUNC(avg( mean_exec_time )::bigint) as avg_mean_exec_time
-FROM pg_stat_statements join pg_database on (pg_database.oid = pg_stat_statements.dbid)
-group by pg_database.datname
-order by sum_total_exec_time desc;
+123test
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+test
+
+
+yaml
+
+
+
+
+
