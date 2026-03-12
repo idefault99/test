@@ -1,18 +1,7 @@
--[ RECORD 1 ]---+--------------------------------------------------​------------------
-query           | UPDATE pgbench_tellers SET tbalance = tbalance + $1 WHERE tid = $2
-calls           | 3000
-total_exec_time | 20756.669379
-rows            | 3000
-hit_percent     | 100.0000000000000000
--[ RECORD 2 ]---+--------------------------------------------------​------------------
-query           | copy pgbench_accounts from stdin
-calls           | 1
-total_exec_time | 291.865911
-rows            | 100000
-hit_percent     | 100.0000000000000000
--[ RECORD 3 ]---+--------------------------------------------------​------------------
-query           | UPDATE pgbench_accounts SET abalance = abalance + $1 WHERE aid = $2
-calls           | 3000
-total_exec_time | 271.232977
-rows            | 3000
-hit_percent     | 98.8454011741682975
+Test
+Hello
+
+
+
+
+W`
