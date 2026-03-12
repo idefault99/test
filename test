@@ -1,7 +1,7 @@
-Test
-Hello
-
-
-
-
-W`
+ARGS=(
+    -X PUT
+    "repos/$OWNER/$REPO/contents/$PATH_IN_REPO"
+    -f message="Update file via API"
+    -f content="$CONTENT"
+    -f branch="$BRANCH"
+)
