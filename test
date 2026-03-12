@@ -1,30 +1,46 @@
+test:
+  image: registry.test.model.svo.aero/dpm/airport_digital_ecosystem/aodb/mail-service:${TAG}
+  working_dir: /code/app
+  command: >
+    bash -c "pytest --junitxml=/code/app/artifacts/report.xml -v --cov --cov-report term --cov-report xml:/code/app/artifacts/coverage.xml"
+  volumes:
+    - ./.env:/code/.env
+    - ./artifacts:/code/app/artifacts
+  depends_on:
+    backend:
+      condition: service_healthy
+  env_file:
+    - .env
+  links:
+    - backend
+
+---
 .test:
   extends: .docker_compose_test
   script:
-    - rm -f ./report.xml ./coverage.xml
-    - touch ./report.xml ./coverage.xml
-    - chmod 666 ./report.xml ./coverage.xml
+    - rm -rf ./artifacts
+    - mkdir -p ./artifacts
+    - chmod 777 ./artifacts
     - export TAG=$(eval $TAG_SCRIPT)
     - TEST_EXIT_CODE=0
     - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test || TEST_EXIT_CODE=$?
     - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
-    - ls -lah ./report.xml ./coverage.xml || true
-    - wc -c ./report.xml ./coverage.xml || true
-    - sed -n '1,120p' ./report.xml || true
-    - sed -n '1,120p' ./coverage.xml || true
-    - sed -i 's|" filename="|" filename="src/|g' ./coverage.xml || true
+    - ls -lah ./artifacts || true
+    - wc -c ./artifacts/report.xml ./artifacts/coverage.xml || true
+    - sed -n '1,120p' ./artifacts/report.xml || true
+    - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
     - exit $TEST_EXIT_CODE
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
     paths:
-      - ./report.xml
-      - ./coverage.xml
+      - ./artifacts/report.xml
+      - ./artifacts/coverage.xml
     reports:
-      junit: ./report.xml
+      junit: ./artifacts/report.xml
       coverage_report:
         coverage_format: cobertura
-        path: ./coverage.xml
+        path: ./artifacts/coverage.xml
   after_script:
     - >
       if [ "$CI_JOB_STATUS" = "failed" ]; then
@@ -33,6 +49,3 @@
     - export TAG=$(eval $TAG_SCRIPT)
     - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} down
     - docker volume prune -f
-
-test:
-  extends: .test
