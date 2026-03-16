@@ -1,0 +1,424 @@
+# Проверка корректности данных в Grafana — PostgreSQL + Patroni
+
+> **Метод:** сравнение одной и той же метрики из трёх источников — прямой SQL, Prometheus, Grafana
+
+-----
+
+## Уровень 1: Сравнить Grafana с прямым SQL
+
+Самая надёжная проверка — взять метрику с графика и проверить её напрямую в PostgreSQL.
+
+### Подключение к PRIMARY
+
+```bash
+# Всегда сначала проверить кто primary
+patronictl -c /etc/patroni/patroni.yml list
+
+# Подключиться
+sudo -u postgres psql -h 127.0.0.1 -p 5432
+```
+
+-----
+
+### Активные соединения
+
+```sql
+-- Сравнить с панелью pg_stat_database_custom_numbackends в Grafana
+SELECT
+  datname,
+  numbackends
+FROM pg_stat_database
+WHERE datname NOT IN ('template0', 'template1')
+  AND datname IS NOT NULL
+ORDER BY numbackends DESC;
+```
+
+```sql
+-- Детально — что именно за соединения
+SELECT
+  datname,
+  state,
+  count(*) AS count
+FROM pg_stat_activity
+WHERE datname IS NOT NULL
+GROUP BY datname, state
+ORDER BY count DESC;
+```
+
+-----
+
+### pg_stat_statements — топ запросов
+
+```sql
+-- Сравнить с панелью топ запросов по total_exec_time в Grafana
+SELECT
+  d.datname,
+  left(regexp_replace(s.query, '\s+', ' ', 'g'), 80) AS query,
+  s.calls,
+  round((s.total_exec_time / 1000.0)::numeric, 2) AS total_exec_sec,
+  round((s.mean_exec_time  / 1000.0)::numeric, 2) AS mean_exec_sec
+FROM pg_stat_statements s
+JOIN pg_database d ON d.oid = s.dbid
+WHERE d.datname NOT IN ('template0', 'template1')
+  AND s.calls > 5
+ORDER BY s.total_exec_time DESC
+LIMIT 10;
+```
+
+-----
+
+### Cache hit ratio
+
+```sql
+-- Сравнить с панелью cache_hit_ratio в Grafana
+SELECT
+  datname,
+  round(
+    blks_hit * 100.0 / NULLIF(blks_hit + blks_read, 0), 2
+  ) AS cache_hit_ratio
+FROM pg_stat_database
+WHERE datname NOT IN ('template0', 'template1')
+  AND (blks_hit + blks_read) > 0
+ORDER BY cache_hit_ratio ASC;
+```
+
+-----
+
+### Dead tuples
+
+```sql
+-- Сравнить с панелью dead tuples в Grafana
+SELECT
+  schemaname,
+  relname,
+  n_dead_tup,
+  n_live_tup
+FROM pg_stat_user_tables
+WHERE schemaname NOT IN ('pg_catalog', 'information_schema', '_timescaledb_internal')
+ORDER BY n_dead_tup DESC
+LIMIT 10;
+```
+
+-----
+
+### Размер БД
+
+```sql
+-- Сравнить с панелью database size в Grafana
+SELECT
+  datname,
+  round(pg_database_size(datname) / 1024.0 / 1024 / 1024, 3) AS size_gb
+FROM pg_database
+WHERE datname NOT IN ('template0', 'template1')
+ORDER BY size_gb DESC;
+```
+
+-----
+
+### Лаг репликации
+
+```sql
+-- Сравнить с панелью pg_replication_custom_replay_lag_bytes в Grafana
+-- Выполнять только на PRIMARY — на реплике будет пустой результат
+SELECT
+  client_addr,
+  application_name,
+  state,
+  sync_state,
+  (sent_lsn - write_lsn)::bigint  AS write_lag_bytes,
+  (sent_lsn - flush_lsn)::bigint  AS flush_lag_bytes,
+  (sent_lsn - replay_lsn)::bigint AS replay_lag_bytes
+FROM pg_stat_replication;
+```
+
+-----
+
+### Idle in transaction
+
+```sql
+-- Сравнить с панелью pg_idle_in_transaction_count в Grafana
+SELECT
+  datname,
+  count(*) AS count,
+  max(extract(epoch from (now() - state_change)))::int AS max_idle_seconds
+FROM pg_stat_activity
+WHERE state = 'idle in transaction'
+  AND datname IS NOT NULL
+GROUP BY datname;
+```
+
+-----
+
+### Блокировки
+
+```sql
+-- Сравнить с панелью pg_locks_custom_count в Grafana
+SELECT
+  d.datname,
+  l.mode,
+  count(*) AS count
+FROM pg_locks l
+LEFT JOIN pg_database d ON l.database = d.oid
+WHERE d.datname IS NOT NULL
+GROUP BY d.datname, l.mode
+ORDER BY count DESC;
+```
+
+-----
+
+## Уровень 2: Сравнить Grafana с Prometheus напрямую
+
+Открыть Prometheus Explore (`http://localhost:9090/graph`) и выполнить те же PromQL что используются в Grafana. Если в Grafana и Prometheus одинаково — данные доходят корректно.
+
+```promql
+# Активные соединения
+pg_stat_database_custom_numbackends{datname!="", datname!~"template.*"}
+
+# Cache hit ratio
+pg_stat_database_custom_cache_hit_ratio{datname!=""}
+
+# Размер БД в GB
+pg_database_size_custom_size_bytes / 1024 / 1024 / 1024
+
+# Топ запросов по времени
+topk(10, pg_stat_statements_custom_total_exec_time_seconds{datname!=""})
+
+# Idle in transaction
+pg_idle_in_transaction_count{datname!=""}
+
+# Лаг репликации
+pg_replication_custom_replay_lag_bytes
+
+# Dead tuples топ таблиц
+topk(10, pg_stat_user_tables_custom_n_dead_tup)
+```
+
+-----
+
+## Уровень 3: Проверить что экспортёр не теряет данные
+
+```bash
+# Сколько метрик собирается всего
+curl -s http://localhost:9187/metrics | grep -c "^pg_"
+
+# Убедиться что все кастомные метрики присутствуют
+curl -s http://localhost:9187/metrics \
+  | grep -E "^pg_stat_database_custom|^pg_stat_statements_custom|^pg_idle_in_transaction|^pg_replication_custom|^pg_long_running" \
+  | grep -v "^#" \
+  | head -30
+
+# Главная проверка — нет ли ошибок в scrape
+curl -s http://localhost:9187/metrics | grep "pg_exporter_last_scrape_error"
+# Должно быть: pg_exporter_last_scrape_error 0
+
+# Время последнего scrape (должно быть < 10 секунд)
+curl -s http://localhost:9187/metrics | grep "pg_exporter_last_scrape_duration"
+
+# Проверить второй кластер
+curl -s http://localhost:9188/metrics | grep "pg_exporter_last_scrape_error"
+```
+
+-----
+
+## Уровень 4: Создать искусственную нагрузку и проследить в Grafana
+
+Самая наглядная проверка — создать событие и увидеть его на графике.
+
+### Проверить счётчик соединений
+
+```bash
+# Открыть 10 соединений на 60 секунд
+# В соседнем терминале смотреть на график active connections в Grafana
+# Должен появиться чёткий всплеск для БД postgres
+
+for i in $(seq 1 10); do
+  sudo -u postgres psql -h 127.0.0.1 -p 5432 -d postgres \
+    -c "SELECT pg_sleep(60);" &
+done
+
+# Подождать 15-30 секунд — всплеск должен появиться на графике
+
+# После проверки убить все фоновые процессы
+kill $(jobs -p)
+```
+
+-----
+
+### Проверить pg_stat_statements
+
+```bash
+# Выполнить запрос 20 раз чтобы он появился в топе
+for i in $(seq 1 20); do
+  sudo -u postgres psql -h 127.0.0.1 -p 5432 -d postgres \
+    -c "SELECT count(*) FROM pg_stat_activity;" > /dev/null
+done
+
+# Проверить что запрос появился в pg_stat_statements
+sudo -u postgres psql -h 127.0.0.1 -p 5432 -c "
+  SELECT
+    left(query, 60) AS query,
+    calls,
+    round((mean_exec_time)::numeric, 2) AS mean_ms
+  FROM pg_stat_statements
+  WHERE query LIKE '%pg_stat_activity%'
+  ORDER BY calls DESC
+  LIMIT 5;
+"
+
+# Этот же запрос должен появиться в панели топ запросов в Grafana
+# через 15 секунд (интервал scrape)
+```
+
+-----
+
+### Проверить TPS панель через pgbench
+
+```bash
+# Если pgbench не установлен
+sudo apt install postgresql-contrib
+
+# Инициализировать тестовые таблицы (только первый раз)
+sudo -u postgres pgbench -h 127.0.0.1 -p 5432 -d postgres -i 2>/dev/null
+
+# Создать нагрузку на 60 секунд — 5 клиентов, 2 потока
+sudo -u postgres pgbench -h 127.0.0.1 -p 5432 -d postgres \
+  -c 5 -j 2 -T 60
+
+# TPS панель в Grafana должна показать всплеск xact_commit
+# Панель active connections должна показать +5 соединений для postgres
+```
+
+-----
+
+### Проверить idle in transaction
+
+```bash
+# Создать соединение в состоянии idle in transaction
+sudo -u postgres psql -h 127.0.0.1 -p 5432 -d postgres <<'EOF'
+BEGIN;
+SELECT pg_sleep(60);
+EOF
+# Не завершать — оставить висеть
+
+# В другом терминале проверить SQL
+sudo -u postgres psql -h 127.0.0.1 -p 5432 -c "
+  SELECT datname, state, count(*)
+  FROM pg_stat_activity
+  WHERE state = 'idle in transaction'
+  GROUP BY datname, state;
+"
+
+# Панель pg_idle_in_transaction_count должна показать 1
+# Через 10 минут PostgreSQL убьёт сессию автоматически (idle_in_transaction_session_timeout=10min)
+```
+
+-----
+
+## Чеклист — что должно совпадать
+
+|Панель в Grafana     |SQL для проверки                                    |Допустимое расхождение                      |
+|---------------------|----------------------------------------------------|--------------------------------------------|
+|`numbackends`        |`pg_stat_database.numbackends`                      |0 — данные статичны в момент снятия         |
+|`cache_hit_ratio`    |`blks_hit / (blks_hit + blks_read) * 100`           |±0.1%                                       |
+|`size_gb`            |`pg_database_size() / 1024^3`                       |0                                           |
+|`n_dead_tup`         |`pg_stat_user_tables.n_dead_tup`                    |0                                           |
+|`replay_lag_bytes`   |`pg_stat_replication.sent_lsn - replay_lsn`         |0                                           |
+|`idle_in_transaction`|`pg_stat_activity WHERE state='idle in transaction'`|0                                           |
+|TPS                  |Считается через `rate()`                            |Небольшое — `rate()` сглаживает за окно [5m]|
+|Топ запросов         |`pg_stat_statements ORDER BY total_exec_time DESC`  |±1-2 позиции — scrape каждые 15 сек         |
+
+-----
+
+## Красные флаги — что говорит о проблеме
+
+### Ошибка scrape
+
+```bash
+curl -s http://localhost:9187/metrics | grep "pg_exporter_last_scrape_error"
+# Если значение не 0:
+sudo journalctl -u postgres_exporter_cluster1 -n 50 --no-pager
+```
+
+-----
+
+### Метрика есть в Prometheus но не отображается в Grafana
+
+```bash
+# Проверить точное имя метрики как оно приходит от экспортёра
+curl -s http://localhost:9187/metrics \
+  | grep "^pg_stat_database_custom" \
+  | grep -v "^#" \
+  | head -5
+
+# Пример вывода:
+# pg_stat_database_custom_numbackends{datname="mydb",...} 42
+# Имя в PromQL должно совпадать символ в символ
+```
+
+-----
+
+### Данные есть но не обновляются (график стоит на месте)
+
+```bash
+# Проверить время последнего успешного scrape
+curl -s 'http://localhost:9090/api/v1/query?query=pg_exporter_last_scrape_duration_seconds' \
+  | python3 -m json.tool | grep -A2 '"value"'
+
+# Проверить что target UP в Prometheus
+curl -s http://localhost:9090/api/v1/targets \
+  | python3 -m json.tool \
+  | grep -E '"health"|"scrapeUrl"|"lastError"'
+```
+
+-----
+
+### Разные значения на двух кластерах когда должны быть похожи
+
+```bash
+# Проверить — возможно один экспортёр подключён к реплике вместо primary
+patronictl -c /etc/patroni/patroni.yml list
+
+# На реплике pg_stat_replication будет пустым
+curl -s http://localhost:9187/metrics | grep "pg_replication_custom"
+curl -s http://localhost:9188/metrics | grep "pg_replication_custom"
+# У кластера где нет реплик или экспортёр на реплике — строк не будет
+```
+
+-----
+
+### Значение в Grafana сильно отличается от SQL
+
+```bash
+# Проверить задержку между реальностью и тем что видит Prometheus
+# Разница должна быть не более одного интервала scrape (15 секунд)
+
+# Посмотреть сырое значение прямо сейчас
+curl -s 'http://localhost:9090/api/v1/query?query=pg_stat_database_custom_numbackends{datname="postgres"}' \
+  | python3 -m json.tool
+
+# Сравнить с SQL
+sudo -u postgres psql -h 127.0.0.1 -p 5432 \
+  -c "SELECT numbackends FROM pg_stat_database WHERE datname='postgres';"
+```
+
+-----
+
+## Итоговый порядок проверки
+
+```
+1. curl метрики с экспортёра           → данные вообще собираются?
+        ↓ да
+2. pg_exporter_last_scrape_error = 0   → нет ошибок подключения к PG?
+        ↓ да
+3. Prometheus /targets все UP          → Prometheus забирает метрики?
+        ↓ да
+4. PromQL в Prometheus Explore         → запрос возвращает данные?
+        ↓ да
+5. Тот же PromQL в Grafana             → данные отображаются на графике?
+        ↓ да
+6. Сравнить с прямым SQL               → цифры совпадают?
+        ↓ да
+7. Искусственная нагрузка              → всплеск виден на графике в реальном времени?
+```
+
+Если на каком-то шаге данные пропадают — проблема именно на этом переходе.
