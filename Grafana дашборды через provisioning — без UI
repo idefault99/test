@@ -1,0 +1,1277 @@
+# Grafana дашборды через provisioning — без UI
+
+> Все дашборды создаются через JSON файлы на сервере. Grafana подхватывает их автоматически при старте или перезагрузке provisioning.
+
+-----
+
+## Как работает provisioning
+
+```
+/etc/grafana/provisioning/
+    ├── dashboards/
+    │   └── postgresql.yaml        ← говорит Grafana где искать JSON файлы
+    └── datasources/
+        └── prometheus.yaml        ← источник данных Prometheus
+        
+/var/lib/grafana/dashboards/       ← сюда кладём JSON файлы дашбордов
+    ├── 01_overview.json
+    ├── 02_connections.json
+    ├── 03_queries.json
+    ├── 04_replication.json
+    └── 05_vacuum.json
+```
+
+Grafana читает YAML конфиг → находит папку с JSON → загружает дашборды.
+При изменении JSON файла достаточно перезагрузить Grafana — UI не нужен.
+
+-----
+
+## Шаг 1. Создать структуру директорий
+
+```bash
+sudo mkdir -p /etc/grafana/provisioning/dashboards
+sudo mkdir -p /etc/grafana/provisioning/datasources
+sudo mkdir -p /var/lib/grafana/dashboards
+sudo chown -R grafana:grafana /var/lib/grafana/dashboards
+```
+
+-----
+
+## Шаг 2. Datasource — Prometheus
+
+```bash
+sudo tee /etc/grafana/provisioning/datasources/prometheus.yaml > /dev/null <<'EOF'
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: POST
+EOF
+```
+
+-----
+
+## Шаг 3. Provisioning конфиг для дашбордов
+
+```bash
+sudo tee /etc/grafana/provisioning/dashboards/postgresql.yaml > /dev/null <<'EOF'
+apiVersion: 1
+
+providers:
+  - name: PostgreSQL Dashboards
+    orgId: 1
+    folder: PostgreSQL
+    folderUid: postgresql-monitoring
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
+EOF
+```
+
+-----
+
+## Шаг 4. JSON файлы дашбордов
+
+### Дашборд 1: Overview — общая картина кластеров
+
+**Для чего:** первый экран при открытии мониторинга. Показывает здоровье обоих кластеров Patroni одним взглядом — суммарные соединения, TPS, cache hit, размеры БД, deadlocks. Позволяет быстро понять есть ли проблема не вникая в детали.
+
+```bash
+sudo tee /var/lib/grafana/dashboards/01_overview.json > /dev/null <<'EOF'
+{
+  "uid": "pg-overview",
+  "title": "PostgreSQL — Overview",
+  "description": "Общая картина обоих кластеров Patroni",
+  "tags": ["postgresql", "patroni", "overview"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Кластер",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_stat_database_custom_numbackends, patroni_cluster)",
+        "multi": true,
+        "includeAll": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Суммарные активные соединения",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(pg_stat_database_custom_numbackends{datname!='', datname!~'template.*', patroni_cluster=~'$cluster'})",
+          "legendFormat": "Всего соединений"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 1350 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Утилизация max_connections (%)",
+      "type": "gauge",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(pg_stat_database_custom_numbackends{datname!='', patroni_cluster=~'$cluster'}) / 1500 * 100",
+          "legendFormat": "% от 1500"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "TPS (транзакций в секунду)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(pg_stat_database_custom_xact_commit{datname!='', patroni_cluster=~'$cluster'}[5m]) + rate(pg_stat_database_custom_xact_rollback{datname!='', patroni_cluster=~'$cluster'}[5m]))",
+          "legendFormat": "TPS"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Deadlocks (в секунду)",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(pg_stat_database_custom_deadlocks{datname!='', patroni_cluster=~'$cluster'}[5m]))",
+          "legendFormat": "Deadlocks/sec"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Активные соединения по БД",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_stat_database_custom_numbackends{datname!='', datname!~'template.*', patroni_cluster=~'$cluster'}",
+          "legendFormat": "{{patroni_cluster}} / {{datname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never"
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Cache Hit Ratio по БД (%)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_stat_database_custom_cache_hit_ratio{datname!='', datname!~'template.*', patroni_cluster=~'$cluster'}",
+          "legendFormat": "{{datname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 1, "fillOpacity": 0 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Размер БД (GB)",
+      "type": "bargauge",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sort_desc(pg_database_size_custom_size_bytes{datname!='', datname!~'template.*', patroni_cluster=~'$cluster'} / 1024 / 1024 / 1024)",
+          "legendFormat": "{{patroni_cluster}} / {{datname}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2
+        }
+      }
+    }
+  ],
+  "schemaVersion": 36
+}
+EOF
+```
+
+-----
+
+### Дашборд 2: Connections — детальный анализ соединений
+
+**Для чего:** глубокий разбор соединений. Показывает состояние каждого соединения (active / idle / idle in transaction / waiting), утилизацию лимита по каждой БД, долгие запросы, блокировки. Открываешь когда видишь всплеск на overview или когда приложение жалуется на нехватку соединений.
+
+```bash
+sudo tee /var/lib/grafana/dashboards/02_connections.json > /dev/null <<'EOF'
+{
+  "uid": "pg-connections",
+  "title": "PostgreSQL — Connections",
+  "description": "Детальный анализ соединений, idle in transaction, блокировки, долгие запросы",
+  "tags": ["postgresql", "patroni", "connections"],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Кластер",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_stat_database_custom_numbackends, patroni_cluster)",
+        "multi": true,
+        "includeAll": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "refresh": 2
+      },
+      {
+        "name": "datname",
+        "label": "База данных",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_stat_database_custom_numbackends{patroni_cluster=~'$cluster'}, datname)",
+        "multi": true,
+        "includeAll": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Активных соединений (всего)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(pg_stat_database_custom_numbackends{datname!='', datname!~'template.*', patroni_cluster=~'$cluster', datname=~'$datname'})",
+          "legendFormat": "Всего"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 1350 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Idle in transaction",
+      "type": "stat",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(pg_idle_in_transaction_count{patroni_cluster=~'$cluster', datname=~'$datname'})",
+          "legendFormat": "idle in tx"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Долгих запросов (> 30 сек)",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(pg_long_running_queries_count{patroni_cluster=~'$cluster', datname=~'$datname'})",
+          "legendFormat": "долгих запросов"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Макс. время долгого запроса (сек)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "max(pg_long_running_queries_max_duration_seconds{patroni_cluster=~'$cluster', datname=~'$datname'})",
+          "legendFormat": "макс. сек"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Макс. idle in transaction (сек)",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "max(pg_idle_in_transaction_max_idle_seconds{patroni_cluster=~'$cluster', datname=~'$datname'})",
+          "legendFormat": "макс. сек"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 300 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Соединения по состоянию и БД",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_stat_activity_custom_count{datname!='', datname!~'template.*', patroni_cluster=~'$cluster', datname=~'$datname'}",
+          "legendFormat": "{{datname}} — {{state}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 5, "showPoints": "never" }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Idle in transaction по БД",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_idle_in_transaction_count{datname!='', patroni_cluster=~'$cluster', datname=~'$datname'}",
+          "legendFormat": "{{patroni_cluster}} / {{datname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Блокировки по типу",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_locks_custom_count{datname!='', patroni_cluster=~'$cluster', datname=~'$datname'}",
+          "legendFormat": "{{datname}} — {{mode}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 0 }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Утилизация лимита соединений по БД (%)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 19, "w": 24, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_connections_limit_custom_connection_usage_pct{datname!='', datname!~'template.*', patroni_cluster=~'$cluster', datname=~'$datname'}",
+          "legendFormat": "{{patroni_cluster}} / {{datname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 1, "fillOpacity": 5 }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 36
+}
+EOF
+```
+
+-----
+
+### Дашборд 3: Queries — анализ запросов
+
+**Для чего:** разбор производительности запросов через pg_stat_statements. Показывает топ самых долгих и самых частых запросов, среднее и максимальное время выполнения, нагрузку на буферы, temp файлы. Открываешь когда нужно найти узкое место в производительности БД или после деплоя новой версии приложения.
+
+```bash
+sudo tee /var/lib/grafana/dashboards/03_queries.json > /dev/null <<'EOF'
+{
+  "uid": "pg-queries",
+  "title": "PostgreSQL — Queries (pg_stat_statements)",
+  "description": "Топ запросов по нагрузке, среднее время, temp файлы, блоки",
+  "tags": ["postgresql", "patroni", "queries", "pg_stat_statements"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Кластер",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_stat_statements_custom_calls, patroni_cluster)",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 2
+      },
+      {
+        "name": "datname",
+        "label": "База данных",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_stat_statements_custom_calls{patroni_cluster=~'$cluster'}, datname)",
+        "multi": true,
+        "includeAll": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Топ 20 запросов по суммарному времени выполнения",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(20, rate(pg_stat_statements_custom_total_exec_time_seconds{datname!='', datname=~'$datname', patroni_cluster='$cluster'}[5m]))",
+          "legendFormat": "{{datname}} | {{query_short}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "showPoints": "never" }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Топ 20 запросов по среднему времени выполнения",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(20, pg_stat_statements_custom_mean_exec_time_seconds{datname!='', datname=~'$datname', patroni_cluster='$cluster'})",
+          "legendFormat": "{{datname}} | {{query_short}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 1, "fillOpacity": 0 }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Топ 20 запросов по кол-ву вызовов (rate)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(20, rate(pg_stat_statements_custom_calls{datname!='', datname=~'$datname', patroni_cluster='$cluster'}[5m]))",
+          "legendFormat": "{{datname}} | {{query_short}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 1, "fillOpacity": 0 }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "TPS по БД (commit + rollback)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum by (datname) (rate(pg_stat_database_custom_xact_commit{datname!='', datname!~'template.*', datname=~'$datname', patroni_cluster='$cluster'}[5m]) + rate(pg_stat_database_custom_xact_rollback{datname!='', datname=~'$datname', patroni_cluster='$cluster'}[5m]))",
+          "legendFormat": "{{datname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Temp файлы по БД (rate)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_custom_temp_files{datname!='', datname=~'$datname', patroni_cluster='$cluster'}[5m])",
+          "legendFormat": "{{datname}} — файлов/сек"
+        },
+        {
+          "expr": "rate(pg_stat_database_custom_temp_bytes{datname!='', datname=~'$datname', patroni_cluster='$cluster'}[5m])",
+          "legendFormat": "{{datname}} — байт/сек"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 5 }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Shared buffer hits vs disk reads (топ запросы)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(10, rate(pg_stat_statements_custom_shared_blks_read{datname!='', datname=~'$datname', patroni_cluster='$cluster'}[5m]))",
+          "legendFormat": "DISK: {{datname}} | {{query_short}}"
+        },
+        {
+          "expr": "topk(10, rate(pg_stat_statements_custom_shared_blks_hit{datname!='', datname=~'$datname', patroni_cluster='$cluster'}[5m]))",
+          "legendFormat": "CACHE: {{datname}} | {{query_short}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 1, "fillOpacity": 0 }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 36
+}
+EOF
+```
+
+-----
+
+### Дашборд 4: Replication — репликация Patroni
+
+**Для чего:** мониторинг репликации между нодами Patroni. Показывает write/flush/replay lag в байтах, состояние каждой реплики, историю лага. Открываешь при подозрении на отставание реплики, после failover или при проблемах с сетью между нодами.
+
+```bash
+sudo tee /var/lib/grafana/dashboards/04_replication.json > /dev/null <<'EOF'
+{
+  "uid": "pg-replication",
+  "title": "PostgreSQL — Replication (Patroni)",
+  "description": "Лаг репликации между нодами Patroni: write / flush / replay lag",
+  "tags": ["postgresql", "patroni", "replication"],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Кластер",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_replication_custom_replay_lag_bytes, patroni_cluster)",
+        "multi": true,
+        "includeAll": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Replay lag (bytes) — текущий",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "max(pg_replication_custom_replay_lag_bytes{patroni_cluster=~'$cluster'})",
+          "legendFormat": "max replay lag"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10485760 },
+              { "color": "red", "value": 52428800 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Flush lag (bytes) — текущий",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "max(pg_replication_custom_flush_lag_bytes{patroni_cluster=~'$cluster'})",
+          "legendFormat": "max flush lag"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5242880 },
+              { "color": "red", "value": 20971520 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Write lag (bytes) — текущий",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "max(pg_replication_custom_write_lag_bytes{patroni_cluster=~'$cluster'})",
+          "legendFormat": "max write lag"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1048576 },
+              { "color": "red", "value": 10485760 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Состояние реплик",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "count(pg_replication_custom_replay_lag_bytes{patroni_cluster=~'$cluster'})",
+          "legendFormat": "Активных реплик"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Replay lag по репликам (bytes)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_replication_custom_replay_lag_bytes{patroni_cluster=~'$cluster'}",
+          "legendFormat": "{{patroni_cluster}} → {{application_name}} ({{client_addr}})"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10485760 },
+              { "color": "red", "value": 52428800 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Write / Flush / Replay lag сравнение",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "pg_replication_custom_write_lag_bytes{patroni_cluster=~'$cluster'}",
+          "legendFormat": "WRITE: {{application_name}}"
+        },
+        {
+          "expr": "pg_replication_custom_flush_lag_bytes{patroni_cluster=~'$cluster'}",
+          "legendFormat": "FLUSH: {{application_name}}"
+        },
+        {
+          "expr": "pg_replication_custom_replay_lag_bytes{patroni_cluster=~'$cluster'}",
+          "legendFormat": "REPLAY: {{application_name}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "lineWidth": 1, "fillOpacity": 0 }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 36
+}
+EOF
+```
+
+-----
+
+### Дашборд 5: Vacuum & Tables — здоровье таблиц
+
+**Для чего:** мониторинг bloat и autovacuum. Показывает dead tuples по таблицам, частоту vacuum/analyze, seq scan vs index scan, строки по операциям. Открываешь при деградации производительности запросов, росте размера БД или когда autovacuum не справляется с нагрузкой записи.
+
+```bash
+sudo tee /var/lib/grafana/dashboards/05_vacuum.json > /dev/null <<'EOF'
+{
+  "uid": "pg-vacuum",
+  "title": "PostgreSQL — Vacuum & Tables",
+  "description": "Dead tuples, bloat, autovacuum, seq scan vs index scan по таблицам",
+  "tags": ["postgresql", "patroni", "vacuum", "tables"],
+  "timezone": "browser",
+  "refresh": "60s",
+  "time": { "from": "now-3h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Кластер",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_stat_user_tables_custom_n_dead_tup, patroni_cluster)",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 2
+      },
+      {
+        "name": "schema",
+        "label": "Схема",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(pg_stat_user_tables_custom_n_dead_tup{patroni_cluster='$cluster'}, schemaname)",
+        "multi": true,
+        "includeAll": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Топ 20 таблиц по dead tuples",
+      "type": "bargauge",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(20, pg_stat_user_tables_custom_n_dead_tup{patroni_cluster='$cluster', schemaname=~'$schema'})",
+          "legendFormat": "{{schemaname}}.{{relname}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100000 },
+              { "color": "red", "value": 500000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Топ 20 таблиц по live tuples",
+      "type": "bargauge",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(20, pg_stat_user_tables_custom_n_live_tup{patroni_cluster='$cluster', schemaname=~'$schema'})",
+          "legendFormat": "{{schemaname}}.{{relname}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Dead tuples топ таблиц (динамика)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 10, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(15, pg_stat_user_tables_custom_n_dead_tup{patroni_cluster='$cluster', schemaname=~'$schema'})",
+          "legendFormat": "{{schemaname}}.{{relname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 5 }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Autovacuum count (rate) — топ таблиц",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(10, rate(pg_stat_user_tables_custom_autovacuum_count{patroni_cluster='$cluster', schemaname=~'$schema'}[10m]))",
+          "legendFormat": "{{schemaname}}.{{relname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 5 }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Seq scan vs Index scan (топ таблиц)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(10, rate(pg_stat_user_tables_custom_seq_scan{patroni_cluster='$cluster', schemaname=~'$schema'}[5m]))",
+          "legendFormat": "SEQ: {{schemaname}}.{{relname}}"
+        },
+        {
+          "expr": "topk(10, rate(pg_stat_user_tables_custom_idx_scan{patroni_cluster='$cluster', schemaname=~'$schema'}[5m]))",
+          "legendFormat": "IDX: {{schemaname}}.{{relname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 1, "fillOpacity": 0 }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Rows inserted / updated / deleted по БД (rate)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_custom_tup_inserted{datname!='', datname!~'template.*', patroni_cluster='$cluster'}[5m])",
+          "legendFormat": "INSERT: {{datname}}"
+        },
+        {
+          "expr": "rate(pg_stat_database_custom_tup_updated{datname!='', datname!~'template.*', patroni_cluster='$cluster'}[5m])",
+          "legendFormat": "UPDATE: {{datname}}"
+        },
+        {
+          "expr": "rate(pg_stat_database_custom_tup_deleted{datname!='', datname!~'template.*', patroni_cluster='$cluster'}[5m])",
+          "legendFormat": "DELETE: {{datname}}"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 36
+}
+EOF
+```
+
+-----
+
+## Шаг 5. Применить и запустить
+
+```bash
+# Установить права
+sudo chown -R grafana:grafana /var/lib/grafana/dashboards
+sudo chown -R grafana:grafana /etc/grafana/provisioning
+
+# Перезапустить Grafana
+sudo systemctl restart grafana-server
+sudo systemctl status grafana-server
+
+# Проверить логи — не должно быть ошибок provisioning
+sudo journalctl -u grafana-server -n 50 --no-pager | grep -E "error|Error|provisioning|dashboard"
+```
+
+-----
+
+## Шаг 6. Проверить что дашборды появились
+
+```bash
+# Через API Grafana — список всех дашбордов
+curl -s http://admin:admin@localhost:3000/api/search?type=dash-db \
+  | python3 -m json.tool | grep '"title"'
+
+# Если пароль не admin:admin — заменить на свой
+# curl -s http://admin:YOURPASSWORD@localhost:3000/api/search?type=dash-db
+```
+
+В браузере: `http://localhost:3000` → папка **PostgreSQL** → 5 дашбордов.
+
+-----
+
+## Обновление дашборда без перезапуска Grafana
+
+Grafana перечитывает JSON файлы каждые 30 секунд (задано в `updateIntervalSeconds: 30`).
+
+```bash
+# Отредактировать JSON файл
+sudo nano /var/lib/grafana/dashboards/01_overview.json
+
+# Подождать 30 секунд — или принудительно перезагрузить provisioning
+curl -X POST http://admin:admin@localhost:3000/api/admin/provisioning/dashboards/reload
+```
+
+-----
+
+## Итоговая структура файлов
+
+```
+/etc/grafana/provisioning/
+    ├── datasources/
+    │   └── prometheus.yaml              ← источник данных Prometheus
+    └── dashboards/
+        └── postgresql.yaml              ← где искать JSON файлы
+
+/var/lib/grafana/dashboards/
+    ├── 01_overview.json                 ← общая картина кластеров
+    ├── 02_connections.json              ← детальный анализ соединений
+    ├── 03_queries.json                  ← pg_stat_statements, топ запросов
+    ├── 04_replication.json              ← лаг репликации Patroni
+    └── 05_vacuum.json                   ← dead tuples, autovacuum, bloat
+```
+
+-----
+
+## Описание дашбордов — краткая справка
+
+|Файл                 |Название       |Когда открывать                                           |
+|---------------------|---------------|----------------------------------------------------------|
+|`01_overview.json`   |Overview       |Всегда — первый экран при открытии мониторинга            |
+|`02_connections.json`|Connections    |Всплеск соединений, жалобы приложения, idle in transaction|
+|`03_queries.json`    |Queries        |Деградация производительности, поиск тяжёлых запросов     |
+|`04_replication.json`|Replication    |После failover, подозрение на отставание реплики          |
+|`05_vacuum.json`     |Vacuum & Tables|Рост размера БД, частые seq scan, bloat таблиц            |
