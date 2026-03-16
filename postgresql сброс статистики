@@ -1,0 +1,362 @@
+# Сброс статистики PostgreSQL — полное руководство
+
+> **Окружение:** 2 кластера Patroni, PostgreSQL 16, мониторинг через postgres_exporter + Prometheus
+
+-----
+
+## Важно перед началом
+
+### Где запускать
+
+```
+Кластер 1: 192.168.0.249 (patroni-1)
+Кластер 2: <IP второго кластера>
+```
+
+**Правило:** все запросы на сброс статистики выполняются **только на PRIMARY** ноде каждого кластера.
+На реплике они либо упадут с ошибкой, либо не дадут эффекта.
+
+```bash
+# Всегда сначала проверяй кто primary
+patronictl -c /etc/patroni/patroni.yml list
+
+# Подключение к PostgreSQL
+sudo -u postgres psql -h 127.0.0.1 -p 5432
+```
+
+-----
+
+## Карта всех функций сброса
+
+|Функция                                          |Что сбрасывает                                                 |Область     |
+|-------------------------------------------------|---------------------------------------------------------------|------------|
+|`pg_stat_reset()`                                |Статистику текущей БД (таблицы, индексы, seq scan, dead tuples)|Одна БД     |
+|`pg_stat_reset_shared('bgwriter')`               |Checkpoint, bgwriter, buffers                                  |Весь кластер|
+|`pg_stat_reset_shared('archiver')`               |Статистику WAL архивирования                                   |Весь кластер|
+|`pg_stat_reset_shared('wal')`                    |Статистику WAL (PG 14+)                                        |Весь кластер|
+|`pg_stat_statements_reset()`                     |Все накопленные запросы в pg_stat_statements                   |Весь кластер|
+|`pg_stat_statements_reset(userid, dbid, queryid)`|Конкретный запрос/пользователь/БД                              |Точечно     |
+
+-----
+
+## Блок 1: pg_stat_statements_reset()
+
+### Сброс ВСЕЙ статистики запросов
+
+```sql
+-- Запускать на PRIMARY каждого кластера отдельно
+-- Сбрасывает накопленные данные по ВСЕМ запросам во ВСЕХ БД
+
+SELECT pg_stat_statements_reset();
+```
+
+**Что происходит:**
+
+- Обнуляет `calls`, `total_exec_time`, `rows`, `shared_blks_hit` и все остальные счётчики
+- Очищает таблицу `pg_stat_statements` полностью
+- В Prometheus метрики `pg_stat_statements_custom_*` упадут до 0, графики `rate()` временно покажут 0 — это нормально, восстановится через 1-2 минуты
+
+**Когда использовать:**
+
+- После крупного деплоя или миграции схемы — чтобы убрать старые планы
+- После оптимизации запросов — чтобы видеть чистую картину новых планов
+- Если таблица засорена устаревшими запросами из удалённых объектов
+
+-----
+
+### Сброс статистики только для конкретной БД
+
+```sql
+-- Сбрасывает pg_stat_statements только для одной БД
+-- Заменить 'mydb' на имя нужной базы
+
+SELECT pg_stat_statements_reset(
+  0,                                        -- 0 = все пользователи
+  (SELECT oid FROM pg_database WHERE datname = 'mydb'),  -- OID нужной БД
+  0                                         -- 0 = все запросы
+);
+```
+
+**Что происходит:**
+
+- Очищает статистику запросов только для указанной БД
+- Остальные БД не затрагиваются
+- Полезно когда в одной БД провели оптимизацию и хочешь чистый отсчёт именно по ней
+
+-----
+
+### Сброс статистики только для конкретного пользователя
+
+```sql
+-- Сбрасывает pg_stat_statements только для конкретного пользователя
+
+SELECT pg_stat_statements_reset(
+  (SELECT oid FROM pg_roles WHERE rolname = 'app_user'),  -- OID пользователя
+  0,   -- 0 = все БД
+  0    -- 0 = все запросы
+);
+```
+
+**Что происходит:**
+
+- Убирает из статистики все запросы, которые выполнял этот пользователь
+- Нужно когда меняли приложение под конкретным юзером и хочешь видеть только новые запросы
+
+-----
+
+### Сброс конкретного запроса по queryid
+
+```sql
+-- Сначала найти queryid нужного запроса
+SELECT queryid, left(query, 80) AS query, calls, total_exec_time
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 20;
+
+-- Затем сбросить конкретный запрос (подставить реальный queryid)
+SELECT pg_stat_statements_reset(
+  0,          -- все пользователи
+  0,          -- все БД
+  123456789   -- конкретный queryid из запроса выше
+);
+```
+
+**Что происходит:**
+
+- Удаляет из таблицы только одну строку с указанным queryid
+- Хирургически точный сброс — всё остальное не трогается
+- Полезно когда один конкретный запрос был оптимизирован и его старая статистика искажает картину
+
+-----
+
+## Блок 2: pg_stat_reset()
+
+### Сброс статистики по таблицам и индексам в одной БД
+
+```sql
+-- Подключиться к нужной БД перед выполнением!
+-- \c mydb
+
+-- Сбрасывает статистику ТОЛЬКО для БД к которой подключён
+SELECT pg_stat_reset();
+```
+
+**Что сбрасывает конкретно:**
+
+- `pg_stat_user_tables` — seq_scan, idx_scan, n_tup_ins/upd/del, n_dead_tup
+- `pg_stat_user_indexes` — idx_scan, idx_tup_read, idx_tup_fetch
+- `pg_statio_user_tables` — heap_blks_read, heap_blks_hit
+- `pg_stat_database` для этой БД — xact_commit, xact_rollback, blks_read, blks_hit, deadlocks
+
+**Что НЕ сбрасывает:**
+
+- `pg_stat_statements` — это отдельная функция
+- Статистику других БД
+- bgwriter, checkpoint статистику
+
+**Когда использовать:**
+
+- После `VACUUM FULL` или `REINDEX` — чтобы убрать старые счётчики dead_tuples
+- После реструктуризации таблиц — чтобы seq_scan/idx_scan начали считаться заново
+- При анализе поведения новой версии схемы
+
+-----
+
+### Сброс статистики во ВСЕХ БД кластера
+
+```sql
+-- Выполнять на PRIMARY
+-- Сбрасывает pg_stat_reset() последовательно в каждой БД
+
+DO $$
+DECLARE
+  db_name text;
+BEGIN
+  FOR db_name IN
+    SELECT datname FROM pg_database
+    WHERE datname NOT IN ('template0', 'template1')
+      AND datistemplate = false
+  LOOP
+    EXECUTE format('SELECT pg_stat_reset()');
+    RAISE NOTICE 'Reset stats for database: %', db_name;
+  END LOOP;
+END;
+$$;
+```
+
+> ⚠️ Этот скрипт сбрасывает статистику только в той БД, к которой ты подключён.
+> Чтобы сбросить во всех БД — нужно подключаться к каждой отдельно (см. ниже).
+
+### Правильный способ сброса во всех БД через bash
+
+```bash
+# Выполнять на хосте с PRIMARY
+# Сбрасывает pg_stat_reset() в каждой БД последовательно
+
+sudo -u postgres psql -h 127.0.0.1 -p 5432 -t -A \
+  -c "SELECT datname FROM pg_database WHERE datname NOT IN ('template0','template1') AND datistemplate=false" \
+| while read dbname; do
+    echo "Resetting stats for: $dbname"
+    sudo -u postgres psql -h 127.0.0.1 -p 5432 -d "$dbname" \
+      -c "SELECT pg_stat_reset();" -q
+  done
+
+echo "Done."
+```
+
+-----
+
+## Блок 3: pg_stat_reset_shared()
+
+### Сброс статистики bgwriter и checkpoint
+
+```sql
+-- Выполнять на PRIMARY
+-- Затрагивает весь кластер, не зависит от текущей БД
+
+SELECT pg_stat_reset_shared('bgwriter');
+```
+
+**Что сбрасывает:**
+
+- `checkpoints_timed` и `checkpoints_req` — счётчики checkpoint
+- `checkpoint_write_time` и `checkpoint_sync_time`
+- `buffers_checkpoint`, `buffers_clean`, `buffers_backend`
+- `buffers_alloc`, `maxwritten_clean`
+
+**Когда использовать:**
+
+- После изменения параметров `checkpoint_timeout`, `max_wal_size` — чтобы видеть эффект изменений
+- После добавления RAM и изменения `shared_buffers` — чтобы оценить новую эффективность буферизации
+
+-----
+
+### Сброс статистики WAL (PostgreSQL 14+)
+
+```sql
+-- Выполнять на PRIMARY
+-- У тебя PG 16, работает
+
+SELECT pg_stat_reset_shared('wal');
+```
+
+**Что сбрасывает:**
+
+- `wal_records`, `wal_fpi` — счётчики WAL записей
+- `wal_bytes` — суммарный объём записанного WAL
+- `wal_buffers_full` — сколько раз WAL буферы переполнялись
+- `wal_write_time`, `wal_sync_time`
+
+**Когда использовать:**
+
+- После изменения `wal_buffers` (у тебя 100MB) — чтобы оценить новую конфигурацию
+- После изменения `wal_compression` — для оценки эффекта сжатия
+
+-----
+
+### Сброс статистики WAL архивирования
+
+```sql
+-- Выполнять на PRIMARY
+-- Актуально если используется archive_mode=on
+
+SELECT pg_stat_reset_shared('archiver');
+```
+
+**Что сбрасывает:**
+
+- `archived_count` — количество успешно заархивированных WAL файлов
+- `failed_count` — количество неудачных попыток архивирования
+- `last_archived_wal`, `last_failed_wal`
+
+-----
+
+## Блок 4: Проверка когда последний раз сбрасывалась статистика
+
+```sql
+-- Посмотреть когда последний раз сбрасывалась статистика по каждой БД
+SELECT
+  datname,
+  stats_reset,
+  now() - stats_reset AS time_since_reset
+FROM pg_stat_database
+WHERE datname NOT IN ('template0', 'template1')
+  AND datname IS NOT NULL
+ORDER BY stats_reset ASC;
+```
+
+```sql
+-- Посмотреть когда сбрасывалась статистика bgwriter
+SELECT
+  stats_reset,
+  now() - stats_reset AS time_since_reset
+FROM pg_stat_bgwriter;
+```
+
+```sql
+-- Посмотреть сколько записей сейчас в pg_stat_statements
+-- и когда была последняя активность
+SELECT
+  count(*) AS total_queries,
+  min(min_exec_time) AS min_ever_ms,
+  max(max_exec_time) AS max_ever_ms,
+  sum(calls) AS total_calls
+FROM pg_stat_statements;
+```
+
+-----
+
+## Как поступить в твоём случае (Patroni + Prometheus)
+
+### Рекомендуемая стратегия
+
+**Не делай автоматический сброс по расписанию.** Prometheus использует `rate()` и `increase()` поверх COUNTER метрик — он сам правильно считает скорость изменения независимо от абсолютных значений.
+
+Автосброс по cron сломает графики и алёрты каждый раз на 2-5 минут пока не накопятся новые данные.
+
+### Когда сбрасывать вручную
+
+```
+Ситуация                               Что сбрасывать
+─────────────────────────────────────────────────────────────────
+Деплой новой версии приложения      →  pg_stat_statements_reset()
+Миграция схемы / переименование таблиц →  pg_stat_reset() в затронутых БД
+Оптимизация конкретного запроса     →  pg_stat_statements_reset(0, dboid, queryid)
+Изменение shared_buffers / checkpoint →  pg_stat_reset_shared('bgwriter')
+Изменение wal_buffers               →  pg_stat_reset_shared('wal')
+Анализ деградации конкретной БД     →  pg_stat_reset() в этой БД
+После VACUUM FULL крупных таблиц    →  pg_stat_reset() в этой БД
+```
+
+### Пошаговый порядок действий перед сбросом
+
+```bash
+# 1. Убедиться что ты на PRIMARY
+patronictl -c /etc/patroni/patroni.yml list
+
+# 2. Проверить когда последний раз сбрасывалась статистика
+sudo -u postgres psql -h 127.0.0.1 -p 5432 -c "
+  SELECT datname, stats_reset, now() - stats_reset AS age
+  FROM pg_stat_database
+  WHERE datname NOT IN ('template0','template1')
+  ORDER BY stats_reset ASC LIMIT 10;
+"
+
+# 3. Выполнить нужный сброс (примеры выше)
+
+# 4. Убедиться что Prometheus пережил сброс — проверить графики через 2 минуты
+# rate() метрики восстановятся автоматически после следующего scrape (15 сек)
+```
+
+### Повторить на ВТОРОМ кластере
+
+```bash
+# Подключиться к хосту второго кластера
+# Проверить primary
+patronictl -c /etc/patroni/patroni.yml list
+
+# Выполнить те же запросы на его primary
+sudo -u postgres psql -h 127.0.0.1 -p 5432
+```
+
+> Каждый кластер Patroni — независимый PostgreSQL. Сброс на кластере 1 не влияет на кластер 2. Если нужен одинаковый отсчёт на обоих — выполняй одни и те же команды на primary каждого кластера.
