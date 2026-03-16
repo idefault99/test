@@ -1,4 +1,96 @@
-Hello
- World
+scope: patroni-cluster
+name: patroni-1
+namespace: /service
+
+restapi:
+  listen: 192.168.0.249:8008
+  connect_address: 192.168.0.249:8008
+
+etcd3:
+   hosts: 192.168.0.19:2379
+
+bootstrap:
+  method: initdb
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+  initdb:
+    - data-checksums
+
+postgresql:
+  use_pg_rewind: true
+  use_slots: true
+  parameters:
+    autovacuum: true
+    autovacuum_max_workers: 5
+    idle_in_transaction_session_timeout: 10min
+    superuser_reserved_connections: 5
+    max_connections: 1500
+    shared_buffers: 12GB
+    effective_cache_size: 24GB
+    max_worker_processes: 32
+    max_parallel_workers_per_gather: 6
+    max_parallel_workers: 8
+    max_parallel_maintenance_workers: 7
+    work_mem: 1024MB
+    maintenance_work_mem: 1024MB
+    random_page_cost: 4
+    effective_io_concurrency: 200
+    huge_pages: try
+    checkpoint_timeout: 15min
+    wal_level: replica
+    wal_compression: on
+    max_wal_senders: 10
+    synchronous_commit: on
+    max_replication_slots: 10
+    min_wal_size: 10GB
+    max_wal_size: 20GB
+    wal_keep_size: 200GB
+    checkpoint_completion_target: 0.9
+    wal_buffers: 100MB
+    wal_keep_segments: 130
+    default_statistics_target: 1000
+    password_encryption: md5
+    unix_socket_directories: /var/run/postgresql
+    shared_preload_libraries: 'pg_stat_statements,timescaledb'
+
+  pg_hba:
+    - local all postgres peer
+    - host all all 0.0.0.0/0 md5
+    - host replication replicator 127.0.0.1/32 md5
+    - host replication replicator 192.168.0.249/32 md5
+    - host replication replicator 192.168.0.51/32 md5
+
+  listen: 192.168.0.249,127.0.0.1:5432
+  connect_address: 192.168.0.249:5432
+  data_dir: /data/postgresql/main
+  config_dir: /data/postgresql/main
+  bin_dir: /usr/lib/postgresql/16/bin
+  pgpass: /data/postgresql/.pgpass_patroni
+
+  authentication:
+    superuser:
+      username: postgres
+      password: Pkwfowgfji77#!@oo1
+    replication:
+      username: replicator
+      password: replicator
+
+  remove_data_directory_on_rewind_failure: false
+  remove_data_directory_on_diverged_timelines: false
+
+  use_unix_socket: true
 
 
+watchdog:
+  mode: off
+  device: /dev/watchdog
+  safety_margin: 5
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false
