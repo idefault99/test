@@ -1,88 +1,3 @@
-sudo tee -a /etc/postgres_exporter/queries.yaml > /dev/null <<'YAML'
-
-# =============================================================================
-# pg_stat_statements_aggregated — агрегированная статистика по БД
-# =============================================================================
-pg_stat_statements_aggregated:
-  query: |
-    SELECT 
-      d.datname,
-      COALESCE(SUM(s.calls), 0)::bigint AS calls_total,
-      COALESCE(TRUNC(SUM(s.total_exec_time)), 0)::bigint AS total_exec_time_ms,
-      COALESCE(TRUNC(AVG(s.min_exec_time)), 0)::bigint AS avg_min_exec_time_ms,
-      COALESCE(TRUNC(AVG(s.max_exec_time)), 0)::bigint AS avg_max_exec_time_ms,
-      COALESCE(TRUNC(AVG(s.mean_exec_time)), 0)::bigint AS avg_mean_exec_time_ms,
-      COALESCE(TRUNC(SUM(s.total_exec_time) / NULLIF(SUM(s.calls), 0)), 0)::bigint AS weighted_mean_exec_time_ms,
-      COALESCE(SUM(s.rows), 0)::bigint AS rows_total,
-      COALESCE(SUM(s.shared_blks_hit), 0)::bigint AS shared_blks_hit_total,
-      COALESCE(SUM(s.shared_blks_read), 0)::bigint AS shared_blks_read_total,
-      CASE 
-        WHEN (SUM(s.shared_blks_hit) + SUM(s.shared_blks_read)) = 0 THEN 0
-        ELSE ROUND(SUM(s.shared_blks_hit) * 100.0 / (SUM(s.shared_blks_hit) + SUM(s.shared_blks_read)), 2)
-      END AS cache_hit_ratio_pct,
-      COUNT(DISTINCT s.queryid) AS unique_queries_count
-    FROM pg_database d
-    LEFT JOIN pg_stat_statements s ON d.oid = s.dbid
-    WHERE d.datname NOT IN ('template0', 'template1')
-      AND d.datname IS NOT NULL
-    GROUP BY d.datname
-    ORDER BY total_exec_time_ms DESC
-  metrics:
-    - datname:
-        usage: LABEL
-        description: "Database name"
-    - calls_total:
-        usage: COUNTER
-        description: "Total query calls across all queries"
-    - total_exec_time_ms:
-        usage: COUNTER
-        description: "Total execution time in milliseconds"
-    - avg_min_exec_time_ms:
-        usage: GAUGE
-        description: "Average minimum execution time (ms)"
-    - avg_max_exec_time_ms:
-        usage: GAUGE
-        description: "Average maximum execution time (ms)"
-    - avg_mean_exec_time_ms:
-        usage: GAUGE
-        description: "Average mean execution time (ms)"
-    - weighted_mean_exec_time_ms:
-        usage: GAUGE
-        description: "Weighted mean execution time (ms) = total_time / total_calls"
-    - rows_total:
-        usage: COUNTER
-        description: "Total rows returned/affected"
-    - shared_blks_hit_total:
-        usage: COUNTER
-        description: "Total shared buffer cache hits"
-    - shared_blks_read_total:
-        usage: COUNTER
-        description: "Total shared buffer disk reads"
-    - cache_hit_ratio_pct:
-        usage: GAUGE
-        description: "Cache hit ratio percentage"
-    - unique_queries_count:
-        usage: GAUGE
-        description: "Number of unique queries"
-YAML
-
-
-# Кластер 1
-sudo systemctl restart postgres_exporter_cluster1
-sudo systemctl status postgres_exporter_cluster1
-
-# Кластер 2
-sudo systemctl restart postgres_exporter_cluster2
-sudo systemctl status postgres_exporter_cluster2
-
-
-# Кластер 1 (порт 9188)
-curl -s http://localhost:9188/metrics | grep pg_stat_statements_aggregated
-
-# Кластер 2 (порт 9188 или другой если на другом хосте)
-curl -s http://localhost:9188/metrics | grep pg_stat_statements_aggregated
-
-
 {
   "annotations": {
     "list": [
@@ -423,5 +338,247 @@ curl -s http://localhost:9188/metrics | grep pg_stat_statements_aggregated
           "expr": "pg_stat_statements_aggregated_cache_hit_ratio_pct{cluster=~\"$cluster\", datname=~\"$database\"}",
           "legendFormat": "{{cluster}} - {{datname}}",
           "range": true,
-          "ref
-
+          "refId": "A"
+        }
+      ],
+      "title": "Cache Hit Ratio",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "text": {}
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "pg_stat_statements_aggregated_unique_queries_count{cluster=~\"$cluster\", datname=~\"$database\"}",
+          "legendFormat": "{{cluster}} - {{datname}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Unique Queries Count",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "pg_stat_statements_aggregated_calls_total{cluster=~\"$cluster\", datname=~\"$database\"}",
+          "legendFormat": "{{cluster}} - {{datname}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total Query Calls",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*avg_min.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*avg_mean.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*avg_max.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "display
