@@ -1,18 +1,662 @@
-#!/bin/bash
+# PostgreSQL + Patroni Мониторинг (postgres_exporter + Prometheus + Grafana)
+> **Окружение:** 2 кластера Patroni, PostgreSQL 16, `pg_stat_statements` уже в `shared_preload_libraries`, `max_connections=1500`, `shared_buffers=12GB`
+-----
+## Шаг 1. Создать пользователя мониторинга в PostgreSQL
+Выполнять **только на PRIMARY** — Patroni сам реплицирует на реплику.
+```bash
+# Узнать кто сейчас primary
+patronictl -c /etc/patroni/patroni.yml list
+# Подключиться
+sudo -u postgres psql -h 127.0.0.1 -p 5432
+```
+```sql
+CREATE USER prometheus_monitor WITH PASSWORD 'Monitor9999' CONNECTION LIMIT 3;
+GRANT pg_monitor TO prometheus_monitor;
+GRANT CONNECT ON DATABASE postgres TO prometheus_monitor;
 
-# Проверка активных пользователей
-USERS=$(who | wc -l)
+-- Создать расширение (библиотека уже загружена через shared_preload_libraries)
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
-if [ $USERS -gt 1 ]; then
-    echo "ВНИМАНИЕ: На сервере $USERS активных пользователей!"
-    read -p "Продолжить? (yes/no): " confirm
-    [ "$confirm" != "yes" ] && exit 1
-fi
+-- Проверка
+SELECT count(*) FROM pg_stat_statements;
+```
 
-# Graceful shutdown сервисов (пример)
-echo "Останавливаем сервисы..."
-sudo systemctl stop nginx
-sudo systemctl stop postgresql
+## Шаг 2. Установка postgres_exporter (на ОБОИХ хостах)
 
-echo "Перезагрузка..."
-sudo reboot
+```bash
+cd /tmp
+wget https://github.com/prometheus-community/postgres_exporter/releases/download/v0.15.0/postgres_exporter-0.15.0.linux-amd64.tar.gz
+tar xvf postgres_exporter-0.15.0.linux-amd64.tar.gz
+sudo cp postgres_exporter-0.15.0.linux-amd64/postgres_exporter /usr/local/bin/
+sudo chmod +x /usr/local/bin/postgres_exporter
+sudo useradd --no-create-home --shell /bin/false postgres_exporter 2>/dev/null || true
+sudo mkdir -p /etc/postgres_exporter
+
+# Проверка
+postgres_exporter --version
+```
+
+## Шаг 3. Файлы окружения (.env)
+### Кластер 1 — хост 192.168.0.249
+
+```bash
+sudo tee /etc/postgres_exporter/cluster1.env > /dev/null <<'EOF'
+DATA_SOURCE_NAME=postgresql://prometheus_monitor:Monito%23rgf77%23%21@127.0.0.1:5432/postgres?sslmode=disable
+EOF
+sudo chmod 600 /etc/postgres_exporter/cluster1.env
+sudo chown postgres_exporter:postgres_exporter /etc/postgres_exporter/cluster1.env
+```
+
+### Кластер 2 — на хосте второго кластера (замени IP если нужно)
+```bash
+sudo tee /etc/postgres_exporter/cluster2.env > /dev/null <<'EOF'
+DATA_SOURCE_NAME=postgresql://prometheus_monitor:Monito%23rgf77%23%21@127.0.0.1:5432/postgres?sslmode=disable
+EOF
+sudo chmod 600 /etc/postgres_exporter/cluster2.env
+sudo chown postgres_exporter:postgres_exporter /etc/postgres_exporter/cluster2.env
+```
+## Шаг 4. queries.yaml — все pg_stat_* метрики
+
+```bash
+sudo tee /etc/postgres_exporter/queries.yaml > /dev/null <<'YAML'
+# =============================================================================
+# pg_stat_database — активные соединения и статистика по каждой БД
+# =============================================================================
+pg_stat_database_custom:
+  query: |
+    SELECT
+      datname,
+      numbackends,
+      xact_commit,
+      xact_rollback,
+      blks_read,
+      blks_hit,
+      CASE WHEN (blks_hit + blks_read) = 0 THEN 0
+           ELSE round(blks_hit * 100.0 / (blks_hit + blks_read), 2)
+      END AS cache_hit_ratio,
+      tup_returned,
+      tup_fetched,
+      tup_inserted,
+      tup_updated,
+      tup_deleted,
+      conflicts,
+      temp_files,
+      temp_bytes,
+      deadlocks,
+      blk_read_time,
+      blk_write_time
+    FROM pg_stat_database
+    WHERE datname NOT IN ('template0', 'template1')
+      AND datname IS NOT NULL
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - numbackends:
+        usage: GAUGE
+        description: "Active connections"
+    - xact_commit:
+        usage: COUNTER
+        description: "Committed transactions"
+    - xact_rollback:
+        usage: COUNTER
+        description: "Rolled back transactions"
+    - blks_read:
+        usage: COUNTER
+        description: "Disk blocks read"
+    - blks_hit:
+        usage: COUNTER
+        description: "Buffer cache hits"
+    - cache_hit_ratio:
+        usage: GAUGE
+        description: "Cache hit ratio %"
+    - tup_returned:
+        usage: COUNTER
+        description: "Rows returned"
+    - tup_fetched:
+        usage: COUNTER
+        description: "Rows fetched"
+    - tup_inserted:
+        usage: COUNTER
+        description: "Rows inserted"
+    - tup_updated:
+        usage: COUNTER
+        description: "Rows updated"
+    - tup_deleted:
+        usage: COUNTER
+        description: "Rows deleted"
+    - conflicts:
+        usage: COUNTER
+        description: "Recovery conflicts"
+    - temp_files:
+        usage: COUNTER
+        description: "Temp files created"
+    - temp_bytes:
+        usage: COUNTER
+        description: "Temp bytes written"
+    - deadlocks:
+        usage: COUNTER
+        description: "Deadlocks"
+    - blk_read_time:
+        usage: COUNTER
+        description: "Block read time ms"
+    - blk_write_time:
+        usage: COUNTER
+        description: "Block write time ms"
+
+# =============================================================================
+# pg_stat_statements — топ запросов по нагрузке
+# =============================================================================
+pg_stat_statements_custom:
+  query: |
+    SELECT
+      d.datname,
+      s.queryid::text AS queryid,
+      left(regexp_replace(s.query, '\s+', ' ', 'g'), 100) AS query_short,
+      s.calls,
+      s.total_exec_time / 1000.0 AS total_exec_time_seconds,
+      s.mean_exec_time  / 1000.0 AS mean_exec_time_seconds,
+      s.min_exec_time   / 1000.0 AS min_exec_time_seconds,
+      s.max_exec_time   / 1000.0 AS max_exec_time_seconds,
+      s.stddev_exec_time / 1000.0 AS stddev_exec_time_seconds,
+      s.rows,
+      s.shared_blks_hit,
+      s.shared_blks_read,
+      s.shared_blks_dirtied,
+      s.shared_blks_written,
+      s.temp_blks_read,
+      s.temp_blks_written,
+      s.blk_read_time  / 1000.0 AS blk_read_time_seconds,
+      s.blk_write_time / 1000.0 AS blk_write_time_seconds
+    FROM pg_stat_statements s
+    JOIN pg_database d ON d.oid = s.dbid
+    WHERE d.datname NOT IN ('template0', 'template1')
+      AND s.calls > 5
+    ORDER BY s.total_exec_time DESC
+    LIMIT 50
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - queryid:
+        usage: LABEL
+        description: "Query ID"
+    - query_short:
+        usage: LABEL
+        description: "Query text (first 100 chars)"
+    - calls:
+        usage: COUNTER
+        description: "Total calls"
+    - total_exec_time_seconds:
+        usage: COUNTER
+        description: "Total execution time sec"
+    - mean_exec_time_seconds:
+        usage: GAUGE
+        description: "Mean execution time sec"
+    - min_exec_time_seconds:
+        usage: GAUGE
+        description: "Min execution time sec"
+    - max_exec_time_seconds:
+        usage: GAUGE
+        description: "Max execution time sec"
+    - stddev_exec_time_seconds:
+        usage: GAUGE
+        description: "Stddev execution time sec"
+    - rows:
+        usage: COUNTER
+        description: "Total rows processed"
+    - shared_blks_hit:
+        usage: COUNTER
+        description: "Shared buffer hits"
+    - shared_blks_read:
+        usage: COUNTER
+        description: "Disk reads"
+    - shared_blks_dirtied:
+        usage: COUNTER
+        description: "Blocks dirtied"
+    - shared_blks_written:
+        usage: COUNTER
+        description: "Blocks written"
+    - temp_blks_read:
+        usage: COUNTER
+        description: "Temp blocks read"
+    - temp_blks_written:
+        usage: COUNTER
+        description: "Temp blocks written"
+    - blk_read_time_seconds:
+        usage: COUNTER
+        description: "Block read time sec"
+    - blk_write_time_seconds:
+        usage: COUNTER
+        description: "Block write time sec"
+
+# =============================================================================
+# pg_stat_activity — соединения в реальном времени
+# =============================================================================
+pg_stat_activity_custom:
+  query: |
+    SELECT
+      datname,
+      state,
+      COALESCE(wait_event_type, 'none') AS wait_event_type,
+      COALESCE(wait_event, 'none')      AS wait_event,
+      count(*) AS count
+    FROM pg_stat_activity
+    WHERE datname IS NOT NULL
+      AND datname NOT IN ('template0', 'template1')
+    GROUP BY datname, state, wait_event_type, wait_event
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - state:
+        usage: LABEL
+        description: "Connection state"
+    - wait_event_type:
+        usage: LABEL
+        description: "Wait event type"
+    - wait_event:
+        usage: LABEL
+        description: "Wait event"
+    - count:
+        usage: GAUGE
+        description: "Connection count"
+
+# =============================================================================
+# Долгие запросы > 30 секунд
+# =============================================================================
+pg_long_running_queries:
+  query: |
+    SELECT
+      datname,
+      usename,
+      state,
+      count(*) AS count,
+      max(extract(epoch from (now() - query_start)))::int AS max_duration_seconds
+    FROM pg_stat_activity
+    WHERE state != 'idle'
+      AND query_start IS NOT NULL
+      AND (now() - query_start) > interval '30 seconds'
+      AND datname IS NOT NULL
+      AND pid <> pg_backend_pid()
+    GROUP BY datname, usename, state
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - usename:
+        usage: LABEL
+        description: "User"
+    - state:
+        usage: LABEL
+        description: "State"
+    - count:
+        usage: GAUGE
+        description: "Long running queries count"
+    - max_duration_seconds:
+        usage: GAUGE
+        description: "Max duration seconds"
+
+# =============================================================================
+# idle in transaction — критично при idle_in_transaction_session_timeout=10min
+# =============================================================================
+pg_idle_in_transaction:
+  query: |
+    SELECT
+      datname,
+      count(*) AS count,
+      max(extract(epoch from (now() - state_change)))::int AS max_idle_seconds
+    FROM pg_stat_activity
+    WHERE state = 'idle in transaction'
+      AND datname IS NOT NULL
+    GROUP BY datname
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - count:
+        usage: GAUGE
+        description: "Idle in transaction connections"
+    - max_idle_seconds:
+        usage: GAUGE
+        description: "Max idle in transaction sec"
+
+# =============================================================================
+# pg_stat_bgwriter — checkpoint и bgwriter
+# =============================================================================
+pg_stat_bgwriter_custom:
+  query: |
+    SELECT
+      checkpoints_timed,
+      checkpoints_req,
+      checkpoint_write_time,
+      checkpoint_sync_time,
+      buffers_checkpoint,
+      buffers_clean,
+      maxwritten_clean,
+      buffers_backend,
+      buffers_backend_fsync,
+      buffers_alloc
+    FROM pg_stat_bgwriter
+  metrics:
+    - checkpoints_timed:
+        usage: COUNTER
+        description: "Scheduled checkpoints"
+    - checkpoints_req:
+        usage: COUNTER
+        description: "Requested checkpoints"
+    - checkpoint_write_time:
+        usage: COUNTER
+        description: "Checkpoint write time ms"
+    - checkpoint_sync_time:
+        usage: COUNTER
+        description: "Checkpoint sync time ms"
+    - buffers_checkpoint:
+        usage: COUNTER
+        description: "Buffers written at checkpoint"
+    - buffers_clean:
+        usage: COUNTER
+        description: "Buffers written by bgwriter"
+    - maxwritten_clean:
+        usage: COUNTER
+        description: "bgwriter stopped by max writes"
+    - buffers_backend:
+        usage: COUNTER
+        description: "Buffers written by backend"
+    - buffers_alloc:
+        usage: COUNTER
+        description: "Buffers allocated"
+
+# =============================================================================
+# pg_stat_user_tables — seq scan vs index scan, bloat
+# =============================================================================
+pg_stat_user_tables_custom:
+  query: |
+    SELECT
+      schemaname,
+      relname,
+      seq_scan,
+      seq_tup_read,
+      idx_scan,
+      idx_tup_fetch,
+      n_tup_ins,
+      n_tup_upd,
+      n_tup_del,
+      n_live_tup,
+      n_dead_tup,
+      vacuum_count,
+      autovacuum_count,
+      analyze_count,
+      autoanalyze_count
+    FROM pg_stat_user_tables
+    WHERE schemaname NOT IN ('pg_catalog', 'information_schema', '_timescaledb_internal')
+  metrics:
+    - schemaname:
+        usage: LABEL
+        description: "Schema"
+    - relname:
+        usage: LABEL
+        description: "Table"
+    - seq_scan:
+        usage: COUNTER
+        description: "Sequential scans"
+    - seq_tup_read:
+        usage: COUNTER
+        description: "Rows read by seq scan"
+    - idx_scan:
+        usage: COUNTER
+        description: "Index scans"
+    - idx_tup_fetch:
+        usage: COUNTER
+        description: "Rows fetched by index"
+    - n_tup_ins:
+        usage: COUNTER
+        description: "Rows inserted"
+    - n_tup_upd:
+        usage: COUNTER
+        description: "Rows updated"
+    - n_tup_del:
+        usage: COUNTER
+        description: "Rows deleted"
+    - n_live_tup:
+        usage: GAUGE
+        description: "Live rows"
+    - n_dead_tup:
+        usage: GAUGE
+        description: "Dead rows (need VACUUM)"
+    - vacuum_count:
+        usage: COUNTER
+        description: "Manual VACUUMs"
+    - autovacuum_count:
+        usage: COUNTER
+        description: "Auto VACUUMs"
+    - analyze_count:
+        usage: COUNTER
+        description: "Manual ANALYZEs"
+    - autoanalyze_count:
+        usage: COUNTER
+        description: "Auto ANALYZEs"
+
+# =============================================================================
+# pg_locks — блокировки
+# =============================================================================
+pg_locks_custom:
+  query: |
+    SELECT
+      d.datname,
+      l.mode,
+      count(*) AS count
+    FROM pg_locks l
+    LEFT JOIN pg_database d ON l.database = d.oid
+    WHERE d.datname IS NOT NULL
+    GROUP BY d.datname, l.mode
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - mode:
+        usage: LABEL
+        description: "Lock mode"
+    - count:
+        usage: GAUGE
+        description: "Lock count"
+
+# =============================================================================
+# pg_stat_replication — лаг репликации Patroni (только на primary)
+# =============================================================================
+pg_replication_custom:
+  query: |
+    SELECT
+      client_addr::text AS client_addr,
+      application_name,
+      state,
+      sync_state,
+      CASE WHEN sent_lsn IS NOT NULL AND write_lsn IS NOT NULL
+           THEN (sent_lsn - write_lsn)::bigint ELSE 0
+      END AS write_lag_bytes,
+      CASE WHEN sent_lsn IS NOT NULL AND flush_lsn IS NOT NULL
+           THEN (sent_lsn - flush_lsn)::bigint ELSE 0
+      END AS flush_lag_bytes,
+      CASE WHEN sent_lsn IS NOT NULL AND replay_lsn IS NOT NULL
+           THEN (sent_lsn - replay_lsn)::bigint ELSE 0
+      END AS replay_lag_bytes
+    FROM pg_stat_replication
+  metrics:
+    - client_addr:
+        usage: LABEL
+        description: "Replica address"
+    - application_name:
+        usage: LABEL
+        description: "Patroni node name"
+    - state:
+        usage: LABEL
+        description: "Replication state"
+    - sync_state:
+        usage: LABEL
+        description: "Sync state"
+    - write_lag_bytes:
+        usage: GAUGE
+        description: "Write lag bytes"
+    - flush_lag_bytes:
+        usage: GAUGE
+        description: "Flush lag bytes"
+    - replay_lag_bytes:
+        usage: GAUGE
+        description: "Replay lag bytes"
+
+# =============================================================================
+# Размер баз данных
+# =============================================================================
+pg_database_size_custom:
+  query: |
+    SELECT
+      datname,
+      pg_database_size(datname) AS size_bytes
+    FROM pg_database
+    WHERE datname NOT IN ('template0', 'template1')
+      AND datname IS NOT NULL
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - size_bytes:
+        usage: GAUGE
+        description: "Database size bytes"
+
+# =============================================================================
+# Использование лимита подключений (max_connections=1500)
+# =============================================================================
+pg_connections_limit_custom:
+  query: |
+    SELECT
+      d.datname,
+      d.datconnlimit                          AS connection_limit,
+      count(a.pid)                            AS active_connections,
+      current_setting('max_connections')::int AS max_connections_global,
+      CASE WHEN d.datconnlimit <= 0 THEN 0
+           ELSE round(count(a.pid) * 100.0 / d.datconnlimit, 2)
+      END AS connection_usage_pct
+    FROM pg_database d
+    LEFT JOIN pg_stat_activity a ON a.datname = d.datname
+    WHERE d.datname NOT IN ('template0', 'template1')
+      AND d.datname IS NOT NULL
+    GROUP BY d.datname, d.datconnlimit
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - connection_limit:
+        usage: GAUGE
+        description: "Per-DB connection limit"
+    - active_connections:
+        usage: GAUGE
+        description: "Active connections"
+    - max_connections_global:
+        usage: GAUGE
+        description: "Global max_connections"
+    - connection_usage_pct:
+        usage: GAUGE
+        description: "Connection limit usage %"
+YAML
+
+sudo chown postgres_exporter:postgres_exporter /etc/postgres_exporter/queries.yaml
+```
+
+-----
+
+## Шаг 5. Systemd units
+
+### Кластер 1 (порт 9187) — на хосте 192.168.0.249
+
+```bash
+sudo tee /etc/systemd/system/postgres_exporter_cluster1.service > /dev/null <<'EOF'
+[Unit]
+Description=PostgreSQL Exporter - Cluster 1 (patroni-cluster)
+Documentation=https://github.com/prometheus-community/postgres_exporter
+After=network.target
+
+[Service]
+Type=simple
+User=postgres_exporter
+Group=postgres_exporter
+EnvironmentFile=/etc/postgres_exporter/cluster1.env
+ExecStart=/usr/local/bin/postgres_exporter \
+    --extend.query-path=/etc/postgres_exporter/queries.yaml \
+    --web.listen-address=:9188 \
+    --web.telemetry-path=/metrics \
+    --log.level=info \
+    --collector.stat_bgwriter \
+    --collector.stat_database \
+    --collector.stat_user_tables \
+    --collector.stat_statements \
+    --collector.process_idle
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### Кластер 2 (порт 9187 если на другом хосте, 9188 если на том же)
+
+```bash
+sudo tee /etc/systemd/system/postgres_exporter_cluster2.service > /dev/null <<'EOF'
+[Unit]
+Description=PostgreSQL Exporter - Cluster 2
+Documentation=https://github.com/prometheus-community/postgres_exporter
+After=network.target
+
+[Service]
+Type=simple
+User=postgres_exporter
+Group=postgres_exporter
+EnvironmentFile=/etc/postgres_exporter/cluster2.env
+ExecStart=/usr/local/bin/postgres_exporter \
+    --extend.query-path=/etc/postgres_exporter/queries.yaml \
+    --web.listen-address=:9188 \
+    --web.telemetry-path=/metrics \
+    --log.level=info \
+    --collector.stat_bgwriter \
+    --collector.stat_database \
+    --collector.stat_user_tables \
+    --collector.stat_statements \
+    --collector.process_idle
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### Запуск
+
+```bash
+sudo systemctl daemon-reload
+
+sudo systemctl enable postgres_exporter_cluster1
+sudo systemctl start postgres_exporter_cluster1
+sudo systemctl status postgres_exporter_cluster1
+
+# На хосте второго кластера (или здесь если оба на одном хосте):
+sudo systemctl enable postgres_exporter_cluster2
+sudo systemctl start postgres_exporter_cluster2
+sudo systemctl status postgres_exporter_cluster2
+```
+
+
+У меня есть такой запрос
+SELECT pg_database.datname,
+sum(calls) as calls,
+TRUNC(sum(total_exec_time)::bigint) as sum_total_exec_time, 
+TRUNC(avg( min_exec_time )::bigint) as avg_min_exec_time,
+TRUNC(avg( max_exec_time )::bigint) as avg_max_exec_time,
+TRUNC(avg( mean_exec_time )::bigint) as avg_mean_exec_time
+FROM pg_stat_statements join pg_database on (pg_database.oid = pg_stat_statements.dbid)
+group by pg_database.datname
+order by sum_total_exec_time desc;
+Мне нужно добавить метрики и сделать красивый дашборд по этому запросу
+Опиши мне в md файле что делать и сделай готовый json для графаны
