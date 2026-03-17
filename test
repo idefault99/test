@@ -1,1 +1,18 @@
-DATA_SOURCE_NAME=postgresql://prometheus_monitor:Monitor$2024!@127.0.0.1:5432/postgres?sslmode=disable
+#!/bin/bash
+
+# Проверка активных пользователей
+USERS=$(who | wc -l)
+
+if [ $USERS -gt 1 ]; then
+    echo "ВНИМАНИЕ: На сервере $USERS активных пользователей!"
+    read -p "Продолжить? (yes/no): " confirm
+    [ "$confirm" != "yes" ] && exit 1
+fi
+
+# Graceful shutdown сервисов (пример)
+echo "Останавливаем сервисы..."
+sudo systemctl stop nginx
+sudo systemctl stop postgresql
+
+echo "Перезагрузка..."
+sudo reboot
