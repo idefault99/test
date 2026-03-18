@@ -1,2 +1,133 @@
-Теперь названия начинаются с pg_stat_statements_aggregated_avg_min_exec_time_ms test-gis-svo
-А должно быть просто test-gis-svo
+{
+  "id": 7,
+  "type": "bargauge",
+  "title": "avg_min_exec_time (мин)",
+  "description": "Минимальное время выполнения запросов по каждой базе данных",
+  "gridPos": {
+    "x": 0,
+    "y": 8,
+    "h": 17,
+    "w": 12
+  },
+  "fieldConfig": {
+    "defaults": {
+      "mappings": [],
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          {
+            "color": "green",
+            "value": null
+          },
+          {
+            "color": "yellow",
+            "value": 10
+          },
+          {
+            "color": "orange",
+            "value": 50
+          },
+          {
+            "color": "red",
+            "value": 100
+          }
+        ]
+      },
+      "color": {
+        "mode": "thresholds"
+      },
+      "decimals": 0,
+      "unit": "ms"
+    },
+    "overrides": []
+  },
+  "transformations": [
+    {
+      "id": "seriesToRows",
+      "options": {}
+    },
+    {
+      "id": "sortBy",
+      "options": {
+        "fields": {},
+        "sort": [
+          {
+            "desc": true,
+            "field": "Value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "renameByRegex",
+      "options": {
+        "regex": "^pg_stat_statements_aggregated_avg_min_exec_time_ms\\{.*\\}\\s*(.+)$",
+        "rename": "$1"
+      }
+    },
+    {
+      "id": "renameByRegex",
+      "options": {
+        "regex": "^Metric$",
+        "rename": "База данных"
+      }
+    },
+    {
+      "id": "renameByRegex",
+      "options": {
+        "regex": "^Value$",
+        "rename": "Мин. время (мс)"
+      }
+    }
+  ],
+  "pluginVersion": "11.6.0",
+  "targets": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cel1vbcq17l6ob"
+      },
+      "editorMode": "code",
+      "exemplar": false,
+      "expr": "pg_stat_statements_aggregated_avg_min_exec_time_ms{} > 0",
+      "format": "table",
+      "instant": true,
+      "legendFormat": "{{datname}}",
+      "range": false,
+      "refId": "A"
+    }
+  ],
+  "datasource": {
+    "type": "prometheus",
+    "uid": "cel1vbcq17l6ob"
+  },
+  "options": {
+    "reduceOptions": {
+      "values": true,
+      "calcs": [],
+      "fields": "",
+      "limit": 1000
+    },
+    "orientation": "horizontal",
+    "legend": {
+      "showLegend": false,
+      "displayMode": "table",
+      "placement": "right",
+      "calcs": [],
+      "sortBy": "Мин. время (мс)",
+      "sortDesc": true
+    },
+    "displayMode": "gradient",
+    "valueMode": "text",
+    "namePlacement": "auto",
+    "showUnfilled": true,
+    "sizing": "auto",
+    "minVizWidth": 8,
+    "minVizHeight": 16,
+    "maxVizHeight": 300,
+    "text": {
+      "titleSize": 12,
+      "valueSize": 14
+    }
+  }
+}
