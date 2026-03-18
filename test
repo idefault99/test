@@ -1034,11 +1034,13 @@
       {
         "current": {
           "text": "All",
-          "value": "$__all"
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "cel1vbcq17l6ob"
         },
         "definition": "label_values(pg_stat_statements_aggregated_calls_total{cluster=~\"$cluster\"}, datname)",
         "includeAll": true,
@@ -1066,5 +1068,5 @@
   "timezone": "",
   "title": "PostgreSQL — Статистика запросов",
   "uid": "postgres-pgss-per-db-ru",
-  "version": 24
+  "version": 25
 }
