@@ -27,7 +27,26 @@
     },
     "overrides": []
   },
-  "transformations": [],
+  "transformations": [
+    {
+      "id": "reduce",
+      "options": {
+        "reducers": ["last"]
+      }
+    },
+    {
+      "id": "sortBy",
+      "options": {
+        "fields": {},
+        "sort": [
+          {
+            "desc": true,
+            "field": "Last *"
+          }
+        ]
+      }
+    }
+  ],
   "pluginVersion": "11.6.0",
   "targets": [
     {
