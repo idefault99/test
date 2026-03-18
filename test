@@ -1,212 +1,656 @@
-{
-  "id": 1,
-  "type": "timeseries",
-  "title": "Интенсивность запросов (запросов/сек)",
-  "gridPos": {
-    "x": 0,
-    "y": 0,
-    "h": 8,
-    "w": 12
-  },
-  "fieldConfig": {
-    "defaults": {
-      "custom": {
-        "drawStyle": "line",
-        "lineInterpolation": "linear",
-        "barAlignment": 0,
-        "barWidthFactor": 0.6,
-        "lineWidth": 0,
-        "fillOpacity": 100,
-        "gradientMode": "none",
-        "spanNulls": false,
-        "insertNulls": false,
-        "showPoints": "never",
-        "pointSize": 5,
-        "stacking": {
-          "mode": "normal",
-          "group": "A"
-        },
-        "axisPlacement": "auto",
-        "axisLabel": "",
-        "axisColorMode": "text",
-        "axisBorderShow": false,
-        "scaleDistribution": {
-          "type": "linear"
-        },
-        "axisCenteredZero": false,
-        "hideFrom": {
-          "tooltip": false,
-          "viz": false,
-          "legend": false
-        },
-        "thresholdsStyle": {
-          "mode": "off"
-        }
-      },
-      "color": {
-        "mode": "palette-classic"
-      },
-      "mappings": [],
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      },
-      "unit": "ops",
-      "min": 0
-    },
-    "overrides": []
-  },
-  "pluginVersion": "11.6.0",
-  "targets": [
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "cel1vbcq17l6ob"
-      },
-      "editorMode": "code",
-      "expr": "rate(pg_stat_statements_aggregated_calls_total{datname=~\"$database\"}[$__rate_interval])",
-      "format": "time_series",
-      "intervalFactor": 2,
-      "legendFormat": "{{cluster}} - {{datname}}",
-      "range": true,
-      "refId": "A",
-      "step": 10
-    }
-  ],
-  "datasource": {
-    "type": "prometheus",
-    "uid": "cel1vbcq17l6ob"
-  },
-  "interval": "1m",
-  "options": {
-    "tooltip": {
-      "mode": "single",
-      "sort": "none",
-      "hideZeros": false
-    },
-    "legend": {
-      "showLegend": true,
-      "displayMode": "table",
-      "placement": "right",
-      "calcs": [
-        "lastNotNull"
-      ],
-      "sortBy": "Last *",
-      "sortDesc": true
-    },
-    "alertThreshold": true
-  }
-}
+У меня в кубере в каждом неймспейсе есть свой Redis с одной репликой, у него нет pvc и pv
+При рестарте редиса - сервис падает, нужно к каждому редису добавить pvc, при рестарте сервис не должен падать, должен быть кластер
+Если есть вопросы, задавай
+aerps-dev                         redis-deployment-0                                                1/1     Running                  0                   20d
+aerps-test                        redis-deployment-0                                                1/1     Running                  1 (36d ago)         36d
+aos-svo-test-02-approvals         redis-deployment-0                                                1/1     Running                  0                   20d
+aos-svo-test-02-audit             redis-deployment-0                                                1/1     Running                  0                   20d
+aos-svo-test-02-dt                redis-deployment-0                                                1/1     Running                  0                   20d
+aos-svo-test-02-fids              redis-deployment-0                                                1/1     Running                  0                   20d
+aos-svo-test-02-notification      redis-deployment-0                                                1/1     Running                  0                   20d
+aos-svo-test-02-rms               redis-deployment-0                                                1/1     Running                  0                   20d
+aos-svo-test-02-schedule          redis-deployment-0                                                1/1     Running                  0                   13d
+aos-svo-test-02-variation         redis-deployment-0                                                1/1     Running                  0                   20d
+aos-svo-test-02                   redis-deployment-0                                                1/1     Running                  0                   20d
+auth-dev-variation                redis-deployment-0                                                1/1     Running                  0                   13d
+auth-dev                          redis-deployment-0                                                1/1     Running                  0                   34d
+demo-aloms-notification           redis-deployment-0                                                1/1     Running                  0                   37d
+demo-aloms-variation              redis-deployment-0                                                1/1     Running                  1 (36d ago)         37d
+demo-aloms                        redis-deployment-0                                                1/1     Running                  0                   37d
+demo-isua-approvals               redis-deployment-0                                                1/1     Running                  0                   20d
+demo-isua-dt                      prospect-ac-redis-deployment-0                                    1/1     Running                  0                   13d
+demo-isua-dt                      redis-deployment-0                                                1/1     Running                  0                   13d
+demo-isua-fids                    redis-deployment-0                                                1/1     Running                  0                   28d
+demo-isua-gis                     redis-deployment-0                                                1/1     Running                  0                   28d
+demo-isua-rms                     redis-deployment-0                                                1/1     Running                  0                   28d
+demo-isua-schedule                redis-deployment-0                                                1/1     Running                  0                   28d
+demo-isua-sh                      redis-deployment-0                                                1/1     Running                  0                   28d
+demo-isua-telegram                redis-deployment-0                                                1/1     Running                  0                   13d
+demo-isua-variation               redis-deployment-0                                                1/1     Running                  0                   28d
+demo-isua                         redis-deployment-0                                                1/1     Running                  0                   28d
+dev-aloms-notification            redis-deployment-0                                                1/1     Running                  0                   37d
+dev-aloms-variation               redis-deployment-0                                                1/1     Running                  0                   37d
+dev-aloms                         redis-deployment-0                                                1/1     Running                  0                   37d
+dev-devops                        redis-deployment-0                                                1/1     Running                  0                   24m
+dev-dt-approvals                  redis-deployment-0                                                1/1     Running                  0                   13d
+dev-dt-dt                         prospect-ac-redis-deployment-0                                    1/1     Running                  0                   6d3h
+dev-dt-dt                         redis-deployment-0                                                1/1     Running                  0                   7d20h
+dev-dt-variation                  redis-deployment-0                                                1/1     Running                  0                   20d
+dev-dt                            redis-deployment-0                                                1/1     Running                  2 (29h ago)         20d
+dev-sis-approvals                 redis-deployment-0                                                1/1     Running                  0                   20d
+dev-sis-notification              redis-deployment-0                                                1/1     Running                  0                   13d
+dev-sis                           redis-deployment-0                                                1/1     Running                  0                   13d
+dev-sochi-approvals               redis-deployment-0                                                1/1     Running                  0                   20d
+dev-sochi-dt                      redis-deployment-0                                                1/1     Running                  0                   20d
+dev-sochi-variation               redis-deployment-0                                                1/1     Running                  0                   20d
+dev-sochi                         redis-deployment-0                                                1/1     Running                  0                   20d
+develop-approvals                 redis-deployment-0                                                1/1     Running                  0                   33d
+develop-audit                     redis-deployment-0                                                1/1     Running                  0                   33d
+develop-dt                        prospect-ac-redis-deployment-0                                    1/1     Running                  0                   18d
+develop-dt                        redis-deployment-0                                                1/1     Running                  0                   33d
+develop-fids                      redis-deployment-0                                                1/1     Running                  0                   5d3h
+develop-gis                       redis-deployment-0                                                1/1     Running                  0                   33d
+develop-notification              redis-deployment-0                                                1/1     Running                  0                   33d
+develop-rms                       redis-deployment-0                                                1/1     Running                  0                   33d
+develop-schedule                  redis-deployment-0                                                1/1     Running                  0                   33d
+develop-sh                        redis-deployment-0                                                1/1     Running                  0                   20d
+develop-telegram                  redis-deployment-0                                                1/1     Running                  0                   33d
+develop-variation                 redis-deployment-0                                                1/1     Running                  0                   33d
+develop                           redis-deployment-0                                                1/1     Running                  0                   33d
+gis-2-approvals                   redis-deployment-0                                                1/1     Running                  0                   20d
+gis-2-gis                         redis-deployment-0                                                1/1     Running                  0                   27d
+gis-2-notification                redis-deployment-0                                                1/1     Running                  0                   27d
+gis-2-rms                         redis-deployment-0                                                1/1     Running                  0                   27d
+gis-2-variation                   redis-deployment-0                                                1/1     Running                  0                   27d
+gis-2                             redis-deployment-0                                                1/1     Running                  0                   27d
+is-isua-svo-variation             redis-deployment-0                                                1/1     Running                  0                   20d
+is-isua-svo                       redis-deployment-0                                                1/1     Running                  0                   20d
+rms-audit                         redis-deployment-0                                                1/1     Running                  0                   34d
+rms-dev-02-approvals              redis-deployment-0                                                1/1     Running                  0                   13d
+rms-dev-02-notification           redis-deployment-0                                                1/1     Running                  0                   20d
+rms-dev-02-rms                    redis-deployment-0                                                1/1     Running                  0                   20d
+rms-dev-02-schedule               redis-deployment-0                                                1/1     Running                  0                   20d
+rms-dev-02-variation              redis-deployment-0                                                1/1     Running                  0                   20d
+rms-dev-02                        redis-deployment-0                                                1/1     Running                  0                   20d
+rms-eurochem-dev-approvals        redis-deployment-0                                                1/1     Running                  0                   20d
+rms-eurochem-dev-rms              redis-deployment-0                                                1/1     Running                  0                   20d
+rms-eurochem-dev-variation        redis-deployment-0                                                1/1     Running                  0                   20d
+rms-eurochem-dev                  redis-deployment-0                                                1/1     Running                  0                   20d
+rms-notification                  redis-deployment-0                                                1/1     Running                  0                   34d
+rms-rms                           ac-allocation-socket-server-redis-deployment-0                    1/1     Running                  0                   12d
+rms-rms                           redis-deployment-0                                                1/1     Running                  0                   20d
+rms-schedule                      redis-deployment-0                                                1/1     Running                  0                   34d
+rms-sh-demo-approvals             redis-deployment-0                                                1/1     Running                  0                   20d
+rms-sh-demo-notification          redis-deployment-0                                                1/1     Running                  0                   28d
+rms-sh-demo-rms                   redis-deployment-0                                                1/1     Running                  0                   28d
+rms-sh-demo-schedule              redis-deployment-0                                                1/1     Running                  0                   28d
+rms-sh-demo-variation             redis-deployment-0                                                1/1     Running                  0                   28d
+rms-sh-demo                       redis-deployment-0                                                1/1     Running                  0                   28d
+rms-variation                     redis-deployment-0                                                1/1     Running                  0                   34d
+rms                               redis-deployment-0                                                1/1     Running                  0                   34d
+schedule-dev-approvals            redis-deployment-0                                                1/1     Running                  0                   13d
+schedule-dev-audit                redis-deployment-0                                                1/1     Running                  0                   13d
+schedule-dev-schedule             redis-deployment-0                                                1/1     Running                  0                   34d
+schedule-dev-variation            redis-deployment-0                                                1/1     Running                  0                   13d
+schedule-dev                      redis-deployment-0                                                1/1     Running                  0                   13d
+telegram-dev-approvals            redis-deployment-0                                                1/1     Running                  0                   13d
+telegram-dev-schedule             redis-deployment-0                                                1/1     Running                  0                   34d
+telegram-dev-sh                   redis-deployment-0                                                1/1     Running                  0                   28d
+telegram-dev-telegram             redis-deployment-0                                                1/1     Running                  0                   34d
+telegram-dev-variation            redis-deployment-0                                                1/1     Running                  0                   34d
+telegram-dev                      redis-deployment-0                                                1/1     Running                  0                   34d
+test-aloms-notification           redis-deployment-0                                                1/1     Running                  0                   37d
+test-aloms-variation              redis-deployment-0                                                1/1     Running                  0                   37d
+test-aloms                        redis-deployment-0                                                1/1     Running                  0                   37d
+test-gis-svo-approvals            redis-deployment-0                                                1/1     Running                  0                   20d
+test-gis-svo-gis                  redis-deployment-0                                                1/1     Running                  0                   13d
+test-gis-svo-notification         redis-deployment-0                                                1/1     Running                  0                   20d
+test-gis-svo-rms                  redis-deployment-0                                                1/1     Running                  0                   20d
+test-gis-svo-variation            redis-deployment-0                                                1/1     Running                  0                   20d
+test-gis-svo                      redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-auto-approvals          redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-auto-dt                 redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-auto-fids               redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-auto-schedule           redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-auto-variation          redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-auto                    redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-led-approvals           redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-led-audit               redis-deployment-0                                                1/1     Running                  0                   28d
+test-isua-led-notification        redis-deployment-0                                                1/1     Running                  0                   28d
+test-isua-led-rms                 ac-allocation-socket-server-redis-deployment-0                    1/1     Running                  0                   14d
+test-isua-led-rms                 redis-deployment-0                                                1/1     Running                  0                   28d
+test-isua-led-schedule            redis-deployment-0                                                1/1     Running                  0                   28d
+test-isua-led-sh                  redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-led-telegram            redis-deployment-0                                                1/1     Running                  0                   28d
+test-isua-led-variation           redis-deployment-0                                                1/1     Running                  0                   28d
+test-isua-led                     redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-load-variation          redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-load                    redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-prod-led-approvals      redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-prod-led-audit          redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-prod-led-fids           redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-prod-led-notification   redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-prod-led-rms            ac-allocation-socket-server-redis-deployment-0                    1/1     Running                  0                   13d
+test-isua-prod-led-rms            redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-prod-led-schedule       redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-prod-led-telegram       redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-prod-led-variation      redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-prod-led                redis-deployment-0                                                1/1     Running                  0                   29d
+test-isua-sochi-approvals         redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-sochi-dt                redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-sochi-variation         redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-sochi                   redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-svo-approvals           redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-svo-audit               redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-svo-dt                  redis-deployment-0                                                1/1     Running                  3 (2d4h ago)        13d
+test-isua-svo-fids                redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-svo-notification        redis-deployment-0                                                1/1     Running                  0                   8d
+test-isua-svo-prod-dt             redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-svo-prod-fids           redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-svo-prod-schedule       redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-svo-prod-variation      redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-svo-prod                redis-deployment-0                                                1/1     Running                  0                   20d
+test-isua-svo-rms                 redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-svo-schedule            redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-svo-variation           redis-deployment-0                                                1/1     Running                  0                   13d
+test-isua-svo                     redis-deployment-0                                                1/1     Running                  2 (2d3h ago)        13d
+tgo-dt                            redis-deployment-0                                                1/1     Running                  0                   13d
+tgo-schedule                      redis-deployment-0                                                1/1     Running                  0                   33d
+tgo-variation                     redis-deployment-0                                                1/1     Running                  0                   33d
+tgo                               redis-deployment-0                                                1/1     Running                  0                   13d
+trip-dev                          redis-deployment-0                                                1/1     Running                  0                   7d3h
+variation-dev-approvals           redis-deployment-0                                                1/1     Running                  0                   20d
+variation-dev-variation           redis-deployment-0                                                1/1     Running                  0                   34d
+variation-dev                     redis-deployment-0                                                1/1     Running                  0                   46h
+---
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $.Values.labels.redis }}-deployment
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+spec:
+  serviceName: {{ $.Values.labels.redis }}-service
+  {{ if (eq $.Values.enableService.redis.type "single") }}
+  replicas: 1
+  {{ else if (eq $.Values.enableService.redis.type "cluster") }}
+  replicas: 3
+  {{ else }}
+    {{ fail "Type of redis must be 'single' or 'cluster'" }}
+  {{ end }}
+  selector:
+    matchLabels:
+      app: {{ $.Values.labels.redis }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Values.labels.redis }}
+    spec:
+      containers:
+      - name: {{ $.Values.labels.redis }}
+        image: {{ $.Values.images.redis }}
+        imagePullPolicy: "IfNotPresent"
+        ports:
+        - name: client
+          containerPort: {{ $.Values.ports.internal.redis.client }}
+        {{ if eq $.Values.enableService.redis.type "cluster" }}
+        - name: bus
+          containerPort: {{ $.Values.ports.internal.redis.bus }}
+        volumeMounts:
+          - name: {{ $.Values.labels.redis }}-config
+            mountPath: /redis-stack.conf
+            subPath: redis-stack.conf
+        {{ end }}
+        resources:
+          limits:
+            cpu: {{ ((((($.Values.configPods).redis).resources).limits).cpu) | default "200m" }}
+            memory: {{ ((((($.Values.configPods).redis).resources).limits).memory) | default "500Mi" }}
+          requests:
+            cpu: {{ ((((($.Values.configPods).redis).resources).requests).cpu) | default "100m" }}
+            memory: {{ ((((($.Values.configPods).redis).resources).requests).memory) | default "250Mi" }}
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+      {{ if eq $.Values.enableService.redis.type "cluster" }}
+      volumes:
+        - name: {{ $.Values.labels.redis }}-config
+          configMap:
+            name: {{ $.Values.labels.redis }}-config
+            items:
+                - key: "redis-stack.conf"
+                  path: "redis-stack.conf"
+      {{ end }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: {{ $.Values.labels.redis }}
+  name: {{ $.Values.labels.redis }}-service
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: client
+    port: {{ $.Values.ports.internal.redis.client }}
+    targetPort: {{ $.Values.ports.internal.redis.client }}
+    protocol: TCP
+  {{ if eq $.Values.enableService.redis.type "cluster" }}
+  - name: bus
+    port: {{ $.Values.ports.internal.redis.bus }}
+    targetPort: {{ $.Values.ports.internal.redis.bus }}
+    protocol: TCP
+  clusterIP: None
+  {{ end }}
+  selector:
+    app: {{ $.Values.labels.redis }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $.Values.labels.redis }}-config
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+data:
+  redis-stack.conf: |
+    port {{ $.Values.ports.internal.redis.client }}
+    cluster-enabled yes
+    cluster-config-file nodes.conf
+    cluster-node-timeout 5000
+    appendonly yes
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis-waiter-sa
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+automountServiceAccountToken: true
 
 ---
-{
-  "id": 11,
-  "type": "timeseries",
-  "title": "Общее время выполнения запросов (мс/сек)",
-  "description": "Скорость накопления общего времени выполнения запросов по каждой базе данных",
-  "gridPos": {
-    "x": 12,
-    "y": 0,
-    "h": 8,
-    "w": 12
-  },
-  "fieldConfig": {
-    "defaults": {
-      "custom": {
-        "drawStyle": "line",
-        "lineInterpolation": "linear",
-        "barAlignment": 0,
-        "barWidthFactor": 0.6,
-        "lineWidth": 0,
-        "fillOpacity": 100,
-        "gradientMode": "none",
-        "spanNulls": false,
-        "insertNulls": false,
-        "showPoints": "never",
-        "pointSize": 5,
-        "stacking": {
-          "mode": "normal",
-          "group": "A"
-        },
-        "axisPlacement": "auto",
-        "axisLabel": "",
-        "axisColorMode": "text",
-        "axisBorderShow": false,
-        "scaleDistribution": {
-          "type": "linear"
-        },
-        "axisCenteredZero": false,
-        "hideFrom": {
-          "tooltip": false,
-          "viz": false,
-          "legend": false
-        },
-        "thresholdsStyle": {
-          "mode": "off"
-        }
-      },
-      "color": {
-        "mode": "palette-classic"
-      },
-      "mappings": [],
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      },
-      "decimals": 0,
-      "unit": "ms",
-      "min": 0
-    },
-    "overrides": []
-  },
-  "pluginVersion": "11.6.0",
-  "targets": [
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "cel1vbcq17l6ob"
-      },
-      "editorMode": "code",
-      "expr": "rate(pg_stat_statements_aggregated_total_exec_time_ms{datname=~\"$database\"}[$__rate_interval])",
-      "format": "time_series",
-      "intervalFactor": 2,
-      "legendFormat": "{{datname}}",
-      "range": true,
-      "refId": "A",
-      "step": 10
-    }
-  ],
-  "datasource": {
-    "type": "prometheus",
-    "uid": "cel1vbcq17l6ob"
-  },
-  "interval": "1m",
-  "options": {
-    "tooltip": {
-      "mode": "single",
-      "sort": "none",
-      "hideZeros": false
-    },
-    "legend": {
-      "showLegend": true,
-      "displayMode": "table",
-      "placement": "right",
-      "calcs": [
-        "lastNotNull"
-      ],
-      "sortBy": "Last *",
-      "sortDesc": true
-    },
-    "alertThreshold": true
-  }
-}
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+  name: pod-reader-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["get"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: redis-waiter-rolebinding
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+subjects:
+- kind: ServiceAccount
+  name: redis-waiter-sa
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+roleRef:
+  kind: Role
+  name: pod-reader-role
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+{{- end }}
+---
+labels:
+  elasticsearch: elasticsearch
+  kafka: kafka
+  mongodb: mongodb
+  postgresSql: postgressql
+  redis: redis
+  s3minio: s3minio
+  fids:
+    share: fids
+    admin: admin
+    tv: tv-backend
+    templateManager: template-manager
+    resonator: resonator
+    fileProxy: file-proxy
+  rms:
+    share: rms
+    rulesBackend: rules-backend
+    dispatcherBackend: dispatcher-backend
+    grBackend: gr-backend
+    rapBackend: rap-backend
+    ws: ws
+    acAllocationSocketServer: ac-allocation-socket-server
+    gisStandEndpoints: gis-stand-endpoints
+    mobile: mobile
+    streamer: streamer
+    StandsApi: ac-allocation-stands-api
+    userEventAdapter: user-event-adapter
+    hypotheses: hypotheses
+    reportBackend: report-backend
+    taskManager: task-manager
+  tgo:
+    share: tgo
+    input: input
+    proxy: proxy
+    tgoInit: tgo-init
+  approvals: approvals
+# Внести Seeder
+  notification: notification
+# Deprecated
+  runway:
+    share: runway
+    flightmonitor: flightmonitor
+    runwayload: runwayload
+  auth: auth
+  keycloak: keycloak
+  front: front
+  telegram:
+    telegram: telegram
+    share: telegram
+    lis: lis
+  schedule:
+    share: schedule
+    codeShare: codeshare
+    bff: bff
+    galaxy: galaxy-connector
+    synchronLedСonnector: synchron-led-connector
+    scheduleNotification: schedule-notification
+  variation:
+    share: variation
+    variation: variation
+    synchron: synchron-variation
+  gis:
+    share: gis
+    history: history
+    defects: defects
+    slc: slc
+    asf: asf
+    assignments: assignments
+    dls: dls
+    mobileProxy: mobile-proxy
+    mobileServer: mobile-server
+    needs: needs
+    gantt: gantt
+    os: os
+    tileMap: tile-map
+    historyPlayback: history-playback
+    slb: slb
+    vega: vega
+    user: user
+    ornithology: ornithology
+    dataLakeService: data-lake
+    eventService: events
+    weatherProxy: weather
+    towTaskService: tow-task-service
+    hwaService: hwa
+  dt:
+    share: dt
+    gateway: gateway
+    airportScheduleEnrichment: airport-schedule-enrichment
+    validator: validator
+    resourceOperator: resource-operator
+    # TODO только для стенда гардиума, удалить в будущих версиях после замены на нормальный стенд
+    path: digital-twin
+    aircraftstandallocation3: aircraftstandallocation3
+    aircraftstandallocation3DataServer: aircraftstandallocation3-data-server
+    replicator: replicator
+    predictive: predictive
+    prospectiveAC: prospect-ac
+    variations: variations-dt
+    requestoperators: requestoperators
+    kpmModelBackend: kpm-model-backend
+    airportSecurity: airport-security
+    terminalInfrastructureLoad: terminal-infrastructure-load
+    aodbConnector: proxy
+    scheduleConverterDt: schedule-converter-dt
+    dtBff: dt-bff
+    predictiveOrchestrator: predictive-orchestrator
+    predictiveDashboard: predictive-dashboard
+    cpmBaseImage: cpm-base-image
+    sochiScheduleSynchronizer: sochi-schedule-synchronizer
+    dtRequestsDbMigrator: dt-requests-db-migrator
+    reportManager: report-manager
+    ovzSampling: ovz-sampling
+    managerDashboard: manager-dashboard
+    managerCalculations: manager-calculations
+    checkInBff: check-in-bff
+    checkInDesks: check-in-desks
+  sis:
+    config: config
+    share: sis
+    dictorPanel: dictor-panel
+    eventProcessor: event-processor
+    scheduler: scheduler
+    audio: audio
+    template: template
+    systemLog: system-log
+  mailservice: mailservice
+  audit: audit
+  aerps:
+    share: aerps
+    backend: backend
+    eventManager: event-manager
+    sapManager: sap-manager
+    synchronManager: synchron-manager
+    ckhdManager: ckhd-manager
+    gisManager: gis-manager
+    ivantiManager: ivanti-manager
+    sobManager: sob-manager
+  aloms:
+    share: aloms
+    alomsBackend: aloms-backend
+    alomsGateway: aloms-pobeda-backend
+  techgraph:
+    share: techgraph
+    graphBackend: graph-backend
+  eurochem:
+    share: eurochem
+    eurochemOrderBackend: eurochem-order-backend
+  sh:
+    share: sh
+    slotHandler: slot-handler
+
+
+ports:
+  internal:
+    keycloak:
+      back: 8000
+      health: 9000
+    s3minioAPI: 9000
+    s3minioConsole: 9001
+    postgresSql: 5432
+    front: 80
+    nginx: 8080
+    frontTargetPort: 8080
+    mongodb: 27017
+    back: 8000
+    elasticsearch: 
+      http: 9200
+      transport: 9300
+    galaxy: 8000
+    grpc: 50051
+    kafka:
+      internal: 9092
+      k8sInternal: 9094
+    redis:
+      client: 6379
+      bus: 16379
+# Если нужно внешнее подключение через NodePort то, необходимо указать порт
+  external:
+    postgresSql:
+    mongodb:
+    kafka:
+    galaxy:
+
+# Change to True if you need service in k8s
+enableService:
+  s3minio: false
+  postgresSql: false
+  mongodb: false
+  kafka: false
+  nginx:
+    enable: false
+    resolver: kube-dns.kube-system
+    resolver_valid: 30s
+    s3:
+      enable: false
+      S3_CONNECTOR: s3minio-api-service.{{ .Release.Namespace }}.svc.{{ .Values.localK8sDomain }}:9000
+      protocol: http
+      verifySsl: true
+      S3_BUCKET: front
+      S3_ACCESS_KEY:
+      S3_SECRET_KEY:
+      S3_SECURE:
+      FOLDER_NAME:
+      SOURCE_PATH:
+  elastic:
+    # Для запуска elastic кластера с несколькими нодами нужно указать type: multi-node
+    enable: false
+    type: single-node
+    replicas: 1
+  redis:
+    # Для запуска redis кластера с 3мя нодами нужно указать type: cluster.
+    type: single
+    enable: false
+
+s3minio:
+  root_user: "minioadmin"
+  root_password: "minioadmin"
+  # EXAMPLE buckets: "front,schedule"
+  buckets: "front"
+  minio_settings:
+    scanner_delay: "\"1\""
+
+enableModules:
+  schedule: false
+  rms: false
+  fids: false
+  variation: false
+  synchronVariation: false
+  approvals: false
+  notification: false
+  runway: false
+  telegram: false
+  tgo: false
+  predictive: false
+  gis: false
+  dt: false
+  sis: false
+  mailservice: false
+  audit: false
+  aerps: false
+  aloms: false
+  techgraph: false
+  eurochem: false
+  sh: false
+
+ingressClassName: nginx
+realmName: test-realm
+realmClient: test-client
+localK8sDomain: cluster.local
+ingressDomain:
+kafkaExternalIP:
+ingressSettings:
+  maxBodySize: "500m"
+baseNs: main
+
+imagePullSecret: regcred-2
+
+TLS:
+  enable: false
+  secret: "{{ .Values.ingressDomain }}-tls-secret"
+postgresSql:
+  db: "testdb"
+  user: "testdbadmin"
+  password: "testdbpassword"
+mongoDb:
+  user: "root"
+  password: "example"
+
+images:
+  redis: registry.test.model.svo.aero/dpm/iac/infra/redis/redis:8.4.0
+  postgresSql:  registry.test.model.svo.aero/dpm/iac/infra/postgres:16.9
+  kafka: registry.test.model.svo.aero/dpm/iac/infra:bitnami-kafka
+  elasticsearch: registry.test.model.svo.aero/dpm/iac/infra:elk-8-11-3
+  s3minio: registry.test.model.svo.aero/dpm/iac/infra/s3minio:0.0.1
+  mongo: registry.test.model.svo.aero/dpm/iac/infra/mongo:8.0.10-noble
+  curl: registry.test.model.svo.aero/dpm/iac/infra/curl:8.15.0
+  nginx: registry.test.model.svo.aero/dpm/iac/infra/nginx:1.25.4_NonRoot
+
+# solution for local PVs
+bindNode:
+storageLocalPath: /mnt/extstorage
+securityContext:
+  enable: false
+  fsGroup: 1000
+  
+  mongodb:
+    enable: false
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+  postgres:
+    enable: false
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+
+NFS:
+  name: nfs-csi
+  service:
+    kafka: false
+    mongodb: false
+    postgresSql: false
+    s3minio: false
+
+# solution for CIDR
+storageClassName:  "\"\""
+
+elasticConfig:
+  cluster:
+    max_shards_per_node: 1000
+
+# EXAMPLE for resources configuration
+# configPods:
+#   s3minio:
+#     resources:
+#       limits:
+#         cpu:
+#         memory:
+#       requests:
+#         cpu:
+#         memory:
+---
