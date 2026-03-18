@@ -1,10 +1,9 @@
 {
-  "id": 11,
+  "id": 1,
   "type": "timeseries",
-  "title": "Общее время выполнения запросов (мс/сек)",
-  "description": "Скорость накопления общего времени выполнения запросов по каждой базе данных",
+  "title": "Интенсивность запросов (запросов/сек)",
   "gridPos": {
-    "x": 12,
+    "x": 0,
     "y": 0,
     "h": 8,
     "w": 12
@@ -16,15 +15,15 @@
         "lineInterpolation": "linear",
         "barAlignment": 0,
         "barWidthFactor": 0.6,
-        "lineWidth": 0,
-        "fillOpacity": 100,
+        "lineWidth": 2,
+        "fillOpacity": 10,
         "gradientMode": "none",
         "spanNulls": false,
         "insertNulls": false,
         "showPoints": "never",
         "pointSize": 5,
         "stacking": {
-          "mode": "normal",
+          "mode": "none",
           "group": "A"
         },
         "axisPlacement": "auto",
@@ -57,9 +56,7 @@
           }
         ]
       },
-      "decimals": 0,
-      "unit": "ms",
-      "min": 0
+      "unit": "ops"
     },
     "overrides": []
   },
@@ -71,36 +68,30 @@
         "uid": "cel1vbcq17l6ob"
       },
       "editorMode": "code",
-      "expr": "rate(pg_stat_statements_aggregated_total_exec_time_ms{}[$__rate_interval])",
-      "format": "time_series",
-      "intervalFactor": 2,
-      "legendFormat": "{{datname}}",
+      "expr": "rate(pg_stat_statements_aggregated_calls_total{}[$__rate_interval])",
+      "legendFormat": "{{cluster}} - {{datname}}",
       "range": true,
-      "refId": "A",
-      "step": 10
+      "refId": "A"
     }
   ],
   "datasource": {
     "type": "prometheus",
     "uid": "cel1vbcq17l6ob"
   },
-  "interval": "1m",
   "options": {
     "tooltip": {
-      "mode": "single",
-      "sort": "none",
+      "mode": "multi",
+      "sort": "desc",
       "hideZeros": false
     },
     "legend": {
       "showLegend": true,
       "displayMode": "table",
-      "placement": "right",
+      "placement": "bottom",
       "calcs": [
-        "lastNotNull"
-      ],
-      "sortBy": "Last *",
-      "sortDesc": true
-    },
-    "alertThreshold": true
+        "lastNotNull",
+        "max"
+      ]
+    }
   }
 }
