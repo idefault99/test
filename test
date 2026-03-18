@@ -1,112 +1,563 @@
-{
-  "id": 7,
-  "type": "bargauge",
-  "title": "avg_min_exec_time (мин)",
-  "description": "Минимальное время выполнения запросов по каждой базе данных",
-  "gridPos": {
-    "x": 0,
-    "y": 8,
-    "h": 17,
-    "w": 12
-  },
-  "fieldConfig": {
-    "defaults": {
-      "mappings": [],
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          },
-          {
-            "color": "yellow",
-            "value": 10
-          },
-          {
-            "color": "orange",
-            "value": 50
-          },
-          {
-            "color": "red",
-            "value": 100
-          }
-        ]
-      },
-      "color": {
-        "mode": "thresholds"
-      },
-      "decimals": 0,
-      "unit": "ms"
-    },
-    "overrides": []
-  },
-  "transformations": [
-    {
-      "id": "reduce",
-      "options": {
-        "reducers": ["last"]
-      }
-    },
-    {
-      "id": "sortBy",
-      "options": {
-        "fields": {},
-        "sort": [
-          {
-            "desc": true,
-            "field": "Last *"
-          }
-        ]
-      }
-    }
-  ],
-  "pluginVersion": "11.6.0",
-  "targets": [
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "cel1vbcq17l6ob"
-      },
-      "editorMode": "code",
-      "exemplar": false,
-      "expr": "pg_stat_statements_aggregated_avg_min_exec_time_ms{} > 0",
-      "format": "time_series",
-      "instant": true,
-      "legendFormat": "{{datname}}",
-      "range": false,
-      "refId": "A"
-    }
-  ],
-  "datasource": {
-    "type": "prometheus",
-    "uid": "cel1vbcq17l6ob"
-  },
-  "options": {
-    "reduceOptions": {
-      "values": false,
-      "calcs": ["last"],
-      "fields": "",
-      "limit": 1000
-    },
-    "orientation": "horizontal",
-    "legend": {
-      "showLegend": false,
-      "displayMode": "table",
-      "placement": "right",
-      "calcs": []
-    },
-    "displayMode": "gradient",
-    "valueMode": "text",
-    "namePlacement": "auto",
-    "showUnfilled": true,
-    "sizing": "auto",
-    "minVizWidth": 8,
-    "minVizHeight": 16,
-    "maxVizHeight": 300,
-    "text": {
-      "titleSize": 12,
-      "valueSize": 14
-    }
-  }
-}
+# =============================================================================
+# pg_stat_database — активные соединения и статистика по каждой БД
+# =============================================================================
+pg_stat_database_custom:
+  query: |
+    SELECT
+      datname,
+      numbackends,
+      xact_commit,
+      xact_rollback,
+      blks_read,
+      blks_hit,
+      CASE WHEN (blks_hit + blks_read) = 0 THEN 0
+           ELSE round(blks_hit * 100.0 / (blks_hit + blks_read), 2)
+      END AS cache_hit_ratio,
+      tup_returned,
+      tup_fetched,
+      tup_inserted,
+      tup_updated,
+      tup_deleted,
+      conflicts,
+      temp_files,
+      temp_bytes,
+      deadlocks,
+      blk_read_time,
+      blk_write_time
+    FROM pg_stat_database
+    WHERE datname NOT IN ('template0', 'template1')
+      AND datname IS NOT NULL
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - numbackends:
+        usage: GAUGE
+        description: "Active connections"
+    - xact_commit:
+        usage: COUNTER
+        description: "Committed transactions"
+    - xact_rollback:
+        usage: COUNTER
+        description: "Rolled back transactions"
+    - blks_read:
+        usage: COUNTER
+        description: "Disk blocks read"
+    - blks_hit:
+        usage: COUNTER
+        description: "Buffer cache hits"
+    - cache_hit_ratio:
+        usage: GAUGE
+        description: "Cache hit ratio %"
+    - tup_returned:
+        usage: COUNTER
+        description: "Rows returned"
+    - tup_fetched:
+        usage: COUNTER
+        description: "Rows fetched"
+    - tup_inserted:
+        usage: COUNTER
+        description: "Rows inserted"
+    - tup_updated:
+        usage: COUNTER
+        description: "Rows updated"
+    - tup_deleted:
+        usage: COUNTER
+        description: "Rows deleted"
+    - conflicts:
+        usage: COUNTER
+        description: "Recovery conflicts"
+    - temp_files:
+        usage: COUNTER
+        description: "Temp files created"
+    - temp_bytes:
+        usage: COUNTER
+        description: "Temp bytes written"
+    - deadlocks:
+        usage: COUNTER
+        description: "Deadlocks"
+    - blk_read_time:
+        usage: COUNTER
+        description: "Block read time ms"
+    - blk_write_time:
+        usage: COUNTER
+        description: "Block write time ms"
+
+# =============================================================================
+# pg_stat_statements — топ запросов по нагрузке
+# =============================================================================
+pg_stat_statements_custom:
+  query: |
+    SELECT
+      d.datname,
+      s.queryid::text AS queryid,
+      left(regexp_replace(s.query, '\s+', ' ', 'g'), 100) AS query_short,
+      s.calls,
+      s.total_exec_time / 1000.0 AS total_exec_time_seconds,
+      s.mean_exec_time  / 1000.0 AS mean_exec_time_seconds,
+      s.min_exec_time   / 1000.0 AS min_exec_time_seconds,
+      s.max_exec_time   / 1000.0 AS max_exec_time_seconds,
+      s.stddev_exec_time / 1000.0 AS stddev_exec_time_seconds,
+      s.rows,
+      s.shared_blks_hit,
+      s.shared_blks_read,
+      s.shared_blks_dirtied,
+      s.shared_blks_written,
+      s.temp_blks_read,
+      s.temp_blks_written,
+      s.blk_read_time  / 1000.0 AS blk_read_time_seconds,
+      s.blk_write_time / 1000.0 AS blk_write_time_seconds
+    FROM pg_stat_statements s
+    JOIN pg_database d ON d.oid = s.dbid
+    WHERE d.datname NOT IN ('template0', 'template1')
+      AND s.calls > 5
+    ORDER BY s.total_exec_time DESC
+    LIMIT 50
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - queryid:
+        usage: LABEL
+        description: "Query ID"
+    - query_short:
+        usage: LABEL
+        description: "Query text (first 100 chars)"
+    - calls:
+        usage: COUNTER
+        description: "Total calls"
+    - total_exec_time_seconds:
+        usage: COUNTER
+        description: "Total execution time sec"
+    - mean_exec_time_seconds:
+        usage: GAUGE
+        description: "Mean execution time sec"
+    - min_exec_time_seconds:
+        usage: GAUGE
+        description: "Min execution time sec"
+    - max_exec_time_seconds:
+        usage: GAUGE
+        description: "Max execution time sec"
+    - stddev_exec_time_seconds:
+        usage: GAUGE
+        description: "Stddev execution time sec"
+    - rows:
+        usage: COUNTER
+        description: "Total rows processed"
+    - shared_blks_hit:
+        usage: COUNTER
+        description: "Shared buffer hits"
+    - shared_blks_read:
+        usage: COUNTER
+        description: "Disk reads"
+    - shared_blks_dirtied:
+        usage: COUNTER
+        description: "Blocks dirtied"
+    - shared_blks_written:
+        usage: COUNTER
+        description: "Blocks written"
+    - temp_blks_read:
+        usage: COUNTER
+        description: "Temp blocks read"
+    - temp_blks_written:
+        usage: COUNTER
+        description: "Temp blocks written"
+    - blk_read_time_seconds:
+        usage: COUNTER
+        description: "Block read time sec"
+    - blk_write_time_seconds:
+        usage: COUNTER
+        description: "Block write time sec"
+
+# =============================================================================
+# pg_stat_activity — соединения в реальном времени
+# =============================================================================
+pg_stat_activity_custom:
+  query: |
+    SELECT
+      datname,
+      state,
+      COALESCE(wait_event_type, 'none') AS wait_event_type,
+      COALESCE(wait_event, 'none')      AS wait_event,
+      count(*) AS count
+    FROM pg_stat_activity
+    WHERE datname IS NOT NULL
+      AND datname NOT IN ('template0', 'template1')
+    GROUP BY datname, state, wait_event_type, wait_event
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - state:
+        usage: LABEL
+        description: "Connection state"
+    - wait_event_type:
+        usage: LABEL
+        description: "Wait event type"
+    - wait_event:
+        usage: LABEL
+        description: "Wait event"
+    - count:
+        usage: GAUGE
+        description: "Connection count"
+
+# =============================================================================
+# Долгие запросы > 30 секунд
+# =============================================================================
+pg_long_running_queries:
+  query: |
+    SELECT
+      datname,
+      usename,
+      state,
+      count(*) AS count,
+      max(extract(epoch from (now() - query_start)))::int AS max_duration_seconds
+    FROM pg_stat_activity
+    WHERE state != 'idle'
+      AND query_start IS NOT NULL
+      AND (now() - query_start) > interval '30 seconds'
+      AND datname IS NOT NULL
+      AND pid <> pg_backend_pid()
+    GROUP BY datname, usename, state
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - usename:
+        usage: LABEL
+        description: "User"
+    - state:
+        usage: LABEL
+        description: "State"
+    - count:
+        usage: GAUGE
+        description: "Long running queries count"
+    - max_duration_seconds:
+        usage: GAUGE
+        description: "Max duration seconds"
+
+# =============================================================================
+# idle in transaction — критично при idle_in_transaction_session_timeout=10min
+# =============================================================================
+pg_idle_in_transaction:
+  query: |
+    SELECT
+      datname,
+      count(*) AS count,
+      max(extract(epoch from (now() - state_change)))::int AS max_idle_seconds
+    FROM pg_stat_activity
+    WHERE state = 'idle in transaction'
+      AND datname IS NOT NULL
+    GROUP BY datname
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - count:
+        usage: GAUGE
+        description: "Idle in transaction connections"
+    - max_idle_seconds:
+        usage: GAUGE
+        description: "Max idle in transaction sec"
+
+# =============================================================================
+# pg_stat_bgwriter — checkpoint и bgwriter
+# =============================================================================
+pg_stat_bgwriter_custom:
+  query: |
+    SELECT
+      checkpoints_timed,
+      checkpoints_req,
+      checkpoint_write_time,
+      checkpoint_sync_time,
+      buffers_checkpoint,
+      buffers_clean,
+      maxwritten_clean,
+      buffers_backend,
+      buffers_backend_fsync,
+      buffers_alloc
+    FROM pg_stat_bgwriter
+  metrics:
+    - checkpoints_timed:
+        usage: COUNTER
+        description: "Scheduled checkpoints"
+    - checkpoints_req:
+        usage: COUNTER
+        description: "Requested checkpoints"
+    - checkpoint_write_time:
+        usage: COUNTER
+        description: "Checkpoint write time ms"
+    - checkpoint_sync_time:
+        usage: COUNTER
+        description: "Checkpoint sync time ms"
+    - buffers_checkpoint:
+        usage: COUNTER
+        description: "Buffers written at checkpoint"
+    - buffers_clean:
+        usage: COUNTER
+        description: "Buffers written by bgwriter"
+    - maxwritten_clean:
+        usage: COUNTER
+        description: "bgwriter stopped by max writes"
+    - buffers_backend:
+        usage: COUNTER
+        description: "Buffers written by backend"
+    - buffers_alloc:
+        usage: COUNTER
+        description: "Buffers allocated"
+
+# =============================================================================
+# pg_stat_user_tables — seq scan vs index scan, bloat
+# =============================================================================
+pg_stat_user_tables_custom:
+  query: |
+    SELECT
+      schemaname,
+      relname,
+      seq_scan,
+      seq_tup_read,
+      idx_scan,
+      idx_tup_fetch,
+      n_tup_ins,
+      n_tup_upd,
+      n_tup_del,
+      n_live_tup,
+      n_dead_tup,
+      vacuum_count,
+      autovacuum_count,
+      analyze_count,
+      autoanalyze_count
+    FROM pg_stat_user_tables
+    WHERE schemaname NOT IN ('pg_catalog', 'information_schema', '_timescaledb_internal')
+  metrics:
+    - schemaname:
+        usage: LABEL
+        description: "Schema"
+    - relname:
+        usage: LABEL
+        description: "Table"
+    - seq_scan:
+        usage: COUNTER
+        description: "Sequential scans"
+    - seq_tup_read:
+        usage: COUNTER
+        description: "Rows read by seq scan"
+    - idx_scan:
+        usage: COUNTER
+        description: "Index scans"
+    - idx_tup_fetch:
+        usage: COUNTER
+        description: "Rows fetched by index"
+    - n_tup_ins:
+        usage: COUNTER
+        description: "Rows inserted"
+    - n_tup_upd:
+        usage: COUNTER
+        description: "Rows updated"
+    - n_tup_del:
+        usage: COUNTER
+        description: "Rows deleted"
+    - n_live_tup:
+        usage: GAUGE
+        description: "Live rows"
+    - n_dead_tup:
+        usage: GAUGE
+        description: "Dead rows (need VACUUM)"
+    - vacuum_count:
+        usage: COUNTER
+        description: "Manual VACUUMs"
+    - autovacuum_count:
+        usage: COUNTER
+        description: "Auto VACUUMs"
+    - analyze_count:
+        usage: COUNTER
+        description: "Manual ANALYZEs"
+    - autoanalyze_count:
+        usage: COUNTER
+        description: "Auto ANALYZEs"
+
+# =============================================================================
+# pg_locks — блокировки
+# =============================================================================
+pg_locks_custom:
+  query: |
+    SELECT
+      d.datname,
+      l.mode,
+      count(*) AS count
+    FROM pg_locks l
+    LEFT JOIN pg_database d ON l.database = d.oid
+    WHERE d.datname IS NOT NULL
+    GROUP BY d.datname, l.mode
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - mode:
+        usage: LABEL
+        description: "Lock mode"
+    - count:
+        usage: GAUGE
+        description: "Lock count"
+
+# =============================================================================
+# pg_stat_replication — лаг репликации Patroni (только на primary)
+# =============================================================================
+pg_replication_custom:
+  query: |
+    SELECT
+      client_addr::text AS client_addr,
+      application_name,
+      state,
+      sync_state,
+      CASE WHEN sent_lsn IS NOT NULL AND write_lsn IS NOT NULL
+           THEN (sent_lsn - write_lsn)::bigint ELSE 0
+      END AS write_lag_bytes,
+      CASE WHEN sent_lsn IS NOT NULL AND flush_lsn IS NOT NULL
+           THEN (sent_lsn - flush_lsn)::bigint ELSE 0
+      END AS flush_lag_bytes,
+      CASE WHEN sent_lsn IS NOT NULL AND replay_lsn IS NOT NULL
+           THEN (sent_lsn - replay_lsn)::bigint ELSE 0
+      END AS replay_lag_bytes
+    FROM pg_stat_replication
+  metrics:
+    - client_addr:
+        usage: LABEL
+        description: "Replica address"
+    - application_name:
+        usage: LABEL
+        description: "Patroni node name"
+    - state:
+        usage: LABEL
+        description: "Replication state"
+    - sync_state:
+        usage: LABEL
+        description: "Sync state"
+    - write_lag_bytes:
+        usage: GAUGE
+        description: "Write lag bytes"
+    - flush_lag_bytes:
+        usage: GAUGE
+        description: "Flush lag bytes"
+    - replay_lag_bytes:
+        usage: GAUGE
+        description: "Replay lag bytes"
+
+# =============================================================================
+# Размер баз данных
+# =============================================================================
+pg_database_size_custom:
+  query: |
+    SELECT
+      datname,
+      pg_database_size(datname) AS size_bytes
+    FROM pg_database
+    WHERE datname NOT IN ('template0', 'template1')
+      AND datname IS NOT NULL
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - size_bytes:
+        usage: GAUGE
+        description: "Database size bytes"
+
+# =============================================================================
+# Использование лимита подключений (max_connections=1500)
+# =============================================================================
+pg_connections_limit_custom:
+  query: |
+    SELECT
+      d.datname,
+      d.datconnlimit                          AS connection_limit,
+      count(a.pid)                            AS active_connections,
+      current_setting('max_connections')::int AS max_connections_global,
+      CASE WHEN d.datconnlimit <= 0 THEN 0
+           ELSE round(count(a.pid) * 100.0 / d.datconnlimit, 2)
+      END AS connection_usage_pct
+    FROM pg_database d
+    LEFT JOIN pg_stat_activity a ON a.datname = d.datname
+    WHERE d.datname NOT IN ('template0', 'template1')
+      AND d.datname IS NOT NULL
+    GROUP BY d.datname, d.datconnlimit
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - connection_limit:
+        usage: GAUGE
+        description: "Per-DB connection limit"
+    - active_connections:
+        usage: GAUGE
+        description: "Active connections"
+    - max_connections_global:
+        usage: GAUGE
+        description: "Global max_connections"
+    - connection_usage_pct:
+        usage: GAUGE
+        description: "Connection limit usage %"
+
+# =============================================================================
+# pg_stat_statements_aggregated — агрегированная статистика по БД
+# =============================================================================
+pg_stat_statements_aggregated:
+  query: |
+    SELECT
+      d.datname,
+      COALESCE(SUM(s.calls), 0)::bigint AS calls_total,
+      COALESCE(TRUNC(SUM(s.total_exec_time)), 0)::bigint AS total_exec_time_ms,
+      COALESCE(TRUNC(AVG(s.min_exec_time)), 0)::bigint AS avg_min_exec_time_ms,
+      COALESCE(TRUNC(AVG(s.max_exec_time)), 0)::bigint AS avg_max_exec_time_ms,
+      COALESCE(TRUNC(AVG(s.mean_exec_time)), 0)::bigint AS avg_mean_exec_time_ms,
+      COALESCE(TRUNC(SUM(s.total_exec_time) / NULLIF(SUM(s.calls), 0)), 0)::bigint AS weighted_mean_exec_time_ms,
+      COALESCE(SUM(s.rows), 0)::bigint AS rows_total,
+      COALESCE(SUM(s.shared_blks_hit), 0)::bigint AS shared_blks_hit_total,
+      COALESCE(SUM(s.shared_blks_read), 0)::bigint AS shared_blks_read_total,
+      CASE
+        WHEN (SUM(s.shared_blks_hit) + SUM(s.shared_blks_read)) = 0 THEN 0
+        ELSE ROUND(SUM(s.shared_blks_hit) * 100.0 / (SUM(s.shared_blks_hit) + SUM(s.shared_blks_read)), 2)
+      END AS cache_hit_ratio_pct,
+      COUNT(DISTINCT s.queryid) AS unique_queries_count
+    FROM pg_database d
+    LEFT JOIN pg_stat_statements s ON d.oid = s.dbid
+    WHERE d.datname NOT IN ('template0', 'template1')
+      AND d.datname IS NOT NULL
+    GROUP BY d.datname
+    ORDER BY total_exec_time_ms DESC
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - calls_total:
+        usage: COUNTER
+        description: "Total query calls across all queries"
+    - total_exec_time_ms:
+        usage: COUNTER
+        description: "Total execution time in milliseconds"
+    - avg_min_exec_time_ms:
+        usage: GAUGE
+        description: "Average minimum execution time (ms)"
+    - avg_max_exec_time_ms:
+        usage: GAUGE
+        description: "Average maximum execution time (ms)"
+    - avg_mean_exec_time_ms:
+        usage: GAUGE
+        description: "Average mean execution time (ms)"
+    - weighted_mean_exec_time_ms:
+        usage: GAUGE
+        description: "Weighted mean execution time (ms) = total_time / total_calls"
+    - rows_total:
+        usage: COUNTER
+        description: "Total rows returned/affected"
+    - shared_blks_hit_total:
+        usage: COUNTER
+        description: "Total shared buffer cache hits"
+    - shared_blks_read_total:
+        usage: COUNTER
+        description: "Total shared buffer disk reads"
+    - cache_hit_ratio_pct:
+        usage: GAUGE
+        description: "Cache hit ratio percentage"
+    - unique_queries_count:
+        usage: GAUGE
+        description: "Number of unique queries"
