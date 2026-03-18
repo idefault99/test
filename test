@@ -43,8 +43,10 @@
   },
   "transformations": [
     {
-      "id": "seriesToRows",
-      "options": {}
+      "id": "reduce",
+      "options": {
+        "reducers": ["last"]
+      }
     },
     {
       "id": "sortBy",
@@ -53,30 +55,9 @@
         "sort": [
           {
             "desc": true,
-            "field": "Value"
+            "field": "Last *"
           }
         ]
-      }
-    },
-    {
-      "id": "renameByRegex",
-      "options": {
-        "regex": "^pg_stat_statements_aggregated_avg_min_exec_time_ms\\{.*\\}\\s*(.+)$",
-        "rename": "$1"
-      }
-    },
-    {
-      "id": "renameByRegex",
-      "options": {
-        "regex": "^Metric$",
-        "rename": "База данных"
-      }
-    },
-    {
-      "id": "renameByRegex",
-      "options": {
-        "regex": "^Value$",
-        "rename": "Мин. время (мс)"
       }
     }
   ],
@@ -90,7 +71,7 @@
       "editorMode": "code",
       "exemplar": false,
       "expr": "pg_stat_statements_aggregated_avg_min_exec_time_ms{} > 0",
-      "format": "table",
+      "format": "time_series",
       "instant": true,
       "legendFormat": "{{datname}}",
       "range": false,
@@ -103,8 +84,8 @@
   },
   "options": {
     "reduceOptions": {
-      "values": true,
-      "calcs": [],
+      "values": false,
+      "calcs": ["last"],
       "fields": "",
       "limit": 1000
     },
@@ -113,9 +94,7 @@
       "showLegend": false,
       "displayMode": "table",
       "placement": "right",
-      "calcs": [],
-      "sortBy": "Мин. время (мс)",
-      "sortDesc": true
+      "calcs": []
     },
     "displayMode": "gradient",
     "valueMode": "text",
