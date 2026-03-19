@@ -1,5 +1,4 @@
-kubectl exec -n develop redis-deployment-0 -- redis-server --version
-kubectl exec -n develop redis-deployment-0 -- redis-cli ping
-# И покажи чем запускается контейнер:
-kubectl exec -n develop redis-deployment-0 -- cat /etc/redis/redis.conf 2>/dev/null || \
-kubectl exec -n develop redis-deployment-0 -- ps aux | grep redis
+Redis server v=8.4.0 sha=00000000:1 malloc=jemalloc-5.3.0 bits=64 build=20be9b111a9854c9
+PONG
+cat: /etc/redis/redis.conf: No such file or directory
+error: Internal error occurred: Internal error occurred: error executing command in container: failed to exec in container: failed to start exec "8f0ad17acbb560c5828ca863ecfb205096d6ab3d07fb4c78ec03985fbcda3b17": OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
