@@ -492,3 +492,316 @@ kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli cluster info | grep c
 #    Это хорошо (данные не потеряются), но нужно чистить руками
 #    при полном сносе namespace.
 ---
+# Миграция Redis: single без PVC → cluster с PVC
+
+## Контекст
+
+- ~160 Redis инстансов, по одному на namespace
+- Текущее состояние: StatefulSet, 1 реплика, без PVC → при рестарте данные теряются
+- Целевое состояние: StatefulSet, 3 реплики, Redis Cluster, PVC через nfs-csi
+- Данных мало (~2.8M RAM, 0 ключей в большинстве namespace) — это кэш, но терять нельзя
+
+-----
+
+## Что изменится в кластере
+
+|Было                            |Станет                                                                                                                        |
+|--------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+|1 под redis-deployment-0        |3 пода: redis-deployment-0/1/2                                                                                                |
+|Нет PVC, данные в памяти        |PVC 1Gi на каждый под (nfs-csi, Retain)                                                                                       |
+|Обычный Redis                   |Redis Cluster (3 мастера, без реплик)                                                                                         |
+|Service: redis-service ClusterIP|Service: redis-service ClusterIP (без изменений для приложений) + redis-headless (новый, для внутренней коммуникации кластера)|
+
+Приложения продолжают подключаться к `redis-service:6379` — **ничего менять в конфигах приложений не нужно**.
+
+> ⚠️ **Важно**: Redis Cluster без реплик (3 мастера, 0 реплик) — при падении одного мастера
+> его слоты временно недоступны до восстановления пода. Под восстанавливается автоматически
+> благодаря PVC. Для dev/test окружений это приемлемо.
+
+-----
+
+## Предварительные требования
+
+```bash
+# Проверить доступность StorageClass
+kubectl get sc nfs-csi
+
+# Убедиться что на каждом namespace есть права для helm upgrade
+# (обычно если деплоишь через CI/CD — права уже есть)
+
+# Проверить версию helm
+helm version
+```
+
+-----
+
+## Порядок действий
+
+### Шаг 0. Подготовка — обновить шаблон и values
+
+1. Заменить `templates/redis.yaml` на новый файл из этого PR/MR
+1. В `values.yaml` обновить блок redis:
+
+```yaml
+# Было:
+enableService:
+  redis:
+    type: single
+    enable: false
+
+# Стало:
+enableService:
+  redis:
+    type: cluster
+    enable: true
+    storageClassName: nfs-csi
+    storageSize: 1Gi
+```
+
+1. Добавить env в StatefulSet (в шаблоне уже должно быть — проверить):
+
+```yaml
+# В spec.template.spec.containers[0]:
+env:
+  - name: MY_POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+```
+
+Это нужно чтобы Redis анонсировал стабильное DNS-имя пода (а не IP).
+Без этого после выгона пода на другую ноду кластер может не восстановиться автоматически.
+
+-----
+
+### Шаг 1. Тест на одном namespace (пилот)
+
+Выбери namespace с наименее критичным окружением. Хорошие кандидаты: `dev-aloms`, `dev-devops`.
+
+```bash
+NAMESPACE="dev-aloms"
+
+# 1.1 Сохрани текущие данные на всякий случай
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli bgsave
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli dbsize
+# Если dbsize = 0 — данных нет, можно пропустить сохранение
+
+# 1.2 Удали старый StatefulSet БЕЗ удаления подов
+# --cascade=orphan — поды продолжат работать пока не поднимется новый StatefulSet
+kubectl delete statefulset redis-deployment -n $NAMESPACE --cascade=orphan
+
+# Убедись что поды всё ещё живы
+kubectl get pods -n $NAMESPACE | grep redis
+
+# 1.3 Выполни helm upgrade
+helm upgrade infra ./path/to/chart -n $NAMESPACE -f values.yaml
+
+# 1.4 Следи за поднятием подов
+kubectl get pods -n $NAMESPACE -w
+# Ожидаем: redis-deployment-0, redis-deployment-1, redis-deployment-2 → Running
+```
+
+**Что происходит в это время с приложением:**
+
+- Пока `redis-deployment-0` жив (cascade=orphan) — приложение работает нормально
+- Когда StatefulSet пересоздаётся и поднимаются 3 пода — кратковременный рестарт redis-deployment-0
+- Полный даунтайм: 10-30 секунд (время рестарта redis-deployment-0)
+
+```bash
+# 1.5 Проверь PVC
+kubectl get pvc -n $NAMESPACE | grep redis
+# Ожидаем: redis-data-redis-deployment-0/1/2 → Bound
+
+# 1.6 Проверь Init Job
+kubectl get jobs -n $NAMESPACE
+kubectl logs -n $NAMESPACE -l app=redis-init
+# В логах должно быть: "Кластер уже инициализирован" или "Готово!"
+
+# 1.7 Проверь состояние кластера
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli cluster info | grep cluster_state
+# Ожидаем: cluster_state:ok
+
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli cluster nodes
+# Ожидаем: 3 строки, все master
+```
+
+```bash
+# 1.8 Тест отказоустойчивости — удали один под
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli -c set testkey "migration-test"
+
+kubectl delete pod redis-deployment-0 -n $NAMESPACE
+kubectl wait --for=condition=Ready pod/redis-deployment-0 -n $NAMESPACE --timeout=60s
+
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli -c get testkey
+# Ожидаем: "migration-test"
+
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli cluster info | grep cluster_state
+# Ожидаем: cluster_state:ok
+```
+
+Если всё хорошо — переходи к массовой миграции.
+
+-----
+
+### Шаг 2. Массовая миграция всех namespace
+
+Миграцию лучше делать батчами по 5-10 namespace, не всё сразу.
+
+```bash
+# Получить полный список namespace с redis
+kubectl get pods -A | grep "redis-deployment-0" | awk '{print $1}' | sort -u > /tmp/redis_namespaces.txt
+cat /tmp/redis_namespaces.txt
+wc -l /tmp/redis_namespaces.txt  # ~160 namespace
+
+# Скрипт миграции одного namespace
+migrate_namespace() {
+  NS=$1
+  echo ""
+  echo "============================================"
+  echo "==> Мигрируем: $NS"
+  echo "============================================"
+
+  # Сохранить количество ключей до
+  KEYS_BEFORE=$(kubectl exec -n $NS redis-deployment-0 -- redis-cli dbsize 2>/dev/null || echo "N/A")
+  echo "  Ключей до миграции: $KEYS_BEFORE"
+
+  # Удалить старый StatefulSet (без удаления подов)
+  kubectl delete statefulset redis-deployment -n $NS --cascade=orphan
+  if [ $? -ne 0 ]; then
+    echo "  ОШИБКА: не удалось удалить StatefulSet в $NS"
+    return 1
+  fi
+
+  # helm upgrade
+  helm upgrade infra ./path/to/chart -n $NS -f values.yaml
+  if [ $? -ne 0 ]; then
+    echo "  ОШИБКА: helm upgrade упал в $NS"
+    return 1
+  fi
+
+  # Ждём готовности всех подов
+  echo "  Ждём готовности подов (до 3 минут)..."
+  kubectl wait --for=condition=Ready pod -l app=redis -n $NS --timeout=180s
+  if [ $? -ne 0 ]; then
+    echo "  ОШИБКА: поды не поднялись в $NS за 3 минуты"
+    kubectl get pods -n $NS | grep redis
+    return 1
+  fi
+
+  # Проверяем кластер
+  CLUSTER_STATE=$(kubectl exec -n $NS redis-deployment-0 -- redis-cli cluster info 2>/dev/null | grep cluster_state | cut -d: -f2 | tr -d '[:space:]')
+  KEYS_AFTER=$(kubectl exec -n $NS redis-deployment-0 -- redis-cli -c dbsize 2>/dev/null || echo "N/A")
+
+  echo "  Cluster state: $CLUSTER_STATE"
+  echo "  Ключей после: $KEYS_AFTER"
+
+  if [ "$CLUSTER_STATE" = "ok" ]; then
+    echo "  ✓ $NS — УСПЕШНО"
+    return 0
+  else
+    echo "  ✗ $NS — КЛАСТЕР НЕ OK (state=$CLUSTER_STATE)"
+    return 1
+  fi
+}
+
+# Запуск по одному namespace из файла
+while read NS; do
+  migrate_namespace "$NS"
+  if [ $? -ne 0 ]; then
+    echo ""
+    echo "!!! Ошибка в $NS. Остановка. Разберись с проблемой вручную."
+    echo "!!! Продолжить с следующего namespace можно командой:"
+    echo "!!! migrate_namespace <next_namespace>"
+    break
+  fi
+  # Пауза между namespace чтобы не перегружать nfs-csi
+  sleep 5
+done < /tmp/redis_namespaces.txt
+```
+
+-----
+
+### Шаг 3. Финальная проверка
+
+```bash
+# Проверить что у всех redis есть PVC
+kubectl get pvc -A | grep redis-data | grep -v Bound
+# Ожидаем: пустой вывод (все Bound)
+
+# Проверить что нет redis без PVC
+kubectl get pvc -A | grep redis-data | wc -l
+# Должно быть кол-во namespace * 3
+
+# Проверить состояние кластеров во всех namespace
+for NS in $(kubectl get pods -A | grep "redis-deployment-0" | awk '{print $1}' | sort -u); do
+  STATE=$(kubectl exec -n $NS redis-deployment-0 -- redis-cli cluster info 2>/dev/null | grep cluster_state | cut -d: -f2 | tr -d '[:space:]')
+  if [ "$STATE" != "ok" ]; then
+    echo "ПРОБЛЕМА: $NS — state=$STATE"
+  fi
+done
+echo "Проверка завершена."
+```
+
+-----
+
+## Откат (если что-то пошло не так)
+
+```bash
+NS="проблемный-namespace"
+
+# Удалить новый StatefulSet
+kubectl delete statefulset redis-deployment -n $NS
+
+# Вернуть старый values (type: single, без storageClassName)
+# и выполнить helm upgrade с ним:
+helm upgrade infra ./path/to/chart -n $NS -f values-old.yaml
+
+# Поды поднимутся без PVC — данные не сохранятся,
+# но приложение начнёт работать как раньше
+```
+
+> ⚠️ Если откат нужен срочно и нет времени на helm — можно применить старый манифест напрямую:
+> `kubectl apply -f redis-old-statefulset.yaml -n $NS`
+
+-----
+
+## Известные ограничения
+
+**Redis Cluster требует `-c` флаг от клиентов для redirect**
+
+Redis Cluster перенаправляет ключи между нодами через MOVED/ASK команды.
+Если клиентская библиотека не поддерживает cluster mode — ключи на “чужих” слотах вернут ошибку.
+
+Проверь какой Redis-клиент используют твои приложения:
+
+- **ioredis** (Node.js) — поддерживает cluster, нужно указать все 3 ноды или использовать DNS
+- **redis-py** (Python) — нужен `RedisCluster` вместо `Redis`
+- **Jedis/Lettuce** (Java) — нужен `JedisCluster` / `RedisClusterClient`
+- **go-redis** (Go) — нужен `NewClusterClient`
+
+Если приложения используют обычное подключение к `redis-service:6379` без cluster-aware клиента —
+**оставь `type: single`**, добавь только PVC. Данные при рестарте сохранятся, кластера не будет,
+но и проблем с клиентами не будет.
+
+**Как понять нужен ли cluster клиент**: если после миграции в логах приложения появляются ошибки
+`MOVED` или `CROSSSLOT` — приложение не поддерживает cluster mode, нужно вернуть `type: single`.
+
+-----
+
+## Быстрая шпаргалка: single с PVC (без кластера)
+
+Если cluster mode не нужен или клиенты его не поддерживают — можно использовать `type: single`.
+Это тоже решает исходную проблему (потеря данных при рестарте):
+
+```yaml
+enableService:
+  redis:
+    type: single
+    enable: true
+    storageClassName: nfs-csi
+    storageSize: 1Gi
+```
+
+При этом поднимается 1 реплика с PVC. При рестарте или выгоне пода данные сохраняются.
+Единственный риск: пока под переезжает на другую ноду — кратковременный даунтайм (~10-30 сек).
+---
