@@ -1,49 +1,584 @@
-#!/bin/bash
-# =============================================================
-# ДИАГНОСТИКА REDIS ДЛЯ МИГРАЦИИ НА PVC + CLUSTER
-# Выполни команды ниже и скинь весь вывод
-# =============================================================
+NAME                          PROVISIONER                RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+csi-sc-cinder                 cinder.csi.openstack.org   Delete          Immediate              true                   463d
+microk8s-hostpath (default)   microk8s.io/hostpath       Delete          WaitForFirstConsumer   false                  549d
+nfs-csi                       nfs.csi.k8s.io             Retain          Immediate              false                  260d
+nfs-csi-2                     nfs.csi.k8s.io             Retain          Immediate              false                  121d
+nfs-csi-3                     nfs.csi.k8s.io             Retain          Immediate              false                  48d
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  annotations:
+    meta.helm.sh/release-name: infra
+    meta.helm.sh/release-namespace: dev-aloms
+  creationTimestamp: "2025-07-29T11:40:39Z"
+  generation: 6
+  labels:
+    app: redis
+    app.kubernetes.io/managed-by: Helm
+  name: redis-deployment
+  namespace: dev-aloms
+  resourceVersion: "413769180"
+  uid: d7528774-2b88-4e1e-974c-07bf6224f581
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: redis
+  serviceName: redis-service
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: redis
+    spec:
+      containers:
+      - image: registry.test.model.svo.aero/dpm/iac/infra/redis/redis:8.4.0
+        imagePullPolicy: IfNotPresent
+        name: redis
+        ports:
+        - containerPort: 6379
+          name: client
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 200m
+            memory: 500Mi
+          requests:
+            cpu: 100m
+            memory: 250Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: regcred-3
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+status:
+  availableReplicas: 1
+  collisionCount: 0
+  currentReplicas: 1
+  currentRevision: redis-deployment-779f7bfd9d
+  observedGeneration: 6
+  readyReplicas: 1
+  replicas: 1
+  updateRevision: redis-deployment-779f7bfd9d
+  updatedReplicas: 1
+NAME                                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS        CLAIM                                                      STORAGECLASS        VOLUMEATTRIBUTESCLASS   REASON   AGE
+airport-security-dev-dt-dt-pv-volume                        5Gi        RWX            Retain           Bound         dev-dt-dt/airport-security-pv-claim                                            <unset>                          271d
+airport-security-dev-sochi-dt-pv-volume                     5Gi        RWX            Retain           Bound         dev-sochi-dt/airport-security-pv-claim                                         <unset>                          128d
+airport-security-develop-dt-pv-volume                       5Gi        RWX            Retain           Bound         develop-dt/airport-security-pv-claim                                           <unset>                          386d
+airport-security-test-isua-sochi-dt-pv-volume               5Gi        RWX            Retain           Bound         test-isua-sochi-dt/airport-security-pv-claim                                   <unset>                          260d
+kafka-devops-pv-volume                                      5Gi        RWO            Retain           Released      devops/kafka-pv-claim                                                          <unset>                          181d
+pvc-019f40f2-baaa-4214-85d3-cce0cd0a9784                    25Gi       RWO            Retain           Released      dev-devops/s3minio                                         nfs-csi             <unset>                          8d
+pvc-0403b856-0b0a-4c94-9c0e-94a1236aa071                    25Gi       RWO            Retain           Bound         dev-devops/s3minio                                         nfs-csi             <unset>                          18h
+pvc-045df84a-70bb-4044-b566-1b84409c9716                    25Gi       RWO            Retain           Bound         demo-isua/s3minio                                          nfs-csi-2           <unset>                          106d
+pvc-046e857c-e2e4-40ac-bbb1-33cb1eadc1f9                    5Gi        RWO            Retain           Released      gis-2/kafka                                                nfs-csi             <unset>                          275d
+pvc-04c1d0a5-32a5-483d-8da7-9600d181939d                    5Gi        RWO            Retain           Bound         test-aloms/kafka                                           nfs-csi             <unset>                          232d
+pvc-05bdc72d-4e65-4713-ba29-4b835bf859c2                    25Gi       RWO            Retain           Bound         dev-dt/s3minio                                             nfs-csi-2           <unset>                          104d
+pvc-0f0dbb47-efae-4a2f-9dd1-cdb9f6589791                    5Gi        RWO            Retain           Released      dev-devops/kafka                                           nfs-csi             <unset>                          159d
+pvc-150667e9-004b-457b-aa3c-23f843f2a730                    25Gi       RWO            Retain           Released      gis-2/s3minio                                              nfs-csi-2           <unset>                          100d
+pvc-1679a326-18ef-41be-ace7-e976cfbe9519                    5Gi        RWO            Retain           Bound         rms-dev-02/kafka                                           nfs-csi-3           <unset>                          48d
+pvc-1823f5ac-0fbc-4d0a-9e29-0f54be3f4dc0                    5Gi        RWO            Retain           Bound         dev-devops/kafka                                           nfs-csi             <unset>                          18h
+pvc-1a621a86-15a0-4286-bbc0-415f85d8c9ce                    5Gi        RWO            Retain           Bound         demo-aloms/kafka                                           nfs-csi             <unset>                          225d
+pvc-1ca0484a-967a-4e7a-b3d9-6f1f0efb3403                    25Gi       RWO            Retain           Released      dev-sis/s3minio                                            nfs-csi             <unset>                          261d
+pvc-1df58134-de62-4a44-af00-0e71838fd446                    25Gi       RWO            Retain           Released      gis-2/s3minio                                              nfs-csi             <unset>                          275d
+pvc-1e261e54-83f7-4ce9-8490-2e3f9b753aa4                    4Gi        RWO            Retain           Bound         devlake/devlake-grafana                                    nfs-csi             <unset>                          152d
+pvc-1f61d345-e77a-4452-b352-85dcae2f944c                    5Gi        RWO            Retain           Released      telegram-dev/kafka                                         nfs-csi-2           <unset>                          107d
+pvc-235d4381-a200-4e7d-af3c-f1ccd5c626d9                    25Gi       RWO            Retain           Released      telegram-dev/s3minio                                       nfs-csi             <unset>                          280d
+pvc-2496e265-4e97-4758-8394-c835e7056a77                    5Gi        RWO            Retain           Released      telegram-dev/kafka                                         nfs-csi             <unset>                          280d
+pvc-258b5365-e494-4547-b213-06811a543466                    5Gi        RWO            Retain           Bound         is-isua-svo/kafka                                          nfs-csi             <unset>                          163d
+pvc-2685ffcf-fd9e-4642-9de8-fbddcbeac7c6                    25Gi       RWO            Retain           Bound         gis-2/s3minio                                              nfs-csi-2           <unset>                          100d
+pvc-27662d5d-369d-4e01-8620-9914a2ae5aeb                    5Gi        RWO            Retain           Released      demo-isua/kafka                                            nfs-csi             <unset>                          258d
+pvc-3262b957-7a9e-4fa8-83a3-504ed0aba1f2                    5Gi        RWO            Retain           Bound         dev-sis/kafka                                              nfs-csi-3           <unset>                          35d
+pvc-33e9446b-6f69-4d22-9164-6c08dbb073a9                    50Gi       RWO            Delete           Bound         devlake/devlake-mysql-data-devlake-mysql-0                 microk8s-hostpath   <unset>                          246d
+pvc-342b3551-84cf-4ad7-a457-afe0ea4b3eb7                    25Gi       RWO            Retain           Bound         rms-eurochem-dev/s3minio                                   nfs-csi             <unset>                          169d
+pvc-3aad6396-c442-4f86-b54c-0bdef3352adf                    25Gi       RWO            Retain           Released      demo-isua/s3minio                                          nfs-csi             <unset>                          258d
+pvc-40ee3ef0-6910-466b-bf94-ea6aff89f4d5                    25Gi       RWO            Retain           Bound         trip-dev/s3minio                                           nfs-csi-3           <unset>                          7d20h
+pvc-41dc3200-6213-4789-95c5-71b441e2a6e0                    5Gi        RWO            Retain           Bound         develop/kafka                                              nfs-csi             <unset>                          280d
+pvc-41f68af3-71a0-4b38-808f-83a2d690e3b3                    5Gi        RWO            Retain           Bound         test-isua-load/kafka                                       nfs-csi-2           <unset>                          64d
+pvc-45b36c13-be15-458b-a0b1-039c2a29c955                    5Gi        RWO            Retain           Bound         test-isua-sochi/kafka                                      nfs-csi             <unset>                          182d
+pvc-45d6b338-41dc-49d5-8b78-83e07449e86f                    25Gi       RWO            Retain           Bound         dev-sochi/s3minio                                          nfs-csi             <unset>                          142d
+pvc-461429d4-dceb-4951-a978-ebb4ecc28148                    25Gi       RWO            Retain           Released      schedule-dev/s3minio                                       nfs-csi-2           <unset>                          121d
+pvc-46a9729a-f7a0-403a-bfda-3466916ad843                    5Gi        RWO            Retain           Released      test-isua-svo/kafka                                        nfs-csi             <unset>                          280d
+pvc-4ac35d84-c4ae-472a-9e86-d06b854a12e3                    5Gi        RWO            Retain           Released      dev-dt/kafka                                               nfs-csi             <unset>                          280d
+pvc-4b86aadc-6ba5-44d1-8194-43ac94c80ed8                    25Gi       RWO            Retain           Bound         test-isua-load/s3minio                                     nfs-csi-2           <unset>                          64d
+pvc-4db1e80f-b6d5-4bab-81f0-c43de9528985                    25Gi       RWO            Retain           Released      test-isua-led/s3minio                                      nfs-csi             <unset>                          280d
+pvc-52723f99-f4f6-4670-9094-a29fec329d24                    25Gi       RWO            Retain           Bound         demo-aloms/s3minio                                         nfs-csi             <unset>                          225d
+pvc-53aabf30-3468-4df4-8e36-cfc4b9e4619f                    5Gi        RWO            Retain           Bound         aerps-dev/kafka                                            nfs-csi             <unset>                          229d
+pvc-5638dd0d-f7b1-4fa9-89ab-2fdbac003f86                    5Gi        RWO            Retain           Bound         aos-svo-test-02/kafka                                      nfs-csi-2           <unset>                          89d
+pvc-5780665e-dd14-4486-b163-61936538fa29                    5Gi        RWO            Retain           Bound         variation-dev/kafka                                        nfs-csi             <unset>                          280d
+pvc-5b76c35f-8507-4fb5-96dd-dfabbcb8966f                    5Gi        RWO            Retain           Released      dev-devops/kafka                                           nfs-csi             <unset>                          8d
+pvc-61a556cd-3f37-4fb9-838e-d73d7b4f14e6                    25Gi       RWO            Retain           Bound         test-isua-led/s3minio                                      nfs-csi-2           <unset>                          93d
+pvc-63f27ea5-c514-426a-9e4d-88f9ce094164                    25Gi       RWO            Retain           Released      test-isua-svo/s3minio                                      nfs-csi             <unset>                          280d
+pvc-64a2d4f8-cbda-48c9-8b62-a25bc342abdd                    5Gi        RWO            Retain           Released      dev-devops/kafka                                           nfs-csi             <unset>                          8d
+pvc-6552695b-3cd2-4db7-bf02-b2c941dd5262                    5Gi        RWO            Retain           Released      rms/kafka                                                  nfs-csi-2           <unset>                          120d
+pvc-665991a3-749d-4e08-9f38-c28f9d21afe4                    25Gi       RWO            Retain           Bound         test-isua-svo-prod/s3minio                                 nfs-csi             <unset>                          138d
+pvc-6678b3b1-143a-4db9-ab5f-9b309a55b0ed                    25Gi       RWO            Retain           Released      dev-dt/s3minio                                             nfs-csi             <unset>                          280d
+pvc-67ab43d6-84e3-4206-8ed8-24f494d90c4a                    25Gi       RWO            Retain           Bound         rms-sh-demo/s3minio                                        nfs-csi             <unset>                          280d
+pvc-6c5e435b-3d48-474d-aa91-ec342375eae4                    25Gi       RWO            Retain           Released      dev-devops/s3minio                                         nfs-csi             <unset>                          8d
+pvc-6c7b826f-9c04-4f23-a629-dc60868616d6                    25Gi       RWO            Retain           Bound         test-isua-prod-led/s3minio                                 nfs-csi-2           <unset>                          98d
+pvc-6f914b22-16ce-4784-a43e-7a46e38b005d                    25Gi       RWO            Retain           Bound         telegram-dev/s3minio                                       nfs-csi-3           <unset>                          44d
+pvc-6ff5fd35-f4d9-48fb-9196-23f7ba3a5120                    5Gi        RWO            Retain           Bound         aerps-test/kafka                                           nfs-csi-3           <unset>                          37d
+pvc-7377541f-2f68-48d4-97e3-8d1dd09312cb                    5Gi        RWO            Retain           Released      schedule-dev/kafka                                         nfs-csi-2           <unset>                          121d
+pvc-745d3a27-6b16-4ff8-8619-b1160a2fa05e                    5Gi        RWO            Retain           Bound         tgo/kafka                                                  nfs-csi             <unset>                          261d
+pvc-778a9756-58ba-4392-8e42-7b786a4748fc                    5Gi        RWO            Retain           Bound         telegram-dev/kafka                                         nfs-csi-3           <unset>                          44d
+pvc-77cbb79f-1d81-4e57-a0ce-34fde9f76384                    25Gi       RWO            Retain           Bound         test-isua-auto/s3minio                                     nfs-csi-2           <unset>                          89d
+pvc-7ab73192-34fa-4b31-9af6-ea35b9881557                    5Gi        RWO            Retain           Bound         test-isua-auto/kafka                                       nfs-csi-2           <unset>                          89d
+pvc-7b12d8c7-0d62-4de5-87e2-bc2e8ea92481                    5Gi        RWO            Retain           Bound         test-isua-svo/kafka                                        nfs-csi-2           <unset>                          110d
+pvc-7b4a1d21-526a-4d2c-afd8-645eefc71ffa                    25Gi       RWO            Retain           Bound         schedule-dev/s3minio                                       nfs-csi-2           <unset>                          121d
+pvc-7f6fb3bc-6a81-489b-926f-e2c87eed7cbe                    25Gi       RWO            Retain           Bound         tgo/s3minio                                                nfs-csi             <unset>                          261d
+pvc-83165174-11ca-4a85-8df0-614a5bb91466                    5Gi        RWO            Retain           Released      dev-sis/kafka                                              nfs-csi             <unset>                          261d
+pvc-84af6405-ce68-410a-9609-8f5320bb498a                    5Gi        RWO            Retain           Bound         demo-isua/kafka                                            nfs-csi-2           <unset>                          106d
+pvc-87365594-de5b-485b-97cb-014edc7802b7                    5Gi        RWO            Retain           Bound         test-isua-led/kafka                                        nfs-csi-2           <unset>                          93d
+pvc-873c575a-a057-42a7-8265-e19279179870                    5Gi        RWO            Retain           Released      dev-devops/kafka                                           nfs-csi             <unset>                          8d
+pvc-93fa1935-cc67-4e9c-93a0-afecd15d4576                    25Gi       RWO            Retain           Released      dev-devops/s3minio                                         nfs-csi             <unset>                          103d
+pvc-95de0ed0-6d68-48f6-9aa2-7f0a570204bb                    25Gi       RWO            Retain           Bound         test-aloms/s3minio                                         nfs-csi             <unset>                          232d
+pvc-9643870e-6525-4113-9ec0-d8edeb26d7fa                    5Gi        RWO            Retain           Bound         trip-dev/postgressql                                       nfs-csi-3           <unset>                          7d20h
+pvc-97932a7e-a3ed-4883-9a23-c7a664418412                    5Gi        RWO            Retain           Released      test-isua-prod-led/kafka                                   nfs-csi-2           <unset>                          98d
+pvc-9a55e07b-af1c-43b9-bf2a-5ca8bc186fd2                    25Gi       RWO            Retain           Bound         rms-dev-02/s3minio                                         nfs-csi-3           <unset>                          48d
+pvc-9d44f598-53ea-425b-aa94-c8a1c0114ddf                    25Gi       RWO            Retain           Bound         test-isua-sochi/s3minio                                    nfs-csi             <unset>                          265d
+pvc-a45f64ca-0a06-4f57-ba60-c81a6ad40aa9                    25Gi       RWO            Retain           Released      dev-devops/s3minio                                         nfs-csi             <unset>                          8d
+pvc-a6eb6ef0-de57-4ecb-bb34-0967cc315810                    5Gi        RWO            Retain           Bound         test-gis-svo/kafka                                         nfs-csi             <unset>                          247d
+pvc-a8e5ddeb-0bd4-4f11-bc8f-a0b6f4ec7099                    5Gi        RWO            Retain           Bound         rms-sh-demo/kafka                                          nfs-csi             <unset>                          280d
+pvc-a99cfde1-f929-4ecc-9b11-1545ba8ebd4f                    5Gi        RWO            Retain           Bound         auth-dev/kafka                                             nfs-csi             <unset>                          275d
+pvc-ac281700-b354-49b2-82be-236ff3a17da0                    25Gi       RWO            Retain           Bound         develop/s3minio                                            nfs-csi             <unset>                          280d
+pvc-ae842d2f-c409-4539-a0e1-fb8fce32f1a8                    25Gi       RWO            Retain           Bound         is-isua-svo/s3minio                                        nfs-csi             <unset>                          163d
+pvc-b43a0595-3367-497c-9632-abbf7854e3ea                    25Gi       RWO            Retain           Bound         aerps-test/s3minio                                         nfs-csi-3           <unset>                          37d
+pvc-b5412641-844d-4d8d-8a39-a948a93b9d74                    5Gi        RWO            Retain           Released      rms-dev-02/kafka                                           nfs-csi             <unset>                          48d
+pvc-bc675884-4e4b-4e5e-8e62-f0812a22c6ce                    5Gi        RWO            Retain           Released      auth-dev/postgressql                                       nfs-csi             <unset>                          275d
+pvc-be1684b4-7287-4173-8ac8-8d6f2dad1415                    5Gi        RWO            Retain           Bound         gis-2/kafka                                                nfs-csi-2           <unset>                          100d
+pvc-c002d0c6-eaad-4c34-9efc-29833fd0e00a                    5Gi        RWO            Retain           Bound         rms/kafka                                                  nfs-csi-2           <unset>                          120d
+pvc-c5caf78a-c32a-4c30-8056-e6b819507c0d                    5Gi        RWO            Retain           Bound         test-isua-svo-prod/kafka                                   nfs-csi             <unset>                          138d
+pvc-c664f49f-8197-422b-86b2-0de8b2bf1a6c                    5Gi        RWO            Retain           Released      dev-sis/kafka                                              nfs-csi-2           <unset>                          105d
+pvc-c73555da-f33a-4309-bce0-fa664febdbc5                    5Gi        RWO            Retain           Released      trip-dev/qdrant                                            nfs-csi-3           <unset>                          7d18h
+pvc-c7f8b0ca-248f-4de9-afa1-7f63c9499915                    25Gi       RWO            Retain           Bound         auth-dev/s3minio                                           nfs-csi             <unset>                          275d
+pvc-c840bf22-044f-4d26-89b4-12d9228ce957                    25Gi       RWO            Retain           Released      dev-devops/s3minio                                         nfs-csi             <unset>                          159d
+pvc-c9cf85e3-8368-434f-9651-71c88da1747f                    5Gi        RWO            Retain           Bound         rms-eurochem-dev/kafka                                     nfs-csi             <unset>                          169d
+pvc-cf612449-8511-489a-b1c5-fd4f7336f770                    5Gi        RWO            Retain           Bound         dev-aloms/kafka                                            nfs-csi             <unset>                          232d
+pvc-cff1517d-f4bd-43af-8f78-bd7d0f22db8d                    5Gi        RWO            Retain           Released      dev-devops/kafka                                           nfs-csi             <unset>                          8d
+pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb                    5Gi        RWO            Retain           Bound         dev-dt/kafka                                               nfs-csi-2           <unset>                          104d
+pvc-d1cc82b3-a67c-4654-bb1a-99d2c792987e                    25Gi       RWO            Retain           Bound         dev-sis/s3minio                                            nfs-csi-3           <unset>                          35d
+pvc-d1fc2c46-528a-4a44-bcd0-1cd9b3e08736                    5Gi        RWO            Retain           Bound         test-isua-prod-led/kafka                                   nfs-csi-2           <unset>                          30d
+pvc-d4d4572b-bf3a-4b6b-90c8-953359087d51                    5Gi        RWO            Retain           Released      trip-dev/qdrant                                            nfs-csi-3           <unset>                          7d18h
+pvc-d669ee09-3232-49ab-8570-4f8708e8bf33                    25Gi       RWO            Retain           Released      dev-sis/s3minio                                            nfs-csi-2           <unset>                          105d
+pvc-d7188d71-6d6f-4f5f-8b3b-9abc33f86837                    25Gi       RWO            Retain           Bound         test-isua-svo/s3minio                                      nfs-csi-2           <unset>                          110d
+pvc-daa0a475-4570-40e3-a1ba-43188827340c                    25Gi       RWO            Retain           Released      telegram-dev/s3minio                                       nfs-csi-2           <unset>                          107d
+pvc-debb180a-cad5-4c7b-aa43-7460a97ead37                    25Gi       RWO            Retain           Bound         test-gis-svo/s3minio                                       nfs-csi             <unset>                          247d
+pvc-e07a536f-f46e-4baa-888d-3a8ef0030489                    25Gi       RWO            Retain           Bound         rms/s3minio                                                nfs-csi-2           <unset>                          120d
+pvc-e0e45019-f444-4ada-9785-3161e954c792                    5Gi        RWO            Retain           Released      dev-devops/kafka                                           nfs-csi             <unset>                          103d
+pvc-e38ca21d-81b1-4b17-a0e2-e06ab63ce2ed                    25Gi       RWO            Retain           Bound         aos-svo-test-02/s3minio                                    nfs-csi-2           <unset>                          89d
+pvc-e3d1afaf-c810-47a1-8450-aab0c09814b1                    25Gi       RWO            Retain           Released      rms-dev-02/s3minio                                         nfs-csi             <unset>                          48d
+pvc-e80727a5-fbca-41b9-8c4e-79a3bf2d6cd0                    5Gi        RWO            Retain           Bound         schedule-dev/kafka                                         nfs-csi-2           <unset>                          121d
+pvc-e8fd6c48-693c-43e9-ac67-955f04e2f753                    5Gi        RWO            Retain           Bound         dev-sochi/kafka                                            nfs-csi             <unset>                          142d
+pvc-eaf67016-c834-4735-9a57-35c763a52563                    25Gi       RWO            Retain           Bound         aerps-dev/s3minio                                          nfs-csi             <unset>                          224d
+pvc-eb7a88e5-279a-46b5-bfc8-5bc86d16bbf2                    10Gi       RWO            Delete           Terminating   main/front-test-pv-claim                                   csi-sc-cinder       <unset>                          461d
+pvc-ee95b820-a652-4345-a39e-3eaaf8fff422                    5Gi        RWO            Retain           Bound         trip-dev/qdrant-storage                                    nfs-csi-3           <unset>                          7d17h
+pvc-ef5d1389-3104-4764-9331-31eee2d255d0                    5Gi        RWO            Retain           Bound         trip-dev/qdrant-snapshots                                  nfs-csi-3           <unset>                          7d17h
+pvc-efa9be33-3ca6-4fc3-a831-dac5b8a29255                    25Gi       RWO            Retain           Released      dev-devops/s3minio                                         nfs-csi             <unset>                          8d
+pvc-f1023aea-8d91-4664-8da7-7895860c09b0                    5Gi        RWO            Retain           Released      rms/kafka                                                  nfs-csi             <unset>                          280d
+pvc-f1097bb4-e1eb-41c1-840a-d4de30a1fdc8                    5Gi        RWO            Retain           Released      test-isua-led/kafka                                        nfs-csi             <unset>                          280d
+pvc-fa7d4143-58e1-4ab7-8296-787a247166e0                    25Gi       RWO            Retain           Bound         variation-dev/s3minio                                      nfs-csi             <unset>                          280d
+pvc-fc6c147a-5165-4b92-8516-af00baa09d70                    25Gi       RWO            Retain           Bound         dev-aloms/s3minio                                          nfs-csi             <unset>                          232d
+pvc-fea0a11d-8836-4792-97c0-1f1f33bd125a                    25Gi       RWO            Retain           Released      rms/s3minio                                                nfs-csi             <unset>                          280d
+s3minio-devops-pv-volume                                    25Gi       RWO            Retain           Released      devops/s3minio-pv-claim                                                        <unset>                          181d
+terminal-infrastructure-load-dev-dt-dt-pv-volume            5Gi        RWX            Retain           Bound         dev-dt-dt/terminal-infrastructure-load-pv-claim                                <unset>                          271d
+terminal-infrastructure-load-dev-sochi-dt-pv-volume         5Gi        RWX            Retain           Bound         dev-sochi-dt/terminal-infrastructure-load-pv-claim                             <unset>                          128d
+terminal-infrastructure-load-develop-dt-pv-volume           5Gi        RWX            Retain           Bound         develop-dt/terminal-infrastructure-load-pv-claim                               <unset>                          386d
+terminal-infrastructure-load-test-isua-sochi-dt-pv-volume   5Gi        RWX            Retain           Bound         test-isua-sochi-dt/terminal-infrastructure-load-pv-claim                       <unset>                          260d
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    meta.helm.sh/release-name: infra
+    meta.helm.sh/release-namespace: dev-aloms
+  creationTimestamp: "2025-07-29T11:40:37Z"
+  labels:
+    app: redis
+    app.kubernetes.io/managed-by: Helm
+  name: redis-service
+  namespace: dev-aloms
+  resourceVersion: "167303535"
+  uid: 93e81b6e-0df7-4c1f-99fa-600bc2b29f1f
+spec:
+  clusterIP: 192.168.188.166
+  clusterIPs:
+  - 192.168.188.166
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: client
+    port: 6379
+    protocol: TCP
+    targetPort: 6379
+  selector:
+    app: redis
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+NAME                 STATUS                     ROLES    AGE    VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION       CONTAINER-RUNTIME
+microk8s             Ready,SchedulingDisabled   <none>   470d   v1.30.14   192.168.0.221   <none>        Ubuntu 22.04.5 LTS   5.15.0-87-generic    containerd://1.6.28
+microk8s-1           Ready                      <none>   162d   v1.30.14   192.168.0.169   <none>        Ubuntu 24.04.2 LTS   6.8.0-57-generic     containerd://1.6.28
+microk8s-2           Ready                      <none>   287d   v1.30.14   192.168.0.28    <none>        Ubuntu 22.04.5 LTS   5.15.0-87-generic    containerd://1.6.28
+microk8s-3           Ready                      <none>   467d   v1.30.14   192.168.0.250   <none>        Ubuntu 22.04.5 LTS   5.15.0-87-generic    containerd://1.6.28
+microk8s-4           Ready                      <none>   371d   v1.30.14   192.168.0.235   <none>        Ubuntu 22.04.5 LTS   5.15.0-134-generic   containerd://1.6.28
+microk8s-5           Ready                      <none>   287d   v1.30.14   192.168.0.122   <none>        Ubuntu 22.04.5 LTS   5.15.0-130-generic   containerd://1.6.28
+microk8s-6           Ready                      <none>   230d   v1.30.14   192.168.0.92    <none>        Ubuntu 24.04.2 LTS   6.8.0-57-generic     containerd://1.6.28
+microk8s-7           Ready                      <none>   163d   v1.30.14   192.168.0.129   <none>        Ubuntu 24.04.2 LTS   6.8.0-57-generic     containerd://1.6.28
+microk8s-8           Ready                      <none>   36d    v1.30.14   192.168.0.32    <none>        Ubuntu 24.04.4 LTS   6.8.0-57-generic     containerd://1.6.28
+microk8s-ingress-1   Ready,SchedulingDisabled   <none>   147d   v1.30.14   192.168.0.109   <none>        Ubuntu 24.04.2 LTS   6.8.0-57-generic     containerd://1.6.28
+microk8s-ingress-2   Ready,SchedulingDisabled   <none>   147d   v1.30.14   192.168.0.119   <none>        Ubuntu 24.04.2 LTS   6.8.0-57-generic     containerd://1.6.28
+NAME                 STATUS                     ROLES    AGE    VERSION    LABELS
+microk8s             Ready,SchedulingDisabled   <none>   470d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,k8slens-edit-resource-version=v1,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-controlplane=microk8s-controlplane,topology.cinder.csi.openstack.org/zone=nova
+microk8s-1           Ready                      <none>   162d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-1,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-2           Ready                      <none>   287d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-2,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-3           Ready                      <none>   467d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-3,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker,topology.cinder.csi.openstack.org/zone=nova
+microk8s-4           Ready                      <none>   371d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-4,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-5           Ready                      <none>   287d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-5,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-6           Ready                      <none>   230d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-6,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-7           Ready                      <none>   163d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-7,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-8           Ready                      <none>   36d    v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-8,kubernetes.io/os=linux,microk8s.io/cluster=true,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-ingress-1   Ready,SchedulingDisabled   <none>   147d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-ingress-1,kubernetes.io/os=linux,microk8s.io/cluster=true,node-role=ingress,node.kubernetes.io/microk8s-worker=microk8s-worker
+microk8s-ingress-2   Ready,SchedulingDisabled   <none>   147d   v1.30.14   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=microk8s-ingress-2,kubernetes.io/os=linux,microk8s.io/cluster=true,node-role=ingress,node.kubernetes.io/microk8s-worker=microk8s-worker
+11
+used_memory_human:2.82M
+maxmemory_human:0B
+0
+registry.test.model.svo.aero/dpm/iac/infra/redis/redis:8.4.0161
+---
+values.yaml
+labels:
+  elasticsearch: elasticsearch
+  kafka: kafka
+  mongodb: mongodb
+  postgresSql: postgressql
+  redis: redis
+  s3minio: s3minio
+  fids:
+    share: fids
+    admin: admin
+    tv: tv-backend
+    templateManager: template-manager
+    resonator: resonator
+    fileProxy: file-proxy
+  rms:
+    share: rms
+    rulesBackend: rules-backend
+    dispatcherBackend: dispatcher-backend
+    grBackend: gr-backend
+    rapBackend: rap-backend
+    ws: ws
+    acAllocationSocketServer: ac-allocation-socket-server
+    gisStandEndpoints: gis-stand-endpoints
+    mobile: mobile
+    streamer: streamer
+    StandsApi: ac-allocation-stands-api
+    userEventAdapter: user-event-adapter
+    hypotheses: hypotheses
+    reportBackend: report-backend
+    taskManager: task-manager
+  tgo:
+    share: tgo
+    input: input
+    proxy: proxy
+    tgoInit: tgo-init
+  approvals: approvals
+# Внести Seeder
+  notification: notification
+# Deprecated
+  runway:
+    share: runway
+    flightmonitor: flightmonitor
+    runwayload: runwayload
+  auth: auth
+  keycloak: keycloak
+  front: front
+  telegram:
+    telegram: telegram
+    share: telegram
+    lis: lis
+  schedule:
+    share: schedule
+    codeShare: codeshare
+    bff: bff
+    galaxy: galaxy-connector
+    synchronLedСonnector: synchron-led-connector
+    scheduleNotification: schedule-notification
+  variation:
+    share: variation
+    variation: variation
+    synchron: synchron-variation
+  gis:
+    share: gis
+    history: history
+    defects: defects
+    slc: slc
+    asf: asf
+    assignments: assignments
+    dls: dls
+    mobileProxy: mobile-proxy
+    mobileServer: mobile-server
+    needs: needs
+    gantt: gantt
+    os: os
+    tileMap: tile-map
+    historyPlayback: history-playback
+    slb: slb
+    vega: vega
+    user: user
+    ornithology: ornithology
+    dataLakeService: data-lake
+    eventService: events
+    weatherProxy: weather
+    towTaskService: tow-task-service
+    hwaService: hwa
+  dt:
+    share: dt
+    gateway: gateway
+    airportScheduleEnrichment: airport-schedule-enrichment
+    validator: validator
+    resourceOperator: resource-operator
+    # TODO только для стенда гардиума, удалить в будущих версиях после замены на нормальный стенд
+    path: digital-twin
+    aircraftstandallocation3: aircraftstandallocation3
+    aircraftstandallocation3DataServer: aircraftstandallocation3-data-server
+    replicator: replicator
+    predictive: predictive
+    prospectiveAC: prospect-ac
+    variations: variations-dt
+    requestoperators: requestoperators
+    kpmModelBackend: kpm-model-backend
+    airportSecurity: airport-security
+    terminalInfrastructureLoad: terminal-infrastructure-load
+    aodbConnector: proxy
+    scheduleConverterDt: schedule-converter-dt
+    dtBff: dt-bff
+    predictiveOrchestrator: predictive-orchestrator
+    predictiveDashboard: predictive-dashboard
+    cpmBaseImage: cpm-base-image
+    sochiScheduleSynchronizer: sochi-schedule-synchronizer
+    dtRequestsDbMigrator: dt-requests-db-migrator
+    reportManager: report-manager
+    ovzSampling: ovz-sampling
+    managerDashboard: manager-dashboard
+    managerCalculations: manager-calculations
+    checkInBff: check-in-bff
+    checkInDesks: check-in-desks
+  sis:
+    config: config
+    share: sis
+    dictorPanel: dictor-panel
+    eventProcessor: event-processor
+    scheduler: scheduler
+    audio: audio
+    template: template
+    systemLog: system-log
+  mailservice: mailservice
+  audit: audit
+  aerps:
+    share: aerps
+    backend: backend
+    eventManager: event-manager
+    sapManager: sap-manager
+    synchronManager: synchron-manager
+    ckhdManager: ckhd-manager
+    gisManager: gis-manager
+    ivantiManager: ivanti-manager
+    sobManager: sob-manager
+  aloms:
+    share: aloms
+    alomsBackend: aloms-backend
+    alomsGateway: aloms-pobeda-backend
+  techgraph:
+    share: techgraph
+    graphBackend: graph-backend
+  eurochem:
+    share: eurochem
+    eurochemOrderBackend: eurochem-order-backend
+  sh:
+    share: sh
+    slotHandler: slot-handler
 
-# 1. StorageClass — что доступно в кластере
-kubectl get sc
 
-# 2. Текущий манифест одного redis (берём первый попавшийся namespace как пример)
-kubectl get statefulset redis-deployment -n develop -o yaml
+ports:
+  internal:
+    keycloak:
+      back: 8000
+      health: 9000
+    s3minioAPI: 9000
+    s3minioConsole: 9001
+    postgresSql: 5432
+    front: 80
+    nginx: 8080
+    frontTargetPort: 8080
+    mongodb: 27017
+    back: 8000
+    elasticsearch: 
+      http: 9200
+      transport: 9300
+    galaxy: 8000
+    grpc: 50051
+    kafka:
+      internal: 9092
+      k8sInternal: 9094
+    redis:
+      client: 6379
+      bus: 16379
+# Если нужно внешнее подключение через NodePort то, необходимо указать порт
+  external:
+    postgresSql:
+    mongodb:
+    kafka:
+    galaxy:
 
-# 3. Существующие PV/PVC в кластере (проверяем что уже есть)
-kubectl get pv
-kubectl get pvc -A | grep redis
+# Change to True if you need service in k8s
+enableService:
+  s3minio: false
+  postgresSql: false
+  mongodb: false
+  kafka: false
+  nginx:
+    enable: false
+    resolver: kube-dns.kube-system
+    resolver_valid: 30s
+    s3:
+      enable: false
+      S3_CONNECTOR: s3minio-api-service.{{ .Release.Namespace }}.svc.{{ .Values.localK8sDomain }}:9000
+      protocol: http
+      verifySsl: true
+      S3_BUCKET: front
+      S3_ACCESS_KEY:
+      S3_SECRET_KEY:
+      S3_SECURE:
+      FOLDER_NAME:
+      SOURCE_PATH:
+  elastic:
+    # Для запуска elastic кластера с несколькими нодами нужно указать type: multi-node
+    enable: false
+    type: single-node
+    replicas: 1
+  redis:
+    # Для запуска redis кластера с 3мя нодами нужно указать type: cluster.
+    type: single
+    enable: false
 
-# 4. Текущий Service redis в namespace develop
-kubectl get svc redis-service -n develop -o yaml
+s3minio:
+  root_user: "minioadmin"
+  root_password: "minioadmin"
+  # EXAMPLE buckets: "front,schedule"
+  buckets: "front"
+  minio_settings:
+    scanner_delay: "\"1\""
 
-# 5. Ноды кластера и их лейблы (нужно для понимания topology)
-kubectl get nodes -o wide
-kubectl get nodes --show-labels
+enableModules:
+  schedule: false
+  rms: false
+  fids: false
+  variation: false
+  synchronVariation: false
+  approvals: false
+  notification: false
+  runway: false
+  telegram: false
+  tgo: false
+  predictive: false
+  gis: false
+  dt: false
+  sis: false
+  mailservice: false
+  audit: false
+  aerps: false
+  aloms: false
+  techgraph: false
+  eurochem: false
+  sh: false
 
-# 6. Сколько нод в кластере (всего)
-kubectl get nodes --no-headers | wc -l
+ingressClassName: nginx
+realmName: test-realm
+realmClient: test-client
+localK8sDomain: cluster.local
+ingressDomain:
+kafkaExternalIP:
+ingressSettings:
+  maxBodySize: "500m"
+baseNs: main
 
-# 7. Реальное потребление памяти Redis в одном из namespace
-# (выбери любой активный namespace из списка)
-kubectl exec -n develop redis-deployment-0 -- redis-cli info memory | grep -E "used_memory_human|maxmemory_human"
+imagePullSecret: regcred-2
 
-# 8. Количество ключей в Redis (чтобы понять объём данных)
-kubectl exec -n develop redis-deployment-0 -- redis-cli dbsize
+TLS:
+  enable: false
+  secret: "{{ .Values.ingressDomain }}-tls-secret"
+postgresSql:
+  db: "testdb"
+  user: "testdbadmin"
+  password: "testdbpassword"
+mongoDb:
+  user: "root"
+  password: "example"
 
-# 9. Текущий образ Redis (версия важна для cluster mode)
-kubectl get statefulset redis-deployment -n develop -o jsonpath='{.spec.template.spec.containers[0].image}'
+images:
+  redis: registry.test.model.svo.aero/dpm/iac/infra/redis/redis:8.4.0
+  postgresSql:  registry.test.model.svo.aero/dpm/iac/infra/postgres:16.9
+  kafka: registry.test.model.svo.aero/dpm/iac/infra:bitnami-kafka
+  elasticsearch: registry.test.model.svo.aero/dpm/iac/infra:elk-8-11-3
+  s3minio: registry.test.model.svo.aero/dpm/iac/infra/s3minio:0.0.1
+  mongo: registry.test.model.svo.aero/dpm/iac/infra/mongo:8.0.10-noble
+  curl: registry.test.model.svo.aero/dpm/iac/infra/curl:8.15.0
+  nginx: registry.test.model.svo.aero/dpm/iac/infra/nginx:1.25.4_NonRoot
 
-# 10. Доступные namespace с redis (для понимания масштаба)
-kubectl get pods -A | grep "redis-deployment-0" | awk '{print $1}' | wc -l
+# solution for local PVs
+bindNode:
+storageLocalPath: /mnt/extstorage
+securityContext:
+  enable: false
+  fsGroup: 1000
+  
+  mongodb:
+    enable: false
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+  postgres:
+    enable: false
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
 
-# 11. ConfigMap redis если есть (для cluster type)
-kubectl get configmap -A | grep redis
+NFS:
+  name: nfs-csi
+  service:
+    kafka: false
+    mongodb: false
+    postgresSql: false
+    s3minio: false
 
-# 12. Текущий values.yaml используемый для деплоя
-# (скинь содержимое файла values.yaml или укажи путь)
-# cat path/to/your/values.yaml
+# solution for CIDR
+storageClassName:  "\"\""
 
-# =============================================================
-# ИТОГО: скинь вывод команд 1-11 + содержимое values.yaml
-# =============================================================
+elasticConfig:
+  cluster:
+    max_shards_per_node: 1000
+
+# EXAMPLE for resources configuration
+# configPods:
+#   s3minio:
+#     resources:
+#       limits:
+#         cpu:
+#         memory:
+#       requests:
+#         cpu:
+#         memory:
