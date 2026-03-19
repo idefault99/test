@@ -1,70 +1,20 @@
-{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ $.Values.labels.redis }}-job-{{ $.Release.Revision }}
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 600  # было 30 — не хватало
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      serviceAccountName: redis-waiter-sa  # твой SA оставляем
-      restartPolicy: Never
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
-      initContainers:
-        - name: wait-for-redis-nodes
-          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
-          command: ['sh', '-c']
-          args:
-            - |
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-0 --timeout=300s
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-1 --timeout=300s
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-2 --timeout=300s
-      containers:
-        - name: {{ $.Values.labels.redis }}
-          image: {{ $.Values.images.redis }}
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c"]
-          args:
-            - |
-              # Проверяем — если кластер уже ок, пропускаем (идемпотентность)
-              CLUSTER_STATE=$(redis-cli \
-                -h {{ $.Values.labels.redis }}-deployment-0.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }} \
-                -p {{ $.Values.ports.internal.redis.client }} \
-                cluster info | grep cluster_state | cut -d: -f2 | tr -d '[:space:]')
+## Известные ограничения
 
-              if [ "$CLUSTER_STATE" = "ok" ]; then
-                echo "Кластер уже инициализирован, пропускаем."
-                exit 0
-              fi
+**Redis Cluster требует `-c` флаг от клиентов для redirect**
 
-              echo "Инициализируем Redis Cluster..."
-              redis-cli --cluster create \
-                {{- range $i := until 3 }}
-                {{ $.Values.labels.redis }}-deployment-{{ $i }}.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}:{{ $.Values.ports.internal.redis.client }} \
-                {{- end }}
-                --cluster-replicas 0 \
-                --cluster-yes
-{{- end }}
-{{- end }}
-{{- end }}
+Redis Cluster перенаправляет ключи между нодами через MOVED/ASK команды.
+Если клиентская библиотека не поддерживает cluster mode — ключи на “чужих” слотах вернут ошибку.
+
+Проверь какой Redis-клиент используют твои приложения:
+
+- **ioredis** (Node.js) — поддерживает cluster, нужно указать все 3 ноды или использовать DNS
+- **redis-py** (Python) — нужен `RedisCluster` вместо `Redis`
+- **Jedis/Lettuce** (Java) — нужен `JedisCluster` / `RedisClusterClient`
+- **go-redis** (Go) — нужен `NewClusterClient`
+
+Если приложения используют обычное подключение к `redis-service:6379` без cluster-aware клиента —
+**оставь `type: single`**, добавь только PVC. Данные при рестарте сохранятся, кластера не будет,
+но и проблем с клиентами не будет.
+
+**Как понять нужен ли cluster клиент**: если после миграции в логах приложения появляются ошибки
+`MOVED` или `CROSSSLOT` — приложение не поддерживает cluster mode, нужно вернуть `type: single`.
