@@ -2,46 +2,69 @@
 {{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
 {{- range $module := $modules.main }}
 {{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $.Values.labels.redis }}-job
+  name: {{ $.Values.labels.redis }}-job-{{ $.Release.Revision }}
   labels:
     app: {{ $.Values.labels.redis }}
-  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+  namespace: {{ $ns }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600  # было 30 — не хватало
+  ttlSecondsAfterFinished: 300
   template:
     spec:
-      serviceAccountName: redis-waiter-sa
-      initContainers:
-      - name: wait-for-redis-nodes
-        image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
-        command: ['sh', '-c']
-        args:
-        - |
-          kubectl auth can-i get pods -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
-          kubectl wait --for=condition=Ready -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }} pod/{{ $.Values.labels.redis }}-deployment-0 --timeout=300s
-          kubectl wait --for=condition=Ready -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }} pod/{{ $.Values.labels.redis }}-deployment-1 --timeout=300s  
-          kubectl wait --for=condition=Ready -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }} pod/{{ $.Values.labels.redis }}-deployment-2 --timeout=300s
-      containers:
-      - name: {{ $.Values.labels.redis }}
-        image: {{ $.Values.images.redis }}
-        imagePullPolicy: "IfNotPresent"
-        command: [ "sh", "-c" ]
-        args:
-          - |
-            redis-cli --cluster create \
-            {{- range $i := until 3 }}
-            {{ $.Values.labels.redis }}-deployment-{{ $i }}.{{ $.Values.labels.redis }}-service.{{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}.svc.cluster.local:{{ $.Values.ports.internal.redis.client }} \
-            {{- end }}
-            --cluster-yes
+      serviceAccountName: redis-waiter-sa  # твой SA оставляем
       restartPolicy: Never
       imagePullSecrets:
         - name: {{ $.Values.imagePullSecret }}
-  backoffLimit: 3
-  activeDeadlineSeconds: 30
-  ttlSecondsAfterFinished: 40
+      initContainers:
+        - name: wait-for-redis-nodes
+          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
+          command: ['sh', '-c']
+          args:
+            - |
+              kubectl wait --for=condition=Ready \
+                -n {{ $ns }} \
+                pod/{{ $.Values.labels.redis }}-deployment-0 --timeout=300s
+              kubectl wait --for=condition=Ready \
+                -n {{ $ns }} \
+                pod/{{ $.Values.labels.redis }}-deployment-1 --timeout=300s
+              kubectl wait --for=condition=Ready \
+                -n {{ $ns }} \
+                pod/{{ $.Values.labels.redis }}-deployment-2 --timeout=300s
+      containers:
+        - name: {{ $.Values.labels.redis }}
+          image: {{ $.Values.images.redis }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              # Проверяем — если кластер уже ок, пропускаем (идемпотентность)
+              CLUSTER_STATE=$(redis-cli \
+                -h {{ $.Values.labels.redis }}-deployment-0.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }} \
+                -p {{ $.Values.ports.internal.redis.client }} \
+                cluster info | grep cluster_state | cut -d: -f2 | tr -d '[:space:]')
+
+              if [ "$CLUSTER_STATE" = "ok" ]; then
+                echo "Кластер уже инициализирован, пропускаем."
+                exit 0
+              fi
+
+              echo "Инициализируем Redis Cluster..."
+              redis-cli --cluster create \
+                {{- range $i := until 3 }}
+                {{ $.Values.labels.redis }}-deployment-{{ $i }}.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}:{{ $.Values.ports.internal.redis.client }} \
+                {{- end }}
+                --cluster-replicas 0 \
+                --cluster-yes
 {{- end }}
 {{- end }}
 {{- end }}
