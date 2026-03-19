@@ -1,326 +1,47 @@
-#!/usr/bin/env bash
-# ============================================================
-#  WSL2 Network Diagnostics & Auto-Fix
-#  Проверяет: ping, SSH, DNS, маршруты, firewall, MTU, resolv.conf
-# ============================================================
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-
-OK()   { echo -e "  ${GREEN}[OK]${NC}  $*"; }
-FAIL() { echo -e "  ${RED}[FAIL]${NC} $*"; }
-WARN() { echo -e "  ${YELLOW}[WARN]${NC} $*"; }
-INFO() { echo -e "  ${CYAN}[INFO]${NC} $*"; }
-SECTION() { echo -e "\n${BOLD}══════════════════════════════════════════${NC}"; \
-            echo -e "${BOLD} $*${NC}"; \
-            echo -e "${BOLD}══════════════════════════════════════════${NC}"; }
-
-FIXED=0
-ERRORS=0
-
-# ──────────────────────────────────────────
-# 0. Проверка что мы в WSL2
-# ──────────────────────────────────────────
-SECTION "0. Окружение"
-if grep -qi microsoft /proc/version 2>/dev/null; then
-    WSL_VER=$(uname -r)
-    OK "Запущено в WSL (ядро: $WSL_VER)"
-else
-    WARN "Не похоже на WSL — скрипт всё равно продолжит"
-fi
-
-# ──────────────────────────────────────────
-# 1. IP и интерфейсы
-# ──────────────────────────────────────────
-SECTION "1. Сетевые интерфейсы"
-ETH=$(ip -o -4 route show to default 2>/dev/null | awk '{print $5}' | head -1)
-GW=$(ip -o -4 route show to default 2>/dev/null | awk '{print $3}' | head -1)
-IP=$(ip -4 addr show "$ETH" 2>/dev/null | awk '/inet /{print $2}' | head -1)
-
-if [[ -n "$ETH" && -n "$IP" ]]; then
-    OK "Интерфейс: $ETH   IP: $IP   GW: $GW"
-else
-    FAIL "Не удалось определить интерфейс/IP/шлюз"
-    ((ERRORS++))
-fi
-
-# ──────────────────────────────────────────
-# 2. Ping — ICMP
-# ──────────────────────────────────────────
-SECTION "2. ICMP (ping)"
-PING_GW=false; PING_EXT=false
-
-if ping -c 2 -W 2 "$GW" &>/dev/null 2>&1; then
-    OK "Ping шлюза $GW — работает"
-    PING_GW=true
-else
-    FAIL "Ping шлюза $GW — НЕ работает (ICMP заблокирован или нет маршрута)"
-    ((ERRORS++))
-fi
-
-if ping -c 2 -W 3 8.8.8.8 &>/dev/null 2>&1; then
-    OK "Ping 8.8.8.8 — работает"
-    PING_EXT=true
-else
-    FAIL "Ping 8.8.8.8 — НЕ работает"
-    ((ERRORS++))
-fi
-
-if ping -c 2 -W 3 google.com &>/dev/null 2>&1; then
-    OK "Ping google.com — работает"
-else
-    FAIL "Ping google.com — НЕ работает"
-    ((ERRORS++))
-fi
-
-# ──────────────────────────────────────────
-# 3. DNS
-# ──────────────────────────────────────────
-SECTION "3. DNS резолвинг"
-RESOLV_NS=$(grep "^nameserver" /etc/resolv.conf | awk '{print $2}' | head -3)
-INFO "Nameservers в /etc/resolv.conf: $(echo $RESOLV_NS | tr '\n' ' ')"
-
-# Проверяем не указывает ли resolv.conf на 127.0.0.53 (systemd-resolved) когда он не работает
-if echo "$RESOLV_NS" | grep -q "^127\."; then
-    if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
-        OK "systemd-resolved активен, loopback DNS ок"
-    else
-        WARN "resolv.conf указывает на 127.x.x.x, но systemd-resolved не запущен — это может ломать DNS"
-        ((ERRORS++))
-        echo "    → Попытка исправить..."
-        sudo systemctl start systemd-resolved 2>/dev/null && \
-            OK "systemd-resolved запущен" && ((FIXED++)) || \
-            FAIL "Не удалось запустить systemd-resolved"
-    fi
-fi
-
-# nslookup
-if command -v nslookup &>/dev/null; then
-    if nslookup google.com &>/dev/null; then
-        OK "nslookup google.com — OK"
-    else
-        FAIL "nslookup google.com — FAIL"
-        ((ERRORS++))
-    fi
-fi
-
-# Прямой dig к 8.8.8.8
-if command -v dig &>/dev/null; then
-    if dig @8.8.8.8 google.com +short +time=3 &>/dev/null; then
-        OK "dig @8.8.8.8 — DNS напрямую работает"
-    else
-        FAIL "dig @8.8.8.8 — нет ответа от 8.8.8.8:53"
-        ((ERRORS++))
-    fi
-fi
-
-# ──────────────────────────────────────────
-# 4. TCP — curl
-# ──────────────────────────────────────────
-SECTION "4. TCP connectivity (curl/nc)"
-if curl -s --max-time 5 https://google.com -o /dev/null; then
-    OK "curl https://google.com — работает"
-else
-    FAIL "curl https://google.com — НЕ работает"
-    ((ERRORS++))
-fi
-
-# Порт 22 до github (внешний SSH тест)
-if command -v nc &>/dev/null; then
-    if nc -z -w3 github.com 22 2>/dev/null; then
-        OK "TCP порт 22 наружу (github.com:22) — открыт"
-    else
-        WARN "TCP порт 22 наружу заблокирован (SSH из WSL в интернет не пройдёт)"
-    fi
-fi
-
-# ──────────────────────────────────────────
-# 5. SSH клиент
-# ──────────────────────────────────────────
-SECTION "5. SSH клиент"
-if command -v ssh &>/dev/null; then
-    OK "ssh установлен: $(ssh -V 2>&1)"
-else
-    FAIL "ssh не установлен"
-    ((ERRORS++))
-    echo "    → Устанавливаем openssh-client..."
-    sudo apt-get install -y openssh-client &>/dev/null && \
-        OK "openssh-client установлен" && ((FIXED++)) || \
-        FAIL "Не удалось установить"
-fi
-
-# SSH агент
-if [[ -z "$SSH_AUTH_SOCK" ]]; then
-    WARN "SSH_AUTH_SOCK не установлен — ssh-agent не запущен (ключи могут не работать)"
-else
-    OK "ssh-agent: $SSH_AUTH_SOCK"
-fi
-
-# ──────────────────────────────────────────
-# 6. MTU — частая причина проблем в WSL2
-# ──────────────────────────────────────────
-SECTION "6. MTU"
-CURRENT_MTU=$(cat /sys/class/net/"$ETH"/mtu 2>/dev/null)
-INFO "Текущий MTU на $ETH: $CURRENT_MTU"
-
-# Тест фрагментации: ping с большим пакетом
-if ping -c 1 -W 3 -M do -s 1400 8.8.8.8 &>/dev/null; then
-    OK "Пакеты 1400 байт проходят без фрагментации"
-else
-    WARN "Пакеты 1400 байт не проходят — возможна проблема MTU/PMTUD"
-    if [[ "$CURRENT_MTU" -gt 1400 ]]; then
-        echo "    → Устанавливаем MTU 1400 на $ETH..."
-        sudo ip link set dev "$ETH" mtu 1400 && \
-            OK "MTU установлен в 1400" && ((FIXED++)) || \
-            FAIL "Не удалось изменить MTU"
-    fi
-fi
-
-# ──────────────────────────────────────────
-# 7. /etc/resolv.conf — проверка и фикс
-# ──────────────────────────────────────────
-SECTION "7. /etc/resolv.conf"
-if [[ -L /etc/resolv.conf ]]; then
-    REAL=$(readlink -f /etc/resolv.conf)
-    INFO "resolv.conf — симлинк → $REAL"
-else
-    INFO "resolv.conf — обычный файл"
-fi
-
-# Проверяем /etc/wsl.conf на generateResolvConf
-if [[ -f /etc/wsl.conf ]]; then
-    GEN=$(grep -i "generateResolvConf" /etc/wsl.conf 2>/dev/null)
-    if echo "$GEN" | grep -qi "false"; then
-        WARN "generateResolvConf=false — WSL не генерирует resolv.conf автоматически"
-        INFO "Проверяем содержимое resolv.conf..."
-        cat /etc/resolv.conf
-    else
-        OK "wsl.conf: generateResolvConf не отключён"
-    fi
-fi
-
-# Если в resolv.conf нет рабочего NS — добавляем 8.8.8.8
-DNS_WORKS=false
-for ns in $RESOLV_NS; do
-    if dig @"$ns" google.com +short +time=2 &>/dev/null 2>&1; then
-        DNS_WORKS=true; break
-    fi
-done
-
-if ! $DNS_WORKS; then
-    FAIL "Ни один NS из resolv.conf не отвечает"
-    ((ERRORS++))
-    echo "    → Добавляем резервный 8.8.8.8 в resolv.conf..."
-    if [[ -L /etc/resolv.conf ]]; then
-        # Если симлинк — не трогаем, создаём резервный файл
-        sudo mkdir -p /etc/resolv.conf.d 2>/dev/null
-        WARN "resolv.conf — симлинк, добавить напрямую нельзя"
-        INFO "Попробуйте в /etc/wsl.conf добавить [network] generateResolvConf=true и перезапустить WSL"
-    else
-        if ! grep -q "8.8.8.8" /etc/resolv.conf; then
-            echo "nameserver 8.8.8.8" | sudo tee -a /etc/resolv.conf > /dev/null && \
-                OK "Добавлен nameserver 8.8.8.8" && ((FIXED++))
-        fi
-    fi
-fi
-
-# ──────────────────────────────────────────
-# 8. Маршрутизация
-# ──────────────────────────────────────────
-SECTION "8. Таблица маршрутов"
-ip route show
-echo ""
-
-# Проверяем дефолтный маршрут
-if ip route | grep -q "^default"; then
-    OK "Дефолтный маршрут есть"
-else
-    FAIL "Нет дефолтного маршрута — сеть не будет работать!"
-    ((ERRORS++))
-    echo "    → Добавляем дефолтный маршрут через $GW..."
-    if [[ -n "$GW" && -n "$ETH" ]]; then
-        sudo ip route add default via "$GW" dev "$ETH" && \
-            OK "Маршрут добавлен" && ((FIXED++)) || \
-            FAIL "Не удалось добавить маршрут"
-    fi
-fi
-
-# ──────────────────────────────────────────
-# 9. /etc/hosts
-# ──────────────────────────────────────────
-SECTION "9. /etc/hosts"
-if grep -q "^127.0.0.1.*localhost" /etc/hosts; then
-    OK "localhost корректно прописан в /etc/hosts"
-else
-    WARN "Запись 127.0.0.1 localhost отсутствует в /etc/hosts"
-    ((ERRORS++))
-fi
-
-# ──────────────────────────────────────────
-# 10. Рекомендации по Windows Firewall
-# ──────────────────────────────────────────
-SECTION "10. Windows Firewall (информация)"
-INFO "Ping из WSL2 использует ICMP — его часто блокирует Windows Defender Firewall"
-INFO "Для разрешения ICMP в Windows выполни в PowerShell (от Администратора):"
-echo ""
-echo "  # Разрешить входящий ICMP (echo request)"
-echo '  New-NetFirewallRule -DisplayName "WSL2 ICMP Allow" `'
-echo '      -Direction Inbound -Protocol ICMPv4 `'
-echo '      -IcmpType 8 -Action Allow'
-echo ""
-echo "  # Либо для WSL2 подсети (обычно 172.16.0.0/12):"
-echo '  New-NetFirewallRule -DisplayName "WSL2 subnet ICMP" `'
-echo '      -Direction Inbound -Protocol ICMPv4 `'
-echo '      -RemoteAddress 172.16.0.0/12 -Action Allow'
-echo ""
-INFO "Если SSH не работает С Windows В WSL2 (не из WSL наружу):"
-echo '  New-NetFirewallRule -DisplayName "WSL2 SSH" `'
-echo '      -Direction Inbound -Protocol TCP -LocalPort 22 `'
-echo '      -RemoteAddress 172.16.0.0/12 -Action Allow'
-
-# ──────────────────────────────────────────
-# 11. /etc/wsl.conf — проверка сетевых настроек
-# ──────────────────────────────────────────
-SECTION "11. /etc/wsl.conf"
-if [[ -f /etc/wsl.conf ]]; then
-    INFO "Содержимое /etc/wsl.conf:"
-    cat /etc/wsl.conf
-else
-    WARN "/etc/wsl.conf не найден"
-    INFO "Создаём рекомендуемый /etc/wsl.conf..."
-    sudo tee /etc/wsl.conf > /dev/null <<'EOF'
-[network]
-generateResolvConf = true
-hostname = ubuntu-wsl
-
-[boot]
-systemd = true
-EOF
-    OK "Создан /etc/wsl.conf (потребуется перезапуск WSL: wsl --shutdown)"
-    ((FIXED++))
-fi
-
-# ──────────────────────────────────────────
-# 12. Итог
-# ──────────────────────────────────────────
-SECTION "Итог"
-echo ""
-if [[ $ERRORS -eq 0 ]]; then
-    echo -e "  ${GREEN}${BOLD}Проблем не обнаружено!${NC}"
-elif [[ $FIXED -gt 0 ]]; then
-    echo -e "  ${YELLOW}${BOLD}Найдено проблем: $ERRORS | Исправлено автоматически: $FIXED${NC}"
-    echo ""
-    WARN "Некоторые исправления требуют перезапуска WSL:"
-    echo "    В PowerShell: wsl --shutdown"
-    echo "    Затем заново открой терминал WSL"
-else
-    echo -e "  ${RED}${BOLD}Найдено проблем: $ERRORS | Автофикс не помог или требует ручного вмешательства${NC}"
-    echo ""
-    INFO "Скорее всего проблема на стороне Windows (Firewall/Hyper-V)"
-    INFO "Следуй инструкциям в разделе 10 выше"
-fi
-
-echo ""
-INFO "Версия ядра WSL: $(uname -r)"
-INFO "Дата проверки:   $(date)"
-echo ""
+{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $.Values.labels.redis }}-job
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+spec:
+  template:
+    spec:
+      serviceAccountName: redis-waiter-sa
+      initContainers:
+      - name: wait-for-redis-nodes
+        image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
+        command: ['sh', '-c']
+        args:
+        - |
+          kubectl auth can-i get pods -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+          kubectl wait --for=condition=Ready -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }} pod/{{ $.Values.labels.redis }}-deployment-0 --timeout=300s
+          kubectl wait --for=condition=Ready -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }} pod/{{ $.Values.labels.redis }}-deployment-1 --timeout=300s  
+          kubectl wait --for=condition=Ready -n {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }} pod/{{ $.Values.labels.redis }}-deployment-2 --timeout=300s
+      containers:
+      - name: {{ $.Values.labels.redis }}
+        image: {{ $.Values.images.redis }}
+        imagePullPolicy: "IfNotPresent"
+        command: [ "sh", "-c" ]
+        args:
+          - |
+            redis-cli --cluster create \
+            {{- range $i := until 3 }}
+            {{ $.Values.labels.redis }}-deployment-{{ $i }}.{{ $.Values.labels.redis }}-service.{{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}.svc.cluster.local:{{ $.Values.ports.internal.redis.client }} \
+            {{- end }}
+            --cluster-yes
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+  backoffLimit: 3
+  activeDeadlineSeconds: 30
+  ttlSecondsAfterFinished: 40
+{{- end }}
+{{- end }}
+{{- end }}
