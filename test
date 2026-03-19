@@ -1,4 +1,494 @@
-Redis server v=8.4.0 sha=00000000:1 malloc=jemalloc-5.3.0 bits=64 build=20be9b111a9854c9
-PONG
-cat: /etc/redis/redis.conf: No such file or directory
-error: Internal error occurred: Internal error occurred: error executing command in container: failed to exec in container: failed to start exec "8f0ad17acbb560c5828ca863ecfb205096d6ab3d07fb4c78ec03985fbcda3b17": OCI runtime exec failed: exec failed: unable to start container process: exec: "ps": executable file not found in $PATH: unknown
+{{/*
+  ============================================================
+  redis.yaml — StatefulSet + Services + ConfigMap + RBAC + Init Job
+  Поддерживает type: single (1 реплика, без кластера)
+                type: cluster (3 реплики, Redis Cluster)
+  При type: cluster:
+    - volumeClaimTemplates создаёт PVC для каждой реплики через nfs-csi
+    - Headless Service для межподовой коммуникации кластера
+    - ClusterIP Service для клиентского подключения (порт 6379)
+    - Init Job инициализирует кластер после первого деплоя
+    - podAntiAffinity размазывает реплики по разным нодам
+  При type: single:
+    - PVC через volumeClaimTemplates (1Gi, nfs-csi) — данные сохраняются при рестарте
+    - Обычный ClusterIP Service
+  ============================================================
+*/}}
+
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
+---
+# ============================================================
+# StatefulSet
+# ============================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $.Values.labels.redis }}-deployment
+  labels:
+    app: {{ $.Values.labels.redis }}
+    app.kubernetes.io/managed-by: Helm
+  namespace: {{ $ns }}
+spec:
+  serviceName: {{ $.Values.labels.redis }}-headless
+  {{- if eq $.Values.enableService.redis.type "cluster" }}
+  replicas: 3
+  {{- else if eq $.Values.enableService.redis.type "single" }}
+  replicas: 1
+  {{- else }}
+  {{ fail "Type of redis must be 'single' or 'cluster'" }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ $.Values.labels.redis }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  template:
+    metadata:
+      labels:
+        app: {{ $.Values.labels.redis }}
+    spec:
+      {{- if eq $.Values.enableService.redis.type "cluster" }}
+      # Размазываем 3 реплики по разным нодам
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - {{ $.Values.labels.redis }}
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      containers:
+        - name: {{ $.Values.labels.redis }}
+          image: {{ $.Values.images.redis }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: client
+              containerPort: {{ $.Values.ports.internal.redis.client }}
+          {{- if eq $.Values.enableService.redis.type "cluster" }}
+            - name: bus
+              containerPort: {{ $.Values.ports.internal.redis.bus }}
+          {{- end }}
+          {{- if eq $.Values.enableService.redis.type "cluster" }}
+          command:
+            - redis-server
+            - /etc/redis/redis-stack.conf
+          {{- else }}
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --dir
+            - /data
+          {{- end }}
+          volumeMounts:
+            - name: {{ $.Values.labels.redis }}-data
+              mountPath: /data
+          {{- if eq $.Values.enableService.redis.type "cluster" }}
+            - name: {{ $.Values.labels.redis }}-config
+              mountPath: /etc/redis/redis-stack.conf
+              subPath: redis-stack.conf
+          {{- end }}
+          resources:
+            limits:
+              cpu: {{ ((((($.Values.configPods).redis).resources).limits).cpu) | default "200m" }}
+              memory: {{ ((((($.Values.configPods).redis).resources).limits).memory) | default "500Mi" }}
+            requests:
+              cpu: {{ ((((($.Values.configPods).redis).resources).requests).cpu) | default "100m" }}
+              memory: {{ ((((($.Values.configPods).redis).resources).requests).memory) | default "250Mi" }}
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+      {{- if eq $.Values.enableService.redis.type "cluster" }}
+      volumes:
+        - name: {{ $.Values.labels.redis }}-config
+          configMap:
+            name: {{ $.Values.labels.redis }}-config
+            items:
+              - key: redis-stack.conf
+                path: redis-stack.conf
+      {{- end }}
+  # PVC создаётся автоматически для каждой реплики
+  volumeClaimTemplates:
+    - metadata:
+        name: {{ $.Values.labels.redis }}-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: {{ $.Values.enableService.redis.storageClassName | default "nfs-csi" }}
+        resources:
+          requests:
+            storage: {{ $.Values.enableService.redis.storageSize | default "1Gi" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+---
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
+---
+# ============================================================
+# Headless Service — для межподовой коммуникации StatefulSet
+# Используется как serviceName в StatefulSet
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.labels.redis }}-headless
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $ns }}
+spec:
+  clusterIP: None
+  ports:
+    - name: client
+      port: {{ $.Values.ports.internal.redis.client }}
+      targetPort: {{ $.Values.ports.internal.redis.client }}
+      protocol: TCP
+  {{- if eq $.Values.enableService.redis.type "cluster" }}
+    - name: bus
+      port: {{ $.Values.ports.internal.redis.bus }}
+      targetPort: {{ $.Values.ports.internal.redis.bus }}
+      protocol: TCP
+  {{- end }}
+  selector:
+    app: {{ $.Values.labels.redis }}
+---
+# ============================================================
+# ClusterIP Service — для клиентских подключений приложений
+# Приложения подключаются к redis-service:6379 как раньше
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.labels.redis }}-service
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $ns }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: client
+      port: {{ $.Values.ports.internal.redis.client }}
+      targetPort: {{ $.Values.ports.internal.redis.client }}
+      protocol: TCP
+  selector:
+    app: {{ $.Values.labels.redis }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+---
+{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
+---
+# ============================================================
+# ConfigMap — конфиг Redis для cluster mode
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $.Values.labels.redis }}-config
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $ns }}
+data:
+  redis-stack.conf: |
+    port {{ $.Values.ports.internal.redis.client }}
+    cluster-enabled yes
+    cluster-config-file /data/nodes.conf
+    cluster-node-timeout 5000
+    appendonly yes
+    dir /data
+    # При рестарте нода восстанавливает своё место в кластере из nodes.conf
+    cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}
+---
+# ============================================================
+# RBAC для Init Job
+# ============================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $.Values.labels.redis }}-init-sa
+  namespace: {{ $ns }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $.Values.labels.redis }}-init-role
+  namespace: {{ $ns }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $.Values.labels.redis }}-init-rolebinding
+  namespace: {{ $ns }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Values.labels.redis }}-init-sa
+    namespace: {{ $ns }}
+roleRef:
+  kind: Role
+  name: {{ $.Values.labels.redis }}-init-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ============================================================
+# Init Job — инициализирует Redis Cluster после деплоя
+#
+# Логика:
+#   1. Ждёт пока все 3 пода поднимутся (readiness)
+#   2. Проверяет — если кластер уже инициализирован, пропускает
+#   3. Если нет — выполняет redis-cli --cluster create
+#
+# Job запускается при каждом helm upgrade, но идемпотентен:
+# повторная инициализация уже существующего кластера не происходит.
+# ============================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $.Values.labels.redis }}-cluster-init-{{ $.Release.Revision }}
+  labels:
+    app: {{ $.Values.labels.redis }}-init
+  namespace: {{ $ns }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # Job удаляется через 5 минут после завершения
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 5
+  template:
+    spec:
+      serviceAccountName: {{ $.Values.labels.redis }}-init-sa
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+      containers:
+        - name: redis-cluster-init
+          image: {{ $.Values.images.redis }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              NAMESPACE="{{ $ns }}"
+              HEADLESS="{{ $.Values.labels.redis }}-headless"
+              PORT="{{ $.Values.ports.internal.redis.client }}"
+              DOMAIN="{{ $.Values.localK8sDomain }}"
+
+              POD0="{{ $.Values.labels.redis }}-deployment-0.${HEADLESS}.${NAMESPACE}.svc.${DOMAIN}:${PORT}"
+              POD1="{{ $.Values.labels.redis }}-deployment-1.${HEADLESS}.${NAMESPACE}.svc.${DOMAIN}:${PORT}"
+              POD2="{{ $.Values.labels.redis }}-deployment-2.${HEADLESS}.${NAMESPACE}.svc.${DOMAIN}:${PORT}"
+
+              echo "==> Ожидаем готовности всех 3 подов Redis..."
+              for POD in $POD0 $POD1 $POD2; do
+                HOST=$(echo $POD | cut -d: -f1)
+                for i in $(seq 1 60); do
+                  if redis-cli -h $HOST -p $PORT ping | grep -q PONG; then
+                    echo "  OK: $HOST"
+                    break
+                  fi
+                  if [ $i -eq 60 ]; then
+                    echo "  FAIL: $HOST не отвечает за 60 попыток"
+                    exit 1
+                  fi
+                  echo "  Попытка $i: $HOST недоступен, жду 3с..."
+                  sleep 3
+                done
+              done
+
+              echo "==> Проверяем, инициализирован ли кластер..."
+              CLUSTER_INFO=$(redis-cli -h $(echo $POD0 | cut -d: -f1) -p $PORT cluster info)
+              CLUSTER_STATE=$(echo "$CLUSTER_INFO" | grep "cluster_state" | cut -d: -f2 | tr -d '[:space:]')
+              CLUSTER_SIZE=$(echo "$CLUSTER_INFO" | grep "cluster_known_nodes" | cut -d: -f2 | tr -d '[:space:]')
+
+              if [ "$CLUSTER_STATE" = "ok" ] && [ "$CLUSTER_SIZE" -ge "3" ]; then
+                echo "==> Кластер уже инициализирован (state=$CLUSTER_STATE, nodes=$CLUSTER_SIZE). Пропускаем."
+                exit 0
+              fi
+
+              echo "==> Инициализируем Redis Cluster..."
+              redis-cli --cluster create \
+                $POD0 \
+                $POD1 \
+                $POD2 \
+                --cluster-replicas 0 \
+                --cluster-yes
+
+              echo "==> Проверяем итоговое состояние кластера:"
+              redis-cli -h $(echo $POD0 | cut -d: -f1) -p $PORT cluster info
+              redis-cli -h $(echo $POD0 | cut -d: -f1) -p $PORT cluster nodes
+              echo "==> Готово!"
+{{- end }}
+{{- end }}
+{{- end }}
+---
+# ============================================================
+# Изменения в values.yaml для Redis с PVC
+# ============================================================
+# Было:
+#   redis:
+#     type: single
+#     enable: false
+#
+# Стало (пример для namespace с cluster mode):
+#   redis:
+#     type: cluster       # "single" или "cluster"
+#     enable: true
+#     storageClassName: nfs-csi   # StorageClass для PVC
+#     storageSize: 1Gi            # Размер PVC на каждую реплику
+
+enableService:
+  redis:
+    type: cluster           # single = 1 реплика + PVC; cluster = 3 реплики + PVC + кластер
+    enable: true
+    storageClassName: nfs-csi   # Можно nfs-csi / nfs-csi-2 / nfs-csi-3
+    storageSize: 1Gi            # Размер PVC (данных ~2.8M, 1Gi более чем достаточно)
+
+# ============================================================
+# ВАЖНО: если нужен single с сохранением данных (без кластера),
+# просто ставишь type: single — volumeClaimTemplates тоже создаст PVC
+# ============================================================
+---
+#!/bin/bash
+# ============================================================
+# ПРОЦЕДУРА МИГРАЦИИ: single Redis без PVC → cluster Redis с PVC
+#
+# Предварительные условия:
+#   - redis.yaml заменён на новый шаблон
+#   - values.yaml обновлён (type: cluster, storageClassName: nfs-csi)
+#   - данных в Redis нет или они не критичны (кэш)
+#
+# Если данные ВАЖНЫ — сначала сделай BGSAVE и сохрани RDB:
+#   kubectl exec -n <namespace> redis-deployment-0 -- redis-cli bgsave
+#   kubectl cp <namespace>/redis-deployment-0:/data/dump.rdb ./dump_<namespace>.rdb
+# ============================================================
+
+# ============================================================
+# ШАГ 1: StatefulSet нельзя обновить если изменился
+# volumeClaimTemplates — нужно удалить старый StatefulSet
+# (поды при этом НЕ удаляются, --cascade=orphan)
+# ============================================================
+
+# Выполни для каждого namespace (пример на develop):
+NAMESPACE="develop"
+
+# Удаляем StatefulSet без удаления подов
+kubectl delete statefulset redis-deployment -n $NAMESPACE --cascade=orphan
+
+# Применяем новый шаблон через helm upgrade
+# (helm сам создаст новый StatefulSet с volumeClaimTemplates)
+# helm upgrade infra ./chart -n $NAMESPACE -f values.yaml
+
+# ============================================================
+# ШАГ 2: Проверяем что PVC создались и поды поднялись
+# ============================================================
+kubectl get pvc -n $NAMESPACE | grep redis
+kubectl get pods -n $NAMESPACE | grep redis
+kubectl get statefulset redis-deployment -n $NAMESPACE
+
+# ============================================================
+# ШАГ 3: Проверяем что Init Job выполнился успешно
+# ============================================================
+kubectl get jobs -n $NAMESPACE | grep redis
+kubectl logs -n $NAMESPACE -l app=redis-init
+
+# ============================================================
+# ШАГ 4: Проверяем состояние кластера
+# ============================================================
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli cluster info
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli cluster nodes
+
+# ============================================================
+# ШАГ 5: Тест — симуляция выгона пода с ноды
+# ============================================================
+# Записываем тестовый ключ
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli -c set testkey "hello"
+
+# Удаляем под (имитация выгона)
+kubectl delete pod redis-deployment-0 -n $NAMESPACE
+
+# Ждём восстановления
+kubectl wait --for=condition=Ready pod/redis-deployment-0 -n $NAMESPACE --timeout=60s
+
+# Проверяем что ключ на месте и кластер ок
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli -c get testkey
+kubectl exec -n $NAMESPACE redis-deployment-0 -- redis-cli cluster info | grep cluster_state
+
+# ============================================================
+# МАССОВАЯ МИГРАЦИЯ всех namespace через скрипт
+# ============================================================
+# Получить список всех namespace с redis:
+# kubectl get pods -A | grep "redis-deployment-0" | awk '{print $1}' | sort -u
+
+# Затем для каждого выполнить:
+# for NS in $(kubectl get pods -A | grep "redis-deployment-0" | awk '{print $1}' | sort -u); do
+#   echo "==> Мигрируем $NS"
+#   kubectl delete statefulset redis-deployment -n $NS --cascade=orphan
+#   helm upgrade infra ./chart -n $NS -f values.yaml
+#   echo "==> $NS: ждём подов..."
+#   kubectl wait --for=condition=Ready pod -l app=redis -n $NS --timeout=120s
+#   echo "==> $NS: кластер:"
+#   kubectl exec -n $NS redis-deployment-0 -- redis-cli cluster info | grep cluster_state
+# done
+
+# ============================================================
+# ИЗВЕСТНЫЕ НЮАНСЫ
+# ============================================================
+# 1. cluster-announce-hostname в ConfigMap использует переменную $(MY_POD_NAME)
+#    Это Kubernetes downward API — нужно добавить env в контейнер.
+#    Если не добавить — Redis будет анонсировать IP (тоже работает, но
+#    при выгоне пода IP меняется и кластер может не восстановиться автоматически).
+#    Решение: добавить в StatefulSet env:
+#      - name: MY_POD_NAME
+#        valueFrom:
+#          fieldRef:
+#            fieldPath: metadata.name
+#
+# 2. --cluster-replicas 0 — 3 мастера без реплик.
+#    Это означает: при падении одного мастера его слоты недоступны.
+#    Для полной отказоустойчивости нужно 6 подов (3 master + 3 replica).
+#    Для dev/test окружений 3 мастера без реплик — приемлемо.
+#
+# 3. nfs-csi с Retain — при helm uninstall PVC и PV останутся.
+#    Это хорошо (данные не потеряются), но нужно чистить руками
+#    при полном сносе namespace.
+---
