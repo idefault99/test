@@ -1,16 +1,34 @@
-#!/bin/bash
-# Удаляет StatefulSet во всех namespace с redis, затем запускает helm upgrade
+"""Содержит функцию получения соединения redis."""
 
-CHART_PATH="./path/to/chart"
-VALUES_FILE="values.yaml"
+from aodb_log_tools import get_logger
+from redis.asyncio import Redis
+from redis.typing import KeyT, ResponseT
 
-for NS in $(kubectl get pods -A --no-headers | grep "redis-deployment-0" | awk '{print $1}' | sort -u); do
-  echo "==> $NS: удаляем StatefulSet..."
-  kubectl delete statefulset redis-deployment -n $NS --cascade=orphan --ignore-not-found
+from config.settings import get_settings
 
-  echo "==> $NS: helm upgrade..."
-  helm upgrade infra $CHART_PATH -n $NS -f $VALUES_FILE
+logger = get_logger(__name__)
 
-  echo "==> $NS: готово"
-  echo ""
-done
+
+class LoggedRedis(Redis):
+    """Redis c логированием."""
+
+    def flushdb(self, **kwargs) -> ResponseT: # noqa: ANN003
+        """Логирует стек вызова перед очисткой кэша."""
+        logger.warning('Вызван redis.flushdb', kwargs=kwargs)
+        return super().flushdb(**kwargs)
+
+    def delete(self, *args: KeyT) -> ResponseT:
+        """Логирует стек вызова перед удачением кэша."""
+        logger.warning('Вызван redis.delete', args=args)
+        return super().delete(*args)
+
+
+def get_redis_pool() -> Redis:
+    """Получить redis соединение."""
+    settings = get_settings()
+    return LoggedRedis.from_url(
+        settings.redis_dsn,
+        encoding='utf-8',
+        decode_responses=True,
+        max_connections=settings.REDIS_POOL_MAX_SIZE,
+    )
