@@ -1,34 +1,42 @@
-"""Содержит функцию получения соединения redis."""
+# Запускаешь в одном терминале
+kubectl exec -n dev-devops <app-pod> -- sh -c '
+i=0
+while true; do
+  i=$((i+1))
+  RESULT=$(redis-cli -h redis-service -p 6379 set "test:key:$i" "value-$i" 2>&1)
+  GET=$(redis-cli -h redis-service -p 6379 get "test:key:$i" 2>&1)
+  echo "$(date +%H:%M:%S) | SET test:key:$i → $RESULT | GET → $GET"
+  sleep 1
+done
+'
 
-from aodb_log_tools import get_logger
+---
+# Копируем скрипт в под и запускаем
+kubectl exec -n dev-devops <app-pod> -- python3 - << 'EOF'
+import asyncio
+import time
 from redis.asyncio import Redis
-from redis.typing import KeyT, ResponseT
 
-from config.settings import get_settings
-
-logger = get_logger(__name__)
-
-
-class LoggedRedis(Redis):
-    """Redis c логированием."""
-
-    def flushdb(self, **kwargs) -> ResponseT: # noqa: ANN003
-        """Логирует стек вызова перед очисткой кэша."""
-        logger.warning('Вызван redis.flushdb', kwargs=kwargs)
-        return super().flushdb(**kwargs)
-
-    def delete(self, *args: KeyT) -> ResponseT:
-        """Логирует стек вызова перед удачением кэша."""
-        logger.warning('Вызван redis.delete', args=args)
-        return super().delete(*args)
-
-
-def get_redis_pool() -> Redis:
-    """Получить redis соединение."""
-    settings = get_settings()
-    return LoggedRedis.from_url(
-        settings.redis_dsn,
-        encoding='utf-8',
+async def main():
+    client = Redis.from_url(
+        "redis://redis-service:6379",
+        encoding="utf-8",
         decode_responses=True,
-        max_connections=settings.REDIS_POOL_MAX_SIZE,
     )
+
+    i = 0
+    while True:
+        i += 1
+        ts = time.strftime("%H:%M:%S")
+        try:
+            await client.set(f"test:key:{i}", f"value-{i}")
+            val = await client.get(f"test:key:{i}")
+            print(f"{ts} | OK  | SET test:key:{i} → GET {val}")
+        except Exception as e:
+            print(f"{ts} | ERR | {type(e).__name__}: {e}")
+        await asyncio.sleep(1)
+
+asyncio.run(main())
+EOF
+
+---
