@@ -1,11 +1,5 @@
-При создании кластера В джобе
-container "redis" in pod "redis-job-8-c4vh4" is waiting to start: PodInitializing
-в events
-0s          Warning   BackOff            pod/redis-deployment-1         Back-off restarting failed container redis in pod redis-deployment-1_dev-devops(46ab2f97-99f6-45ef-97fa-11f6ecc92905)
-0s          Warning   BackOff            pod/redis-deployment-1         Back-off restarting failed container redis in pod redis-deployment-1_dev-devops(46ab2f97-99f6-45ef-97fa-11f6ecc92905)
-0s          Warning   BackOff            pod/redis-deployment-1         Back-off restarting failed container redis in pod redis-deployment-1_dev-devops(46ab2f97-99f6-45ef-97fa-11f6ecc92905)
 
-  Normal   Created  5m5s (x4 over 5m59s)   kubelet  Created container: redis
-  Normal   Started  5m4s (x4 over 5m59s)   kubelet  Started container redis
-  Normal   Pulled   4m16s (x5 over 5m59s)  kubelet  Container image "registry.test.model.svo.aero/dpm/iac/infra/redis/redis:8.4.0" already present on machine
-  Warning  BackOff  52s (x31 over 5m57s)   kubelet  Back-off restarting failed container redis in pod redis-deployment-1_dev-devops(a5d19f3f-8959-47d4-80ae-2e621dfbb189)
+*** FATAL CONFIG FILE ERROR (Redis 8.4.0) ***
+Reading the configuration file, at line 8
+>>> 'cluster-announce-hostname $(MY_POD_NAME).redis-headless.dev-devops.svc.cluster.local'
+Hostnames may only contain alphanumeric characters, hyphens or dots
