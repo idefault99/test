@@ -1,2 +1,4 @@
-kubectl exec -n dev-devops redis-deployment-0 -- sh -c \
-  'cat > /data/dump.rdb' < ./dump.rdb
+kubectl get pods -n <namespace> | grep redis
+kubectl get statefulset redis-deployment -n <namespace>
+kubectl get pvc -n <namespace> | grep redis
+kubectl get events -n <namespace> --sort-by='.lastTimestamp' | tail -20
