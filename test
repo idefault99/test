@@ -1,3 +1,2 @@
-tar: dump.rdb: Cannot change ownership to uid 1002, gid 1003: Operation not permitted
-tar: Exiting with failure status due to previous errors
-command terminated with exit code 2
+kubectl exec -n dev-devops redis-deployment-0 -- sh -c \
+  'cat > /data/dump.rdb' < ./dump.rdb
