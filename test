@@ -1,34 +1,5 @@
-ik.belykh@microk8s:~/test$ sudo bash test.sh restore test-gis-svo
-
-============================================
-  ВОССТАНОВЛЕНИЕ Redis ← test-gis-svo
-============================================
-  → Файл не указан — используем последний бэкап
-  → Бэкап: /opt/redis-backups/test-gis-svo/redis_data_latest.tar.gz (4.0K)
-  → Namespace: test-gis-svo | Pod: redis-deployment-0
-  → Содержимое бэкапа:
-    ./
-    ./dump.rdb
-
-  ⚠ Текущие данные Redis будут ЗАМЕНЕНЫ данными из бэкапа!
-  Продолжить? (y/N): y
-  → Ключей до восстановления: 0
-  → Останавливаем запись на диск...
-  ✓ Запись остановлена
-  → Сохраняем текущее состояние /data/ как .bak...
-  ✓ Откат сохранён: /opt/redis-backups/test-gis-svo/rollback_20260323_115113.tar.gz
-  → Очищаем /data/...
-  ✓ /data/ очищена
-  → Восстанавливаем файлы из архива...
-
-gzip: stdin: unexpected end of file
-tar: Child returned status 1
-tar: Error is not recoverable: exiting now
-command terminated with exit code 2
-  ✗ Ошибка при распаковке архива. Откатываем...
-
-gzip: stdin: unexpected end of file
-tar: Child returned status 1
-tar: Error is not recoverable: exiting now
-command terminated with exit code 2
-ОШИБКА: Восстановление не удалось. Откат выполнен из /opt/redis-backups/test-gis-svo/rollback_20260323_115113.tar.gz
+kubectl exec -n test-gis-svo redis-deployment-0 -- sh -c '
+  echo "=== /data/ ===" && ls -la /data/
+  echo "=== df ===" && df -h /data
+  echo "=== config ===" && redis-cli config get dir && redis-cli config get appendonly && redis-cli config get appendfilename
+'
