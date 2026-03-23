@@ -1,1 +1,18 @@
-Error: UPGRADE FAILED: cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden
+# Смотрим helm secrets в namespace
+kubectl get secrets -n test-gis-svo | grep helm
+
+# Удаляем проблемный revision (10 и 11 — failed)
+kubectl delete secret -n test-gis-svo sh.helm.release.v1.infra.v10
+kubectl delete secret -n test-gis-svo sh.helm.release.v1.infra.v11
+
+# Теперь helm upgrade
+helm upgrade infra ./path/to/chart -n test-gis-svo -f values.yaml
+---
+# Удалить весь helm state для этого релиза
+kubectl get secrets -n test-gis-svo | grep "sh.helm.release.v1.infra" | awk '{print $1}' | xargs kubectl delete secret -n test-gis-svo
+
+# Убедиться что StatefulSet точно удалён
+kubectl get statefulset -n test-gis-svo | grep redis
+
+# Установить как новый релиз
+helm install infra ./path/to/chart -n test-gis-svo -f values.yaml
