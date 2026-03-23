@@ -1,46 +1,28 @@
-kubectl exec -it -n test-gis-svo auth-deployment-866c749f65-xcjxf -- python3 - << 'EOF'
-import asyncio
-import time
-from redis.asyncio import Redis
-
-async def main():
-    client = Redis.from_url(
-        "redis://redis-service:6379",
-        encoding="utf-8",
-        decode_responses=True,
-    )
-
-    # Записываем тестовый ключ один раз в начале
-    await client.set("probe:persistent", "alive", ex=3600)
-    print(f"{time.strftime('%H:%M:%S')} | INIT | Записан probe:persistent = alive")
-
-    i = 0
-    errors = 0
-    while True:
-        i += 1
-        ts = time.strftime("%H:%M:%S")
-        try:
-            # Пишем новый ключ
-            await client.set(f"test:key:{i}", f"value-{i}", ex=60)
-
-            # Читаем только что записанный
-            val = await client.get(f"test:key:{i}")
-
-            # Проверяем персистентный ключ — он должен выжить при рестарте Redis
-            probe = await client.get("probe:persistent")
-
-            if errors > 0:
-                print(f"{ts} | RECOVERED | После {errors} ошибок соединение восстановлено")
-                errors = 0
-
-            probe_status = "OK" if probe == "alive" else f"LOST (val={probe})"
-            print(f"{ts} | OK  | key:{i}={val} | probe={probe_status}")
-
-        except Exception as e:
-            errors += 1
-            print(f"{ts} | ERR | #{errors} {type(e).__name__}: {e}")
-
-        await asyncio.sleep(1)
-
-asyncio.run(main())
-EOF
+Traceback (most recent call last):
+  File "<stdin>", line 44, in <module>
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "<stdin>", line 13, in main
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 646, in execute_command
+    return await conn.retry.call_with_retry(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/retry.py", line 59, in call_with_retry
+    return await do()
+           ^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 620, in _send_command_parse_response
+    return await self.parse_response(conn, command_name, **options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 667, in parse_response
+    response = await connection.read_response()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/connection.py", line 590, in read_response
+    raise response from None
+redis.exceptions.ResponseError: CLUSTERDOWN Hash slot not served
+command terminated with exit code 1
