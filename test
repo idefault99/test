@@ -1,19 +1,11 @@
-NS="test-gis-svo"
-
-for i in 0 1 2; do
-  echo "==> Сбрасываем redis-deployment-$i"
-  kubectl exec -n $NS redis-deployment-$i -- redis-cli flushall
-  kubectl exec -n $NS redis-deployment-$i -- redis-cli cluster reset hard
-done
-
-# Проверяем что ноды чистые
-kubectl exec -n $NS redis-deployment-0 -- redis-cli cluster info | grep cluster_state
-# Должно быть: cluster_state:ok (одиночная нода) или fail с 0 known nodes
-
-# Создаём кластер
-kubectl exec -n $NS redis-deployment-0 -- redis-cli --cluster create \
-  redis-deployment-0.redis-headless.${NS}.svc.cluster.local:6379 \
-  redis-deployment-1.redis-headless.${NS}.svc.cluster.local:6379 \
-  redis-deployment-2.redis-headless.${NS}.svc.cluster.local:6379 \
-  --cluster-replicas 0 \
-  --cluster-yes
+14:36:45 | ERR | ResponseError: MOVED 13068 192.168.219.160:6379
+14:36:46 | ERR | ResponseError: MOVED 879 192.168.214.143:6379
+14:36:47 | ERR | ResponseError: MOVED 4942 192.168.214.143:6379
+14:36:48 | OK  | SET test:key:4 → GET value-4
+14:36:49 | ERR | ResponseError: MOVED 13192 192.168.219.160:6379
+14:36:50 | ERR | ResponseError: MOVED 1003 192.168.214.143:6379
+14:36:51 | ERR | ResponseError: MOVED 5066 192.168.214.143:6379
+14:36:52 | OK  | SET test:key:8 → GET value-8
+14:36:53 | ERR | ResponseError: MOVED 12804 192.168.219.160:6379
+14:36:54 | OK  | SET test:key:10 → GET value-10
+14:36:55 | ERR | ResponseError: MOVED 13582 192.168.219.160:6379
