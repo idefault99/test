@@ -1,12 +1,3 @@
-ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- sh -c 'wc -c /data/dump.rdb'
-88 /data/dump.rdb
-ik.belykh@microk8s:~/test$ kubectl logs redis-deployment-0 -n test-gis-svo | grep -iE "rdb|dump|loaded|error"
-1:C 23 Mar 2026 11:09:13.286 * Configuration loaded
-1:M 23 Mar 2026 11:09:13.303 * Reading RDB base file on AOF loading...
-1:M 23 Mar 2026 11:09:13.303 * Loading RDB produced by version 8.4.0
-1:M 23 Mar 2026 11:09:13.303 * RDB age 4872 seconds
-1:M 23 Mar 2026 11:09:13.304 * RDB memory usage when created 0.64 Mb
-1:M 23 Mar 2026 11:09:13.304 * RDB is base AOF
-1:M 23 Mar 2026 11:09:13.304 * Done loading RDB, keys loaded: 0, keys expired: 0.
-1:M 23 Mar 2026 11:09:13.304 * DB loaded from base file appendonly.aof.1.base.rdb: 0.004 seconds
-1:M 23 Mar 2026 11:09:13.307 * DB loaded from append only file: 0.011 seconds
+# В StatefulSet команда запуска сейчас выглядит как?
+kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get appendonly
+kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get save
