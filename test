@@ -1,28 +1,8 @@
-Traceback (most recent call last):
-  File "<stdin>", line 44, in <module>
-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 190, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "<stdin>", line 13, in main
-  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 646, in execute_command
-    return await conn.retry.call_with_retry(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/retry.py", line 59, in call_with_retry
-    return await do()
-           ^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 620, in _send_command_parse_response
-    return await self.parse_response(conn, command_name, **options)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/client.py", line 667, in parse_response
-    response = await connection.read_response()
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/redis/asyncio/connection.py", line 590, in read_response
-    raise response from None
-redis.exceptions.ResponseError: CLUSTERDOWN Hash slot not served
-command terminated with exit code 1
+12:47:31 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+12:47:32 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+12:47:33 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+12:47:34 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+12:47:35 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+12:47:36 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+12:47:37 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+12:47:38 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
