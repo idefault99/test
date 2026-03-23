@@ -1,173 +1,22 @@
-#!/bin/bash
-# ============================================================
-# Ищем кто удалил helm релизы и ресурсы в namespace dev-devops
-# Запускать на мастер-ноде microk8s
-# ============================================================
+# 1. Основные логи kube-apiserver — именно он фиксирует все операции
+sudo journalctl -u snap.microk8s.daemon-apiserver --since "3 days ago" | grep -iE "delete|$NS|helm"
 
-NS="dev-devops"
+# 2. Все microk8s демоны разом
+sudo journalctl -u snap.microk8s.* --since "3 days ago" | grep -iE "delete|dev-devops|helm" | tail -50
 
-echo "============================================"
-echo "  РАССЛЕДОВАНИЕ: кто удалил ресурсы в $NS"
-echo "============================================"
+# 3. Логи непосредственно в snap директории
+sudo find /var/snap/microk8s/common -name "*.log" 2>/dev/null
+sudo ls -la /var/snap/microk8s/common/var/log/
 
-# ============================================================
-# 1. Audit log microk8s — главный источник истины
-# ============================================================
-echo ""
-echo "==> [1] Ищем в audit log удаление helm secrets (хранилище релизов)..."
+# 4. Containerd логи — видно запуски контейнеров
+sudo journalctl -u snap.microk8s.daemon-containerd --since "3 days ago" | grep -iE "delete|dev-devops" | tail -30
 
-AUDIT_PATHS=(
-  "/var/log/pods"
-  "/var/snap/microk8s/common/var/log/apiserver/audit.log"
-  "/var/snap/microk8s/common/var/log/audit/kube-apiserver-audit.log"
-  "/var/snap/microk8s/common/log"
-)
+# 5. Kubernetes controller-manager — он обрабатывает удаления ресурсов
+sudo journalctl -u snap.microk8s.daemon-controller-manager --since "3 days ago" | tail -50
 
-AUDIT_LOG=""
-for P in "${AUDIT_PATHS[@]}"; do
-  if [ -f "$P" ]; then
-    AUDIT_LOG="$P"
-    echo "  Найден audit log: $P"
-    break
-  fi
-done
+# 6. Смотрим вообще все snap сервисы microk8s которые есть
+sudo systemctl list-units "snap.microk8s.*" --all
 
-if [ -n "$AUDIT_LOG" ]; then
-  echo ""
-  echo "--- Удаление secrets (helm хранит релизы как secrets) ---"
-  grep -i "delete\|DELETE" "$AUDIT_LOG" 2>/dev/null \
-    | grep "$NS" \
-    | grep -i "secret\|helm" \
-    | grep -v '"level":"Request"' \
-    | python3 -c "
-import sys, json
-for line in sys.stdin:
-    try:
-        e = json.loads(line)
-        print(f\"{e.get('requestReceivedTimestamp','?')} | verb={e.get('verb','?')} | user={e.get('user',{}).get('username','?')} | resource={e.get('objectRef',{}).get('resource','?')} | name={e.get('objectRef',{}).get('name','?')} | ns={e.get('objectRef',{}).get('namespace','?')}\")
-    except:
-        print(line.strip())
-" 2>/dev/null | head -50
-
-  echo ""
-  echo "--- Удаление namespace $NS целиком ---"
-  grep -i "delete\|DELETE" "$AUDIT_LOG" 2>/dev/null \
-    | grep -i "namespace" \
-    | grep "$NS" \
-    | python3 -c "
-import sys, json
-for line in sys.stdin:
-    try:
-        e = json.loads(line)
-        print(f\"{e.get('requestReceivedTimestamp','?')} | verb={e.get('verb','?')} | user={e.get('user',{}).get('username','?')} | resource={e.get('objectRef',{}).get('resource','?')} | name={e.get('objectRef',{}).get('name','?')}\")
-    except:
-        print(line.strip())
-" 2>/dev/null | head -20
-
-else
-  echo "  Audit log не найден по стандартным путям."
-  echo "  Ищем где он может быть..."
-  find /var/snap/microk8s -name "*.log" 2>/dev/null | grep -i audit
-  find /var/log -name "*audit*" 2>/dev/null
-fi
-
-# ============================================================
-# 2. Проверяем включён ли audit вообще
-# ============================================================
-echo ""
-echo "==> [2] Проверяем настройки audit в microk8s..."
-cat /var/snap/microk8s/current/args/kube-apiserver 2>/dev/null \
-  | grep -i audit \
-  || echo "  Файл args/kube-apiserver не найден или audit не настроен"
-
-# ============================================================
-# 3. История kubectl на всех нодах
-# ============================================================
-echo ""
-echo "==> [3] История kubectl команд на этой ноде..."
-for HOME_DIR in /root /home/*; do
-  HIST="$HOME_DIR/.bash_history"
-  if [ -f "$HIST" ]; then
-    echo "  --- $HIST ---"
-    grep -i "delete\|helm\|$NS" "$HIST" 2>/dev/null \
-      | grep -v "^#" \
-      | tail -30
-  fi
-done
-
-# ============================================================
-# 4. Helm history — если релиз ещё есть в каком-то виде
-# ============================================================
-echo ""
-echo "==> [4] Проверяем остатки helm релизов..."
-microk8s helm3 list -n $NS -a 2>/dev/null \
-  || helm list -n $NS -a 2>/dev/null \
-  || echo "  Helm релизов не найдено"
-
-# Secrets с префиксом sh.helm — именно в них хранится состояние helm
-echo ""
-echo "  Secrets helm в namespace $NS (если есть):"
-microk8s kubectl get secrets -n $NS 2>/dev/null | grep "sh.helm\|helm" \
-  || kubectl get secrets -n $NS 2>/dev/null | grep "sh.helm\|helm" \
-  || echo "  Helm secrets не найдены — релизы точно удалены"
-
-# ============================================================
-# 5. Системные логи — кто запускал helm или kubectl
-# ============================================================
-echo ""
-echo "==> [5] Ищем в systemd journal вызовы helm/kubectl за последние 3 дня..."
-journalctl --since "3 days ago" 2>/dev/null \
-  | grep -iE "helm|kubectl" \
-  | grep -iE "delete|uninstall|$NS" \
-  | tail -30 \
-  || echo "  Ничего не найдено в journalctl"
-
-# ============================================================
-# 6. Cron jobs — может быть автоматическая очистка
-# ============================================================
-echo ""
-echo "==> [6] Проверяем cron jobs на наличие скриптов очистки..."
-echo "  --- /etc/cron* ---"
-grep -r "helm\|kubectl\|delete\|$NS" /etc/cron* /etc/crontab 2>/dev/null | head -20
-
-echo "  --- crontab пользователей ---"
-for USER in root $(cut -d: -f1 /etc/passwd | head -20); do
-  CRON=$(crontab -l -u $USER 2>/dev/null | grep -iE "helm|kubectl|delete|$NS")
-  if [ -n "$CRON" ]; then
-    echo "  Пользователь $USER:"
-    echo "$CRON"
-  fi
-done
-
-echo "  --- Kubernetes CronJobs в кластере ---"
-microk8s kubectl get cronjobs -A 2>/dev/null \
-  || kubectl get cronjobs -A 2>/dev/null
-
-# ============================================================
-# 7. Недавние события в namespace
-# ============================================================
-echo ""
-echo "==> [7] События в namespace $NS (если namespace ещё существует)..."
-microk8s kubectl get events -n $NS --sort-by='.lastTimestamp' 2>/dev/null | tail -20 \
-  || kubectl get events -n $NS --sort-by='.lastTimestamp' 2>/dev/null | tail -20 \
-  || echo "  Namespace $NS не существует или событий нет"
-
-# ============================================================
-# Итог
-# ============================================================
-echo ""
-echo "============================================"
-echo "  ИТОГ"
-echo "============================================"
-echo ""
-echo "  Если audit log выключен — включи его чтобы в будущем"
-echo "  такие инциденты можно было расследовать:"
-echo ""
-echo "  1. Создай /var/snap/microk8s/common/var/log/audit/ (mkdir -p)"
-echo "  2. Добавь в /var/snap/microk8s/current/args/kube-apiserver:"
-echo "     --audit-log-path=/var/snap/microk8s/common/var/log/audit/audit.log"
-echo "     --audit-log-maxage=30"
-echo "     --audit-log-maxbackup=5"
-echo "     --audit-log-maxsize=100"
-echo "  3. microk8s stop && microk8s start"
-echo ""
+# 7. Логи прямо из контейнера apiserver через crictl
+sudo microk8s kubectl get pods -n kube-system | grep apiserver
+sudo microk8s kubectl logs -n kube-system -l component=kube-apiserver --since=72h 2>/dev/null | grep -iE "delete|dev-devops|helm" | tail -50
