@@ -1,12 +1,15 @@
-# Добавляем helm аннотации к существующему StatefulSet вручную
-kubectl annotate statefulset redis-deployment -n test-gis-svo \
-  meta.helm.sh/release-name=infra \
-  meta.helm.sh/release-namespace=test-gis-svo \
-  --overwrite
+# Смотрим все redis StatefulSet во всех namespace
+kubectl get statefulset -A | grep redis-deployment
 
-kubectl label statefulset redis-deployment -n test-gis-svo \
-  app.kubernetes.io/managed-by=Helm \
-  --overwrite
+# Удаляем все сразу
+kubectl get statefulset -A --no-headers | grep redis-deployment | awk '{print $1, $2}' | \
+  while read NS NAME; do
+    echo "Удаляем $NS/$NAME"
+    kubectl delete statefulset $NAME -n $NS --cascade=orphan
+  done
+
+# Убеждаемся что все удалены
+kubectl get statefulset -A | grep redis-deployment
 
 # Теперь helm install
 helm install infra ./path/to/chart -n test-gis-svo -f values.yaml
