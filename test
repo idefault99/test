@@ -10,16 +10,36 @@ async def main():
         decode_responses=True,
     )
 
+    # Записываем тестовый ключ один раз в начале
+    await client.set("probe:persistent", "alive", ex=3600)
+    print(f"{time.strftime('%H:%M:%S')} | INIT | Записан probe:persistent = alive")
+
     i = 0
+    errors = 0
     while True:
         i += 1
         ts = time.strftime("%H:%M:%S")
         try:
-            await client.set(f"test:key:{i}", f"value-{i}")
+            # Пишем новый ключ
+            await client.set(f"test:key:{i}", f"value-{i}", ex=60)
+
+            # Читаем только что записанный
             val = await client.get(f"test:key:{i}")
-            print(f"{ts} | OK  | SET test:key:{i} → GET {val}")
+
+            # Проверяем персистентный ключ — он должен выжить при рестарте Redis
+            probe = await client.get("probe:persistent")
+
+            if errors > 0:
+                print(f"{ts} | RECOVERED | После {errors} ошибок соединение восстановлено")
+                errors = 0
+
+            probe_status = "OK" if probe == "alive" else f"LOST (val={probe})"
+            print(f"{ts} | OK  | key:{i}={val} | probe={probe_status}")
+
         except Exception as e:
-            print(f"{ts} | ERR | {type(e).__name__}: {e}")
+            errors += 1
+            print(f"{ts} | ERR | #{errors} {type(e).__name__}: {e}")
+
         await asyncio.sleep(1)
 
 asyncio.run(main())
