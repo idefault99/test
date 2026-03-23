@@ -1,23 +1,2 @@
-NS="test-gis-svo"
-HEADLESS="redis-headless"
-PORT="6379"
-DOMAIN="cluster.local"
-
-POD0="redis-deployment-0.${HEADLESS}.${NS}.svc.${DOMAIN}"
-POD1="redis-deployment-1.${HEADLESS}.${NS}.svc.${DOMAIN}"
-POD2="redis-deployment-2.${HEADLESS}.${NS}.svc.${DOMAIN}"
-
-kubectl exec -n $NS redis-deployment-0 -- redis-cli --cluster create \
-  $POD0:$PORT \
-  $POD1:$PORT \
-  $POD2:$PORT \
-  --cluster-replicas 0 \
-  --cluster-yes
-
-
----
-kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli cluster info | grep cluster_state
-# Должно быть: cluster_state:ok
-
-kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli cluster nodes
-# Должно быть 3 строки, все master
+[ERR] Node redis-deployment-0.redis-headless.test-gis-svo.svc.cluster.local:6379 is not empty. Either the node already knows other nodes (check with CLUSTER NODES) or contains some key in database 0.
+command terminated with exit code 1
