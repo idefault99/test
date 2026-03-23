@@ -1,8 +1,25 @@
-12:47:31 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
-12:47:32 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
-12:47:33 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
-12:47:34 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
-12:47:35 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
-12:47:36 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
-12:47:37 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
-12:47:38 | ERR | ResponseError: CLUSTERDOWN Hash slot not served
+cluster_state:fail
+cluster_slots_assigned:2
+cluster_slots_ok:2
+cluster_slots_pfail:0
+cluster_slots_fail:0
+cluster_known_nodes:1
+cluster_size:1
+cluster_current_epoch:0
+cluster_my_epoch:0
+cluster_stats_messages_sent:0
+cluster_stats_messages_received:0
+total_cluster_links_buffer_limit_exceeded:0
+cluster_slot_migration_active_tasks:0
+cluster_slot_migration_active_trim_running:0
+cluster_slot_migration_active_trim_current_job_keys:0
+cluster_slot_migration_active_trim_current_job_trimmed:0
+cluster_slot_migration_stats_active_trim_started:0
+cluster_slot_migration_stats_active_trim_completed:0
+cluster_slot_migration_stats_active_trim_cancelled:0
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli cluster nodes
+766f2530381b06672ea407a00a293ed68ce87b15 :6379@16379,redis-deployment-0.redis-headless.test-gis-svo.svc.cluster.local myself,master - 0 0 0 connected 4757 14758
+ik.belykh@microk8s:~/test$ k get pods -n test-gis-svo | grep redis
+redis-deployment-0                     1/1     Running   0                 28m
+redis-deployment-1                     1/1     Running   0                 28m
+redis-deployment-2                     1/1     Running   0                 28m
