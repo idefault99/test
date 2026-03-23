@@ -1,5 +1,14 @@
-kubectl exec -n test-gis-svo redis-deployment-0 -- sh -c '
-  echo "=== /data/ ===" && ls -la /data/
-  echo "=== df ===" && df -h /data
-  echo "=== config ===" && redis-cli config get dir && redis-cli config get appendonly && redis-cli config get appendfilename
-'
+=== /data/ ===
+total 8
+drwxr-xr-x 2 redis redis 4096 Jan 13 02:02 .
+drwxr-xr-x 1 root  root  4096 Mar 23 11:57 ..
+=== df ===
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vda1       193G  161G   33G  84% /data
+=== config ===
+dir
+/data
+appendonly
+no
+appendfilename
+appendonly.aof
