@@ -1,2 +1,12 @@
-Release "infra" does not exist. Installing it now.
-Error: cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden && cannot patch "redis-deployment" with kind StatefulSet: StatefulSet.apps "redis-deployment" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden
+# Добавляем helm аннотации к существующему StatefulSet вручную
+kubectl annotate statefulset redis-deployment -n test-gis-svo \
+  meta.helm.sh/release-name=infra \
+  meta.helm.sh/release-namespace=test-gis-svo \
+  --overwrite
+
+kubectl label statefulset redis-deployment -n test-gis-svo \
+  app.kubernetes.io/managed-by=Helm \
+  --overwrite
+
+# Теперь helm install
+helm install infra ./path/to/chart -n test-gis-svo -f values.yaml
