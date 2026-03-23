@@ -1,22 +1,43 @@
-# 1. Основные логи kube-apiserver — именно он фиксирует все операции
-sudo journalctl -u snap.microk8s.daemon-apiserver --since "3 days ago" | grep -iE "delete|$NS|helm"
+user@microk8s:~/test$ sudo journalctl -u snap.microk8s.daemon-apiserver --since "3 days ago" | grep -iE "delete|dev-devops|helm"
+user@microk8s:~/test$
+user@microk8s:~/test$
+user@microk8s:~/test$
+user@microk8s:~/test$ sudo journalctl -u snap.microk8s.daemon-apiserver --since "3 days ago" | grep -iE "delete|dev-devops|helm"
+user@microk8s:~/test$ sudo journalctl -u snap.microk8s.daemon-apiserver --since "4 days ago" | grep -iE "delete|dev-devops|helm"
+user@microk8s:~/test$ sudo journalctl -u snap.microk8s.* --since "3 days ago" | grep -iE "delete|dev-devops|helm" | tail -50
 
-# 2. Все microk8s демоны разом
-sudo journalctl -u snap.microk8s.* --since "3 days ago" | grep -iE "delete|dev-devops|helm" | tail -50
+^C
+user@microk8s:~/test$
+user@microk8s:~/test$
+user@microk8s:~/test$ sudo find /var/snap/microk8s/common -name "*.log" 2>/dev/null
+/var/snap/microk8s/common/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1328763/fs/var/log/alternatives.log
+/var/snap/microk8s/common/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1328763/fs/var/log/dpkg.log
+/var/snap/microk8s/common/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1328763/fs/var/log/apt/term.log
+/var/snap/microk8s/common/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1328763/fs/var/log/apt/history.log
+^C
+user@microk8s:~/test$ sudo ls -la /var/snap/microk8s/common/var/log/
+total 12
+drwxr-xr-x 3 root root 4096 Sep 15  2024 .
+drwx--x--x 4 root root 4096 Sep 15  2024 ..
+drwxr-xr-x 3 root root 4096 Sep 15  2024 calico
+user@microk8s:~/test$ sudo journalctl -u snap.microk8s.daemon-containerd --since "3 days ago" | grep -iE "delete|dev-devops" | tail -30
+user@microk8s:~/test$ sudo journalctl -u snap.microk8s.daemon-controller-manager --since "3 days ago" | tail -50
+-- No entries --
+user@microk8s:~/test$ sudo systemctl list-units "snap.microk8s.*" --all
+  UNIT                                          LOAD   ACTIVE   SUB     DESCRIPTION
+  snap.microk8s.daemon-apiserver-kicker.service loaded active   running Service for snap application microk8s.daemon-apiserver-kicker
+  snap.microk8s.daemon-apiserver-proxy.service  loaded inactive dead    Service for snap application microk8s.daemon-apiserver-proxy
+  snap.microk8s.daemon-cluster-agent.service    loaded active   running Service for snap application microk8s.daemon-cluster-agent
+  snap.microk8s.daemon-containerd.service       loaded active   running Service for snap application microk8s.daemon-containerd
+  snap.microk8s.daemon-etcd.service             loaded inactive dead    Service for snap application microk8s.daemon-etcd
+  snap.microk8s.daemon-flanneld.service         loaded inactive dead    Service for snap application microk8s.daemon-flanneld
+  snap.microk8s.daemon-k8s-dqlite.service       loaded active   running Service for snap application microk8s.daemon-k8s-dqlite
+  snap.microk8s.daemon-kubelite.service         loaded active   running Service for snap application microk8s.daemon-kubelite
 
-# 3. Логи непосредственно в snap директории
-sudo find /var/snap/microk8s/common -name "*.log" 2>/dev/null
-sudo ls -la /var/snap/microk8s/common/var/log/
-
-# 4. Containerd логи — видно запуски контейнеров
-sudo journalctl -u snap.microk8s.daemon-containerd --since "3 days ago" | grep -iE "delete|dev-devops" | tail -30
-
-# 5. Kubernetes controller-manager — он обрабатывает удаления ресурсов
-sudo journalctl -u snap.microk8s.daemon-controller-manager --since "3 days ago" | tail -50
-
-# 6. Смотрим вообще все snap сервисы microk8s которые есть
-sudo systemctl list-units "snap.microk8s.*" --all
-
-# 7. Логи прямо из контейнера apiserver через crictl
-sudo microk8s kubectl get pods -n kube-system | grep apiserver
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB.
+SUB    = The low-level unit activation state, values depend on unit type.
+8 loaded units listed.
+To show all installed unit files use 'systemctl list-unit-files'.
+user@microk8s:~/test$ sudo microk8s kubectl get pods -n kube-system | grep apiserver
 sudo microk8s kubectl logs -n kube-system -l component=kube-apiserver --since=72h 2>/dev/null | grep -iE "delete|dev-devops|helm" | tail -50
