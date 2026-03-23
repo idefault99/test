@@ -1,2 +1,19 @@
+NS="test-gis-svo"
 
-[ERR] Node redis-deployment-0.redis-headless.test-gis-svo.svc.cluster.local:6379 is not empty. Either the node already knows other nodes (check with CLUSTER NODES) or contains some key in database 0.
+for i in 0 1 2; do
+  echo "==> Сбрасываем redis-deployment-$i"
+  kubectl exec -n $NS redis-deployment-$i -- redis-cli flushall
+  kubectl exec -n $NS redis-deployment-$i -- redis-cli cluster reset hard
+done
+
+# Проверяем что ноды чистые
+kubectl exec -n $NS redis-deployment-0 -- redis-cli cluster info | grep cluster_state
+# Должно быть: cluster_state:ok (одиночная нода) или fail с 0 known nodes
+
+# Создаём кластер
+kubectl exec -n $NS redis-deployment-0 -- redis-cli --cluster create \
+  redis-deployment-0.redis-headless.${NS}.svc.cluster.local:6379 \
+  redis-deployment-1.redis-headless.${NS}.svc.cluster.local:6379 \
+  redis-deployment-2.redis-headless.${NS}.svc.cluster.local:6379 \
+  --cluster-replicas 0 \
+  --cluster-yes
