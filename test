@@ -1,6 +1,369 @@
-ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get appendonly
-appendonly
-yes
-ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get save
-save
-3600 1 300 100 60 10000
+#!/bin/bash
+# ============================================================
+# Redis Backup & Restore (AOF + RDB mode)
+#
+# Бэкапит всю директорию /data/ через tar — работает с любым
+# режимом Redis: AOF, RDB или оба одновременно.
+#
+# Использование:
+#   bash redis_backup_restore.sh backup  <namespace>
+#   bash redis_backup_restore.sh restore <namespace>
+#   bash redis_backup_restore.sh restore <namespace> <файл.tar.gz>
+#   bash redis_backup_restore.sh list    <namespace>
+#   bash redis_backup_restore.sh check   <namespace>
+#
+# Бэкапы хранятся в: /opt/redis-backups/<namespace>/
+# Хранятся последние 10 бэкапов
+# ============================================================
+
+ACTION="${1}"
+NS="${2}"
+BACKUP_FILE="${3}"
+
+REDIS_POD="redis-deployment-0"
+REDIS_DATA_DIR="/data"
+BACKUP_DIR="/opt/redis-backups/${NS}"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+ok()   { echo -e "${GREEN}  ✓ $1${NC}"; }
+fail() { echo -e "${RED}  ✗ $1${NC}"; }
+info() { echo -e "${YELLOW}  → $1${NC}"; }
+head() { echo -e "${CYAN}$1${NC}"; }
+die()  { echo -e "${RED}ОШИБКА: $1${NC}"; exit 1; }
+
+# ============================================================
+# Проверка аргументов
+# ============================================================
+if [ -z "$ACTION" ] || [ -z "$NS" ]; then
+  echo "Использование:"
+  echo "  $0 backup  <namespace>"
+  echo "  $0 restore <namespace> [путь/к/файлу.tar.gz]"
+  echo "  $0 list    <namespace>"
+  echo "  $0 check   <namespace>"
+  exit 1
+fi
+
+# ============================================================
+# Проверка что под запущен
+# ============================================================
+check_pod() {
+  STATUS=$(kubectl get pod $REDIS_POD -n $NS --no-headers 2>/dev/null | awk '{print $3}')
+  if [ "$STATUS" != "Running" ]; then
+    die "Под $REDIS_POD в namespace $NS не Running (статус: ${STATUS:-не найден})"
+  fi
+}
+
+# ============================================================
+# BACKUP — архивируем всю /data/ через tar
+# ============================================================
+do_backup() {
+  head ""
+  head "============================================"
+  head "  БЭКАП Redis → $NS"
+  head "============================================"
+
+  check_pod
+
+  mkdir -p "$BACKUP_DIR"
+
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+  DEST="$BACKUP_DIR/redis_data_${TIMESTAMP}.tar.gz"
+  LATEST="$BACKUP_DIR/redis_data_latest.tar.gz"
+
+  # Текущее состояние
+  DBSIZE=$(kubectl exec -n $NS $REDIS_POD -- redis-cli dbsize 2>/dev/null)
+  MEMORY=$(kubectl exec -n $NS $REDIS_POD -- redis-cli info memory 2>/dev/null \
+    | grep "used_memory_human" | head -1 | cut -d: -f2 | tr -d '[:space:]')
+  AOF_ENABLED=$(kubectl exec -n $NS $REDIS_POD -- redis-cli config get appendonly 2>/dev/null \
+    | tail -1)
+  info "Ключей: $DBSIZE | Память: $MEMORY | AOF: $AOF_ENABLED"
+
+  if [ "${DBSIZE}" = "0" ]; then
+    echo ""
+    echo -e "${YELLOW}  ⚠ БД пустая (dbsize=0). Бэкап будет сохранён, но данных нет.${NC}"
+    read -p "  Продолжить? (y/N): " CONFIRM
+    [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ] && echo "Отменено." && exit 0
+  fi
+
+  # Принудительный flush на диск перед бэкапом
+  info "Сбрасываем данные на диск..."
+  if [ "$AOF_ENABLED" = "yes" ]; then
+    # При AOF — rewrite чтобы получить актуальный снапшот
+    kubectl exec -n $NS $REDIS_POD -- redis-cli bgrewriteaof > /dev/null 2>&1
+    # Ждём завершения rewrite
+    for i in $(seq 1 30); do
+      REWRITE=$(kubectl exec -n $NS $REDIS_POD -- redis-cli info persistence 2>/dev/null \
+        | grep "aof_rewrite_in_progress" | cut -d: -f2 | tr -d '[:space:]')
+      [ "$REWRITE" = "0" ] && break
+      sleep 1
+    done
+    ok "AOF rewrite завершён"
+  else
+    kubectl exec -n $NS $REDIS_POD -- redis-cli bgsave > /dev/null 2>&1
+    for i in $(seq 1 30); do
+      BGSAVE=$(kubectl exec -n $NS $REDIS_POD -- redis-cli info persistence 2>/dev/null \
+        | grep "rdb_bgsave_in_progress" | cut -d: -f2 | tr -d '[:space:]')
+      [ "$BGSAVE" = "0" ] && break
+      sleep 1
+    done
+    ok "BGSAVE завершён"
+  fi
+
+  # Архивируем всю /data/ — захватываем и RDB и AOF файлы
+  info "Архивируем /data/ → $DEST ..."
+  kubectl exec -n $NS $REDIS_POD -- tar -czf - -C $REDIS_DATA_DIR . 2>/dev/null > "$DEST"
+
+  if [ ! -s "$DEST" ]; then
+    die "Архив пустой или не создался. Проверь доступность пода."
+  fi
+
+  FILE_SIZE=$(du -h "$DEST" | cut -f1)
+  ok "Архив создан: $DEST ($FILE_SIZE)"
+
+  # Показываем содержимое архива
+  info "Содержимое бэкапа:"
+  tar -tzf "$DEST" 2>/dev/null | while read F; do echo "    $F"; done
+
+  # Симлинк на последний бэкап
+  ln -sf "$DEST" "$LATEST"
+  ok "Симлинк обновлён: $LATEST"
+
+  # Ротация — храним последние 10
+  find "$BACKUP_DIR" -name "redis_data_*.tar.gz" | sort -r | tail -n +11 | xargs rm -f 2>/dev/null
+  info "Старые бэкапы очищены (хранятся последние 10)"
+
+  echo ""
+  head "============================================"
+  ok "БЭКАП ЗАВЕРШЁН"
+  echo -e "  Файл   : ${CYAN}$DEST${NC}"
+  echo -e "  Размер : $FILE_SIZE"
+  echo -e "  Ключей : $DBSIZE"
+  echo -e "  Время  : $(date)"
+  head "============================================"
+  echo ""
+}
+
+# ============================================================
+# RESTORE — восстанавливаем /data/ из tar-архива
+# ============================================================
+do_restore() {
+  head ""
+  head "============================================"
+  head "  ВОССТАНОВЛЕНИЕ Redis ← $NS"
+  head "============================================"
+
+  # Определяем файл
+  if [ -n "$BACKUP_FILE" ]; then
+    SOURCE="$BACKUP_FILE"
+  else
+    SOURCE="$BACKUP_DIR/redis_data_latest.tar.gz"
+    info "Файл не указан — используем последний бэкап"
+  fi
+
+  if [ ! -f "$SOURCE" ]; then
+    die "Файл не найден: $SOURCE\nСписок бэкапов: $0 list $NS"
+  fi
+
+  FILE_SIZE=$(du -h "$SOURCE" | cut -f1)
+  info "Бэкап: $SOURCE ($FILE_SIZE)"
+  info "Namespace: $NS | Pod: $REDIS_POD"
+
+  # Показываем что внутри архива
+  info "Содержимое бэкапа:"
+  tar -tzf "$SOURCE" 2>/dev/null | while read F; do echo "    $F"; done
+
+  echo ""
+  echo -e "${YELLOW}  ⚠ Текущие данные Redis будут ЗАМЕНЕНЫ данными из бэкапа!${NC}"
+  read -p "  Продолжить? (y/N): " CONFIRM
+  [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ] && echo "Отменено." && exit 0
+
+  check_pod
+
+  DBSIZE_BEFORE=$(kubectl exec -n $NS $REDIS_POD -- redis-cli dbsize 2>/dev/null)
+  info "Ключей до восстановления: $DBSIZE_BEFORE"
+
+  # Шаг 1: Отключаем запись чтобы Redis не перезаписал файлы
+  info "Останавливаем запись на диск..."
+  kubectl exec -n $NS $REDIS_POD -- redis-cli config set appendonly no > /dev/null 2>&1
+  kubectl exec -n $NS $REDIS_POD -- redis-cli config set save "" > /dev/null 2>&1
+  ok "Запись остановлена"
+
+  # Шаг 2: Бэкап текущих данных на случай отката
+  info "Сохраняем текущее состояние /data/ как .bak..."
+  ROLLBACK="$BACKUP_DIR/rollback_$(date +%Y%m%d_%H%M%S).tar.gz"
+  mkdir -p "$BACKUP_DIR"
+  kubectl exec -n $NS $REDIS_POD -- tar -czf - -C $REDIS_DATA_DIR . 2>/dev/null > "$ROLLBACK"
+  ok "Откат сохранён: $ROLLBACK"
+
+  # Шаг 3: Очищаем /data/ полностью
+  info "Очищаем /data/..."
+  kubectl exec -n $NS $REDIS_POD -- sh -c \
+    'find /data -mindepth 1 -delete 2>/dev/null; true'
+  ok "/data/ очищена"
+
+  # Шаг 4: Заливаем файлы из архива
+  info "Восстанавливаем файлы из архива..."
+  kubectl exec -n $NS $REDIS_POD -- sh -c \
+    'tar -xzf - -C /data' < "$SOURCE"
+  if [ $? -ne 0 ]; then
+    fail "Ошибка при распаковке архива. Откатываем..."
+    kubectl exec -n $NS $REDIS_POD -- sh -c \
+      'find /data -mindepth 1 -delete 2>/dev/null; true'
+    kubectl exec -n $NS $REDIS_POD -- sh -c \
+      'tar -xzf - -C /data' < "$ROLLBACK"
+    kubectl delete pod $REDIS_POD -n $NS > /dev/null 2>&1
+    die "Восстановление не удалось. Откат выполнен из $ROLLBACK"
+  fi
+  ok "Файлы восстановлены"
+
+  # Шаг 5: Перезапускаем под — Redis загрузит данные из восстановленных файлов
+  info "Перезапускаем под..."
+  kubectl delete pod $REDIS_POD -n $NS > /dev/null 2>&1
+
+  info "Ждём готовности пода (до 120 сек)..."
+  kubectl wait --for=condition=Ready pod/$REDIS_POD -n $NS --timeout=120s > /dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    die "Под не поднялся за 120 сек. Проверь: kubectl describe pod $REDIS_POD -n $NS"
+  fi
+  ok "Под Running"
+
+  sleep 2
+
+  # Шаг 6: Проверяем результат
+  DBSIZE_AFTER=$(kubectl exec -n $NS $REDIS_POD -- redis-cli dbsize 2>/dev/null)
+  MEMORY_AFTER=$(kubectl exec -n $NS $REDIS_POD -- redis-cli info memory 2>/dev/null \
+    | grep "used_memory_human" | head -1 | cut -d: -f2 | tr -d '[:space:]')
+
+  # Проверяем лог загрузки
+  info "Лог загрузки данных:"
+  kubectl logs $REDIS_POD -n $NS 2>/dev/null \
+    | grep -iE "rdb|aof|loaded|keys|error" \
+    | while read L; do echo "    $L"; done
+
+  echo ""
+  head "============================================"
+  if [ "${DBSIZE_AFTER:-0}" -gt 0 ] 2>/dev/null; then
+    ok "ВОССТАНОВЛЕНИЕ ЗАВЕРШЕНО УСПЕШНО"
+  else
+    echo -e "${YELLOW}  ⚠ dbsize=0 после восстановления — проверь лог выше${NC}"
+  fi
+  echo -e "  Ключей до   : ${YELLOW}$DBSIZE_BEFORE${NC}"
+  echo -e "  Ключей после: ${GREEN}$DBSIZE_AFTER${NC}"
+  echo -e "  Память      : $MEMORY_AFTER"
+  echo ""
+  echo -e "  Откат если что-то не так:"
+  echo -e "  ${CYAN}$0 restore $NS $ROLLBACK${NC}"
+  head "============================================"
+  echo ""
+}
+
+# ============================================================
+# LIST
+# ============================================================
+do_list() {
+  head ""
+  head "============================================"
+  head "  БЭКАПЫ Redis: $NS"
+  head "============================================"
+
+  if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls $BACKUP_DIR/redis_data_*.tar.gz 2>/dev/null)" ]; then
+    info "Бэкапов не найдено в $BACKUP_DIR"
+    echo ""
+    return
+  fi
+
+  LATEST_TARGET=$(readlink -f "$BACKUP_DIR/redis_data_latest.tar.gz" 2>/dev/null)
+
+  printf "  %-50s %-10s %s\n" "ФАЙЛ" "РАЗМЕР" "ДАТА"
+  echo "  -----------------------------------------------------------------------"
+
+  ls -t "$BACKUP_DIR"/redis_data_*.tar.gz 2>/dev/null | while read F; do
+    SIZE=$(du -h "$F" | cut -f1)
+    DATE=$(date -r "$F" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || stat -c %y "$F" | cut -d. -f1)
+    MARKER=""
+    [ "$(readlink -f "$F")" = "$LATEST_TARGET" ] && MARKER=" ← latest"
+    printf "  %-50s %-10s %s%s\n" "$(basename $F)" "$SIZE" "$DATE" "$MARKER"
+  done
+
+  echo ""
+  echo -e "  Директория: ${CYAN}$BACKUP_DIR${NC}"
+  echo ""
+}
+
+# ============================================================
+# CHECK
+# ============================================================
+do_check() {
+  head ""
+  head "============================================"
+  head "  ПРОВЕРКА Redis: $NS"
+  head "============================================"
+
+  check_pod
+
+  DBSIZE=$(kubectl exec -n $NS $REDIS_POD -- redis-cli dbsize 2>/dev/null)
+  MEMORY=$(kubectl exec -n $NS $REDIS_POD -- redis-cli info memory 2>/dev/null \
+    | grep "used_memory_human" | head -1 | cut -d: -f2 | tr -d '[:space:]')
+  AOF=$(kubectl exec -n $NS $REDIS_POD -- redis-cli config get appendonly 2>/dev/null | tail -1)
+
+  info "PING: $(kubectl exec -n $NS $REDIS_POD -- redis-cli ping 2>/dev/null)"
+  info "Ключей: $DBSIZE | Память: $MEMORY | AOF: $AOF"
+
+  LATEST="$BACKUP_DIR/redis_data_latest.tar.gz"
+  if [ -f "$LATEST" ]; then
+    BACKUP_DATE=$(date -r "$LATEST" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || stat -c %y "$LATEST" | cut -d. -f1)
+    BACKUP_SIZE=$(du -h "$LATEST" | cut -f1)
+    info "Последний бэкап: $BACKUP_DATE ($BACKUP_SIZE)"
+  else
+    info "Бэкапов не найдено в $BACKUP_DIR"
+  fi
+
+  echo ""
+
+  if [ "${DBSIZE:-0}" = "0" ]; then
+    echo -e "${RED}  ✗ БД ПУСТАЯ (dbsize=0)!${NC}"
+    echo ""
+
+    if [ -f "$LATEST" ]; then
+      echo -e "${YELLOW}  Доступен бэкап от $BACKUP_DATE ($BACKUP_SIZE)${NC}"
+      echo ""
+      read -p "  Восстановить прямо сейчас? (y/N): " CONFIRM
+      if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+        do_restore
+      else
+        echo ""
+        info "Для восстановления вручную:"
+        echo -e "  ${CYAN}$0 restore $NS${NC}"
+      fi
+    else
+      fail "Бэкапов нет. Создай бэкап когда БД не пустая:"
+      echo -e "  ${CYAN}$0 backup $NS${NC}"
+    fi
+  else
+    ok "БД в норме ($DBSIZE ключей)"
+    echo ""
+    echo -e "  Создать бэкап:"
+    echo -e "  ${CYAN}$0 backup $NS${NC}"
+  fi
+  echo ""
+}
+
+# ============================================================
+# Роутинг
+# ============================================================
+case "$ACTION" in
+  backup)  do_backup  ;;
+  restore) do_restore ;;
+  list)    do_list    ;;
+  check)   do_check   ;;
+  *)
+    echo "Неизвестное действие: $ACTION"
+    echo "Доступные: backup | restore | list | check"
+    exit 1
+    ;;
+esac
