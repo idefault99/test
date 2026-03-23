@@ -1,25 +1,23 @@
-cluster_state:fail
-cluster_slots_assigned:2
-cluster_slots_ok:2
-cluster_slots_pfail:0
-cluster_slots_fail:0
-cluster_known_nodes:1
-cluster_size:1
-cluster_current_epoch:0
-cluster_my_epoch:0
-cluster_stats_messages_sent:0
-cluster_stats_messages_received:0
-total_cluster_links_buffer_limit_exceeded:0
-cluster_slot_migration_active_tasks:0
-cluster_slot_migration_active_trim_running:0
-cluster_slot_migration_active_trim_current_job_keys:0
-cluster_slot_migration_active_trim_current_job_trimmed:0
-cluster_slot_migration_stats_active_trim_started:0
-cluster_slot_migration_stats_active_trim_completed:0
-cluster_slot_migration_stats_active_trim_cancelled:0
-ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli cluster nodes
-766f2530381b06672ea407a00a293ed68ce87b15 :6379@16379,redis-deployment-0.redis-headless.test-gis-svo.svc.cluster.local myself,master - 0 0 0 connected 4757 14758
-ik.belykh@microk8s:~/test$ k get pods -n test-gis-svo | grep redis
-redis-deployment-0                     1/1     Running   0                 28m
-redis-deployment-1                     1/1     Running   0                 28m
-redis-deployment-2                     1/1     Running   0                 28m
+NS="test-gis-svo"
+HEADLESS="redis-headless"
+PORT="6379"
+DOMAIN="cluster.local"
+
+POD0="redis-deployment-0.${HEADLESS}.${NS}.svc.${DOMAIN}"
+POD1="redis-deployment-1.${HEADLESS}.${NS}.svc.${DOMAIN}"
+POD2="redis-deployment-2.${HEADLESS}.${NS}.svc.${DOMAIN}"
+
+kubectl exec -n $NS redis-deployment-0 -- redis-cli --cluster create \
+  $POD0:$PORT \
+  $POD1:$PORT \
+  $POD2:$PORT \
+  --cluster-replicas 0 \
+  --cluster-yes
+
+
+---
+kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli cluster info | grep cluster_state
+# Должно быть: cluster_state:ok
+
+kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli cluster nodes
+# Должно быть 3 строки, все master
