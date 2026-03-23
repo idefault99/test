@@ -1,14 +1,63 @@
-=== /data/ ===
-total 8
-drwxr-xr-x 2 redis redis 4096 Jan 13 02:02 .
-drwxr-xr-x 1 root  root  4096 Mar 23 11:57 ..
-=== df ===
-Filesystem      Size  Used Avail Use% Mounted on
-/dev/vda1       193G  161G   33G  84% /data
-=== config ===
-dir
-/data
-appendonly
-no
-appendfilename
-appendonly.aof
+ik.belykh@microk8s:~/test$ k get pvc -n test-gis-svo | grep redis
+redis-data-redis-deployment-0   Bound    pvc-84f08250-892b-4d01-b2d5-117689598418   1Gi        RWO            nfs-csi        <unset>                 11s
+ik.belykh@microk8s:~/test$ k get pv -n test-gis-svo | grep redis
+pvc-84f08250-892b-4d01-b2d5-117689598418                    1Gi        RWO            Retain           Bound         test-gis-svo/redis-data-redis-deployment-0                 nfs-csi             <unset>                          15s
+ik.belykh@microk8s:~/test$
+ik.belykh@microk8s:~/test$
+ik.belykh@microk8s:~/test$ sudo bash test.sh check test-gis-svo
+
+============================================
+  ПРОВЕРКА Redis: test-gis-svo
+============================================
+  → PING: PONG
+  → Ключей: 0 | Память: -1 | AOF: no
+  → Последний бэкап: 2026-03-23 11:56:43 (4.0K)
+
+  ✗ БД ПУСТАЯ (dbsize=0)!
+
+  Доступен бэкап от 2026-03-23 11:56:43 (4.0K)
+
+  Восстановить прямо сейчас? (y/N): y
+
+============================================
+  ВОССТАНОВЛЕНИЕ Redis ← test-gis-svo
+============================================
+  → Файл не указан — используем последний бэкап
+  → Бэкап: /opt/redis-backups/test-gis-svo/redis_data_latest.tar.gz (4.0K)
+  → Namespace: test-gis-svo | Pod: redis-deployment-0
+  → Содержимое бэкапа:
+    ./
+    ./dump.rdb
+
+  ⚠ Текущие данные Redis будут ЗАМЕНЕНЫ данными из бэкапа!
+  Продолжить? (y/N): y
+  → Ключей до восстановления: 0
+  → Останавливаем запись на диск...
+  ✓ Запись остановлена
+  → Сохраняем текущее состояние /data/ как .bak...
+  ✓ Откат сохранён: /opt/redis-backups/test-gis-svo/rollback_20260323_121222.tar.gz
+  → Очищаем /data/...
+  ✓ /data/ очищена
+  → Восстанавливаем файлы из архива...
+
+gzip: stdin: unexpected end of file
+tar: Child returned status 1
+tar: Error is not recoverable: exiting now
+command terminated with exit code 2
+  ✗ Ошибка при распаковке архива. Откатываем...
+
+gzip: stdin: unexpected end of file
+tar: Child returned status 1
+tar: Error is not recoverable: exiting now
+command terminated with exit code 2
+ОШИБКА: Восстановление не удалось. Откат выполнен из /opt/redis-backups/test-gis-svo/rollback_20260323_121222.tar.gz
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli dbsize
+0
+ik.belykh@microk8s:~/test$
+ik.belykh@microk8s:~/test$
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- sh -c 'ls -lsa /data'
+total 16
+4 drwxr-xr-x 3 nobody nogroup 4096 Mar 23 11:45 .
+4 drwxr-xr-x 1 root   root    4096 Mar 23 12:12 ..
+4 drwxr-xr-x 2 nobody nogroup 4096 Mar 23 12:12 appendonlydir
+4 -rw-r--r-- 1 nobody nogroup   88 Mar 23 11:45 dump.rdb
