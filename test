@@ -1,63 +1,26 @@
-ik.belykh@microk8s:~/test$ k get pvc -n test-gis-svo | grep redis
-redis-data-redis-deployment-0   Bound    pvc-84f08250-892b-4d01-b2d5-117689598418   1Gi        RWO            nfs-csi        <unset>                 11s
-ik.belykh@microk8s:~/test$ k get pv -n test-gis-svo | grep redis
-pvc-84f08250-892b-4d01-b2d5-117689598418                    1Gi        RWO            Retain           Bound         test-gis-svo/redis-data-redis-deployment-0                 nfs-csi             <unset>                          15s
-ik.belykh@microk8s:~/test$
-ik.belykh@microk8s:~/test$
-ik.belykh@microk8s:~/test$ sudo bash test.sh check test-gis-svo
+kubectl exec -it -n test-gis-svo auth-deployment-866c749f65-xcjxf -- python3 - << 'EOF'
+import asyncio
+import time
+from redis.asyncio import Redis
 
-============================================
-  ПРОВЕРКА Redis: test-gis-svo
-============================================
-  → PING: PONG
-  → Ключей: 0 | Память: -1 | AOF: no
-  → Последний бэкап: 2026-03-23 11:56:43 (4.0K)
+async def main():
+    client = Redis.from_url(
+        "redis://redis-service:6379",
+        encoding="utf-8",
+        decode_responses=True,
+    )
 
-  ✗ БД ПУСТАЯ (dbsize=0)!
+    i = 0
+    while True:
+        i += 1
+        ts = time.strftime("%H:%M:%S")
+        try:
+            await client.set(f"test:key:{i}", f"value-{i}")
+            val = await client.get(f"test:key:{i}")
+            print(f"{ts} | OK  | SET test:key:{i} → GET {val}")
+        except Exception as e:
+            print(f"{ts} | ERR | {type(e).__name__}: {e}")
+        await asyncio.sleep(1)
 
-  Доступен бэкап от 2026-03-23 11:56:43 (4.0K)
-
-  Восстановить прямо сейчас? (y/N): y
-
-============================================
-  ВОССТАНОВЛЕНИЕ Redis ← test-gis-svo
-============================================
-  → Файл не указан — используем последний бэкап
-  → Бэкап: /opt/redis-backups/test-gis-svo/redis_data_latest.tar.gz (4.0K)
-  → Namespace: test-gis-svo | Pod: redis-deployment-0
-  → Содержимое бэкапа:
-    ./
-    ./dump.rdb
-
-  ⚠ Текущие данные Redis будут ЗАМЕНЕНЫ данными из бэкапа!
-  Продолжить? (y/N): y
-  → Ключей до восстановления: 0
-  → Останавливаем запись на диск...
-  ✓ Запись остановлена
-  → Сохраняем текущее состояние /data/ как .bak...
-  ✓ Откат сохранён: /opt/redis-backups/test-gis-svo/rollback_20260323_121222.tar.gz
-  → Очищаем /data/...
-  ✓ /data/ очищена
-  → Восстанавливаем файлы из архива...
-
-gzip: stdin: unexpected end of file
-tar: Child returned status 1
-tar: Error is not recoverable: exiting now
-command terminated with exit code 2
-  ✗ Ошибка при распаковке архива. Откатываем...
-
-gzip: stdin: unexpected end of file
-tar: Child returned status 1
-tar: Error is not recoverable: exiting now
-command terminated with exit code 2
-ОШИБКА: Восстановление не удалось. Откат выполнен из /opt/redis-backups/test-gis-svo/rollback_20260323_121222.tar.gz
-ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli dbsize
-0
-ik.belykh@microk8s:~/test$
-ik.belykh@microk8s:~/test$
-ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- sh -c 'ls -lsa /data'
-total 16
-4 drwxr-xr-x 3 nobody nogroup 4096 Mar 23 11:45 .
-4 drwxr-xr-x 1 root   root    4096 Mar 23 12:12 ..
-4 drwxr-xr-x 2 nobody nogroup 4096 Mar 23 12:12 appendonlydir
-4 -rw-r--r-- 1 nobody nogroup   88 Mar 23 11:45 dump.rdb
+asyncio.run(main())
+EOF
