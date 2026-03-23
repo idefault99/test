@@ -1,324 +1,173 @@
-{{- if eq .Values.enableService.redis.enable true }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
+#!/bin/bash
 # ============================================================
-# StatefulSet
+# Ищем кто удалил helm релизы и ресурсы в namespace dev-devops
+# Запускать на мастер-ноде microk8s
 # ============================================================
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: {{ $.Values.labels.redis }}-deployment
-  labels:
-    app: {{ $.Values.labels.redis }}
-    app.kubernetes.io/managed-by: Helm
-  namespace: {{ $ns }}
-spec:
-  serviceName: {{ $.Values.labels.redis }}-headless
-  {{- if eq $.Values.enableService.redis.type "cluster" }}
-  replicas: 3
-  {{- else if eq $.Values.enableService.redis.type "single" }}
-  replicas: 1
-  {{- else }}
-  {{ fail "Type of redis must be 'single' or 'cluster'" }}
-  {{- end }}
-  selector:
-    matchLabels:
-      app: {{ $.Values.labels.redis }}
-  podManagementPolicy: OrderedReady
-  updateStrategy:
-    type: RollingUpdate
-  persistentVolumeClaimRetentionPolicy:
-    whenDeleted: Retain
-    whenScaled: Retain
-  template:
-    metadata:
-      labels:
-        app: {{ $.Values.labels.redis }}
-    spec:
-      {{- if eq $.Values.enableService.redis.type "cluster" }}
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - {{ $.Values.labels.redis }}
-              topologyKey: kubernetes.io/hostname
-      {{- end }}
-      containers:
-        - name: {{ $.Values.labels.redis }}
-          image: {{ $.Values.images.redis }}
-          imagePullPolicy: IfNotPresent
-          {{- if eq $.Values.enableService.redis.type "cluster" }}
-          # MY_POD_NAME раскрывается shell'ом при старте контейнера.
-          # ConfigMap не подходит — он рендерится статически Helm'ом
-          # и не имеет доступа к env переменным пода.
-          command:
-            - sh
-            - -c
-            - |
-              cat > /tmp/redis.conf << EOF
-              port {{ $.Values.ports.internal.redis.client }}
-              cluster-enabled yes
-              cluster-config-file /data/nodes.conf
-              cluster-node-timeout 5000
-              appendonly yes
-              dir /data
-              cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}
-              EOF
-              exec redis-server /tmp/redis.conf
-          env:
-            - name: MY_POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          {{- else }}
-          command:
-            - redis-server
-            - --appendonly
-            - "yes"
-            - --dir
-            - /data
-          {{- end }}
-          ports:
-            - name: client
-              containerPort: {{ $.Values.ports.internal.redis.client }}
-          {{- if eq $.Values.enableService.redis.type "cluster" }}
-            - name: bus
-              containerPort: {{ $.Values.ports.internal.redis.bus }}
-          {{- end }}
-          volumeMounts:
-            - name: {{ $.Values.labels.redis }}-data
-              mountPath: /data
-          resources:
-            limits:
-              cpu: {{ ((((($.Values.configPods).redis).resources).limits).cpu) | default "200m" }}
-              memory: {{ ((((($.Values.configPods).redis).resources).limits).memory) | default "500Mi" }}
-            requests:
-              cpu: {{ ((((($.Values.configPods).redis).resources).requests).cpu) | default "100m" }}
-              memory: {{ ((((($.Values.configPods).redis).resources).requests).memory) | default "250Mi" }}
-          readinessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 5
-          livenessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 3
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
-  volumeClaimTemplates:
-    - metadata:
-        name: {{ $.Values.labels.redis }}-data
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: {{ $.Values.enableService.redis.storageClassName | default "nfs-csi" }}
-        resources:
-          requests:
-            storage: {{ $.Values.enableService.redis.storageSize | default "1Gi" }}
-{{- end }}
-{{- end }}
-{{- end }}
 
----
-{{- if eq .Values.enableService.redis.enable true }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-# ============================================================
-# Headless Service — для межподовой коммуникации StatefulSet
-# и стабильных DNS-имён подов
-# publishNotReadyAddresses: true — чтобы поды видели друг друга
-# во время инициализации кластера
-# ============================================================
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $.Values.labels.redis }}-headless
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-spec:
-  clusterIP: None
-  publishNotReadyAddresses: true
-  ports:
-    - name: client
-      port: {{ $.Values.ports.internal.redis.client }}
-      targetPort: {{ $.Values.ports.internal.redis.client }}
-      protocol: TCP
-  {{- if eq $.Values.enableService.redis.type "cluster" }}
-    - name: bus
-      port: {{ $.Values.ports.internal.redis.bus }}
-      targetPort: {{ $.Values.ports.internal.redis.bus }}
-      protocol: TCP
-  {{- end }}
-  selector:
-    app: {{ $.Values.labels.redis }}
----
-# ============================================================
-# ClusterIP Service — для клиентских подключений приложений
-# Приложения подключаются к redis-service:6379 как раньше
-# ============================================================
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $.Values.labels.redis }}-service
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-spec:
-  type: ClusterIP
-  ports:
-    - name: client
-      port: {{ $.Values.ports.internal.redis.client }}
-      targetPort: {{ $.Values.ports.internal.redis.client }}
-      protocol: TCP
-  selector:
-    app: {{ $.Values.labels.redis }}
-{{- end }}
-{{- end }}
-{{- end }}
+NS="dev-devops"
 
----
-{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-# ============================================================
-# RBAC для Init Job
-# ============================================================
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: redis-waiter-sa
-  namespace: {{ $ns }}
-automountServiceAccountToken: true
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: pod-reader-role
-  namespace: {{ $ns }}
-rules:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/status"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: redis-waiter-rolebinding
-  namespace: {{ $ns }}
-subjects:
-  - kind: ServiceAccount
-    name: redis-waiter-sa
-    namespace: {{ $ns }}
-roleRef:
-  kind: Role
-  name: pod-reader-role
-  apiGroup: rbac.authorization.k8s.io
----
-# ============================================================
-# Init Job — инициализирует Redis Cluster после деплоя
-#
-# Логика:
-#   1. InitContainer ждёт Ready всех 3 подов через kubectl wait
-#   2. Проверяет cluster info — если кластер уже ok, пропускает
-#   3. Выполняет redis-cli --cluster create
-#
-# Идемпотентен: повторный helm upgrade не сломает живой кластер
-# ============================================================
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ $.Values.labels.redis }}-job-{{ $.Release.Revision }}
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 600
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      serviceAccountName: redis-waiter-sa
-      restartPolicy: Never
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
-      initContainers:
-        - name: wait-for-redis-nodes
-          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
-          command: ['sh', '-c']
-          args:
-            - |
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-0 --timeout=300s
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-1 --timeout=300s
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-2 --timeout=300s
-      containers:
-        - name: {{ $.Values.labels.redis }}
-          image: {{ $.Values.images.redis }}
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c"]
-          args:
-            - |
-              POD0="{{ $.Values.labels.redis }}-deployment-0.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD1="{{ $.Values.labels.redis }}-deployment-1.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD2="{{ $.Values.labels.redis }}-deployment-2.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              PORT="{{ $.Values.ports.internal.redis.client }}"
+echo "============================================"
+echo "  РАССЛЕДОВАНИЕ: кто удалил ресурсы в $NS"
+echo "============================================"
 
-              # Проверяем — если кластер уже ок, пропускаем
-              CLUSTER_STATE=$(redis-cli -h $POD0 -p $PORT cluster info \
-                | grep cluster_state | cut -d: -f2 | tr -d '[:space:]')
-              CLUSTER_NODES=$(redis-cli -h $POD0 -p $PORT cluster info \
-                | grep cluster_known_nodes | cut -d: -f2 | tr -d '[:space:]')
+# ============================================================
+# 1. Audit log microk8s — главный источник истины
+# ============================================================
+echo ""
+echo "==> [1] Ищем в audit log удаление helm secrets (хранилище релизов)..."
 
-              if [ "$CLUSTER_STATE" = "ok" ] && [ "$CLUSTER_NODES" -ge "3" ]; then
-                echo "Кластер уже инициализирован (state=$CLUSTER_STATE, nodes=$CLUSTER_NODES). Пропускаем."
-                exit 0
-              fi
+AUDIT_PATHS=(
+  "/var/log/pods"
+  "/var/snap/microk8s/common/var/log/apiserver/audit.log"
+  "/var/snap/microk8s/common/var/log/audit/kube-apiserver-audit.log"
+  "/var/snap/microk8s/common/log"
+)
 
-              echo "Инициализируем Redis Cluster..."
-              redis-cli --cluster create \
-                $POD0:$PORT \
-                $POD1:$PORT \
-                $POD2:$PORT \
-                --cluster-replicas 0 \
-                --cluster-yes
+AUDIT_LOG=""
+for P in "${AUDIT_PATHS[@]}"; do
+  if [ -f "$P" ]; then
+    AUDIT_LOG="$P"
+    echo "  Найден audit log: $P"
+    break
+  fi
+done
 
-              echo "Итоговое состояние кластера:"
-              redis-cli -h $POD0 -p $PORT cluster info
-              redis-cli -h $POD0 -p $PORT cluster nodes
-{{- end }}
-{{- end }}
-{{- end }}
+if [ -n "$AUDIT_LOG" ]; then
+  echo ""
+  echo "--- Удаление secrets (helm хранит релизы как secrets) ---"
+  grep -i "delete\|DELETE" "$AUDIT_LOG" 2>/dev/null \
+    | grep "$NS" \
+    | grep -i "secret\|helm" \
+    | grep -v '"level":"Request"' \
+    | python3 -c "
+import sys, json
+for line in sys.stdin:
+    try:
+        e = json.loads(line)
+        print(f\"{e.get('requestReceivedTimestamp','?')} | verb={e.get('verb','?')} | user={e.get('user',{}).get('username','?')} | resource={e.get('objectRef',{}).get('resource','?')} | name={e.get('objectRef',{}).get('name','?')} | ns={e.get('objectRef',{}).get('namespace','?')}\")
+    except:
+        print(line.strip())
+" 2>/dev/null | head -50
+
+  echo ""
+  echo "--- Удаление namespace $NS целиком ---"
+  grep -i "delete\|DELETE" "$AUDIT_LOG" 2>/dev/null \
+    | grep -i "namespace" \
+    | grep "$NS" \
+    | python3 -c "
+import sys, json
+for line in sys.stdin:
+    try:
+        e = json.loads(line)
+        print(f\"{e.get('requestReceivedTimestamp','?')} | verb={e.get('verb','?')} | user={e.get('user',{}).get('username','?')} | resource={e.get('objectRef',{}).get('resource','?')} | name={e.get('objectRef',{}).get('name','?')}\")
+    except:
+        print(line.strip())
+" 2>/dev/null | head -20
+
+else
+  echo "  Audit log не найден по стандартным путям."
+  echo "  Ищем где он может быть..."
+  find /var/snap/microk8s -name "*.log" 2>/dev/null | grep -i audit
+  find /var/log -name "*audit*" 2>/dev/null
+fi
+
+# ============================================================
+# 2. Проверяем включён ли audit вообще
+# ============================================================
+echo ""
+echo "==> [2] Проверяем настройки audit в microk8s..."
+cat /var/snap/microk8s/current/args/kube-apiserver 2>/dev/null \
+  | grep -i audit \
+  || echo "  Файл args/kube-apiserver не найден или audit не настроен"
+
+# ============================================================
+# 3. История kubectl на всех нодах
+# ============================================================
+echo ""
+echo "==> [3] История kubectl команд на этой ноде..."
+for HOME_DIR in /root /home/*; do
+  HIST="$HOME_DIR/.bash_history"
+  if [ -f "$HIST" ]; then
+    echo "  --- $HIST ---"
+    grep -i "delete\|helm\|$NS" "$HIST" 2>/dev/null \
+      | grep -v "^#" \
+      | tail -30
+  fi
+done
+
+# ============================================================
+# 4. Helm history — если релиз ещё есть в каком-то виде
+# ============================================================
+echo ""
+echo "==> [4] Проверяем остатки helm релизов..."
+microk8s helm3 list -n $NS -a 2>/dev/null \
+  || helm list -n $NS -a 2>/dev/null \
+  || echo "  Helm релизов не найдено"
+
+# Secrets с префиксом sh.helm — именно в них хранится состояние helm
+echo ""
+echo "  Secrets helm в namespace $NS (если есть):"
+microk8s kubectl get secrets -n $NS 2>/dev/null | grep "sh.helm\|helm" \
+  || kubectl get secrets -n $NS 2>/dev/null | grep "sh.helm\|helm" \
+  || echo "  Helm secrets не найдены — релизы точно удалены"
+
+# ============================================================
+# 5. Системные логи — кто запускал helm или kubectl
+# ============================================================
+echo ""
+echo "==> [5] Ищем в systemd journal вызовы helm/kubectl за последние 3 дня..."
+journalctl --since "3 days ago" 2>/dev/null \
+  | grep -iE "helm|kubectl" \
+  | grep -iE "delete|uninstall|$NS" \
+  | tail -30 \
+  || echo "  Ничего не найдено в journalctl"
+
+# ============================================================
+# 6. Cron jobs — может быть автоматическая очистка
+# ============================================================
+echo ""
+echo "==> [6] Проверяем cron jobs на наличие скриптов очистки..."
+echo "  --- /etc/cron* ---"
+grep -r "helm\|kubectl\|delete\|$NS" /etc/cron* /etc/crontab 2>/dev/null | head -20
+
+echo "  --- crontab пользователей ---"
+for USER in root $(cut -d: -f1 /etc/passwd | head -20); do
+  CRON=$(crontab -l -u $USER 2>/dev/null | grep -iE "helm|kubectl|delete|$NS")
+  if [ -n "$CRON" ]; then
+    echo "  Пользователь $USER:"
+    echo "$CRON"
+  fi
+done
+
+echo "  --- Kubernetes CronJobs в кластере ---"
+microk8s kubectl get cronjobs -A 2>/dev/null \
+  || kubectl get cronjobs -A 2>/dev/null
+
+# ============================================================
+# 7. Недавние события в namespace
+# ============================================================
+echo ""
+echo "==> [7] События в namespace $NS (если namespace ещё существует)..."
+microk8s kubectl get events -n $NS --sort-by='.lastTimestamp' 2>/dev/null | tail -20 \
+  || kubectl get events -n $NS --sort-by='.lastTimestamp' 2>/dev/null | tail -20 \
+  || echo "  Namespace $NS не существует или событий нет"
+
+# ============================================================
+# Итог
+# ============================================================
+echo ""
+echo "============================================"
+echo "  ИТОГ"
+echo "============================================"
+echo ""
+echo "  Если audit log выключен — включи его чтобы в будущем"
+echo "  такие инциденты можно было расследовать:"
+echo ""
+echo "  1. Создай /var/snap/microk8s/common/var/log/audit/ (mkdir -p)"
+echo "  2. Добавь в /var/snap/microk8s/current/args/kube-apiserver:"
+echo "     --audit-log-path=/var/snap/microk8s/common/var/log/audit/audit.log"
+echo "     --audit-log-maxage=30"
+echo "     --audit-log-maxbackup=5"
+echo "     --audit-log-maxsize=100"
+echo "  3. microk8s stop && microk8s start"
+echo ""
