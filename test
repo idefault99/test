@@ -1,15 +1,2 @@
-# Смотрим все redis StatefulSet во всех namespace
-kubectl get statefulset -A | grep redis-deployment
 
-# Удаляем все сразу
-kubectl get statefulset -A --no-headers | grep redis-deployment | awk '{print $1, $2}' | \
-  while read NS NAME; do
-    echo "Удаляем $NS/$NAME"
-    kubectl delete statefulset $NAME -n $NS --cascade=orphan
-  done
-
-# Убеждаемся что все удалены
-kubectl get statefulset -A | grep redis-deployment
-
-# Теперь helm install
-helm install infra ./path/to/chart -n test-gis-svo -f values.yaml
+[ERR] Node redis-deployment-0.redis-headless.test-gis-svo.svc.cluster.local:6379 is not empty. Either the node already knows other nodes (check with CLUSTER NODES) or contains some key in database 0.
