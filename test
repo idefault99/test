@@ -1,152 +1,53 @@
 #!/bin/bash
-# ============================================================
-# Проверка всех Redis во всех namespace:
-# - статус пода
-# - есть ли PVC
-# - последние логи (ошибки)
-# - активные подключения к порту 6379
-# - количество ключей
-# ============================================================
+# Размер БД Redis во всех namespace
+# Сортирует по убыванию — сначала самые большие
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+echo "Собираем данные..."
+echo ""
 
-ok()   { echo -e "${GREEN}  ✓ $1${NC}"; }
-fail() { echo -e "${RED}  ✗ $1${NC}"; }
-info() { echo -e "${YELLOW}  → $1${NC}"; }
-head() { echo -e "${CYAN}$1${NC}"; }
+# Временный файл для сортировки
+TMP=$(mktemp)
 
-# Все namespace где есть redis-deployment-0
-NAMESPACES=$(kubectl get pods -A --no-headers 2>/dev/null \
+kubectl get pods -A --no-headers 2>/dev/null \
   | grep "redis-deployment-0" \
   | awk '{print $1}' \
-  | sort -u)
+  | while read NS; do
+      DBSIZE=$(kubectl exec -n $NS redis-deployment-0 -- redis-cli dbsize 2>/dev/null | tr -d '[:space:]')
+      MEMORY=$(kubectl exec -n $NS redis-deployment-0 -- redis-cli info memory 2>/dev/null \
+        | grep "used_memory_human" | head -1 | cut -d: -f2 | tr -d '[:space:]')
+      echo "$DBSIZE $MEMORY $NS"
+    done | tee $TMP
 
-TOTAL=$(echo "$NAMESPACES" | wc -l)
 echo ""
-head "============================================"
-head "  REDIS CLUSTER OVERVIEW — всего namespace: $TOTAL"
-head "============================================"
-
-# Счётчики для итога
-COUNT_OK=0
-COUNT_FAIL=0
-COUNT_WITH_PVC=0
-COUNT_WITH_CLIENTS=0
-
-for NS in $NAMESPACES; do
-  echo ""
-  head "── $NS"
-
-  # Все redis поды в namespace
-  PODS=$(kubectl get pods -n $NS --no-headers 2>/dev/null \
-    | grep "redis-deployment" \
-    | awk '{print $1}')
-
-  for POD in $PODS; do
-    STATUS=$(kubectl get pod $POD -n $NS --no-headers 2>/dev/null | awk '{print $3}')
-    RESTARTS=$(kubectl get pod $POD -n $NS --no-headers 2>/dev/null | awk '{print $4}')
-    NODE=$(kubectl get pod $POD -n $NS --no-headers 2>/dev/null | awk '{print $7}')
-
-    # Статус пода
-    if [ "$STATUS" = "Running" ]; then
-      ok "$POD | $STATUS | restarts=$RESTARTS | node=$NODE"
-      COUNT_OK=$((COUNT_OK+1))
-    else
-      fail "$POD | $STATUS | restarts=$RESTARTS | node=$NODE"
-      COUNT_FAIL=$((COUNT_FAIL+1))
-    fi
-
-    if [ "$STATUS" != "Running" ]; then
-      continue
-    fi
-
-    # PVC
-    PVC=$(kubectl get pvc -n $NS --no-headers 2>/dev/null \
-      | grep "redis.*$POD\|$(echo $POD | sed 's/redis-deployment/redis-data-redis-deployment/')" \
-      | awk '{print $1" "$2}')
-    if [ -n "$PVC" ]; then
-      ok "  PVC: $PVC"
-      COUNT_WITH_PVC=$((COUNT_WITH_PVC+1))
-    else
-      info "  PVC: нет"
-    fi
-
-    # Количество ключей
-    DBSIZE=$(kubectl exec -n $NS $POD -- redis-cli dbsize 2>/dev/null)
-    info "  Ключей: $DBSIZE"
-
-    # Активные подключения — clients connected
-    CLIENTS=$(kubectl exec -n $NS $POD -- redis-cli info clients 2>/dev/null \
-      | grep "connected_clients" | cut -d: -f2 | tr -d '[:space:]')
-    if [ -n "$CLIENTS" ] && [ "$CLIENTS" -gt 1 ] 2>/dev/null; then
-      ok "  Активных клиентов: $CLIENTS"
-      COUNT_WITH_CLIENTS=$((COUNT_WITH_CLIENTS+1))
-    else
-      info "  Активных клиентов: ${CLIENTS:-0}"
-    fi
-
-    # Кто подключён — список клиентских IP и их команды
-    if [ -n "$CLIENTS" ] && [ "$CLIENTS" -gt 1 ] 2>/dev/null; then
-      echo "    Подключённые клиенты:"
-      kubectl exec -n $NS $POD -- redis-cli client list 2>/dev/null \
-        | grep -v "cmd=ping\|cmd=client" \
-        | awk -F' ' '{
-            addr=""; cmd=""; age=""; idle=""
-            for(i=1;i<=NF;i++){
-              if($i~/^addr=/) addr=substr($i,6)
-              if($i~/^cmd=/)  cmd=substr($i,5)
-              if($i~/^age=/)  age=substr($i,5)
-              if($i~/^idle=/) idle=substr($i,6)
-            }
-            if(addr!="") printf "      addr=%-25s cmd=%-15s age=%ss idle=%ss\n", addr, cmd, age, idle
-          }' 2>/dev/null | head -10
-    fi
-
-    # Последние ошибки в логах (последние 50 строк)
-    ERRORS=$(kubectl logs -n $NS $POD --tail=50 2>/dev/null \
-      | grep -iE "error|warning|fatal|oom|crashed|failed" \
-      | grep -v "^#" \
-      | tail -3)
-    if [ -n "$ERRORS" ]; then
-      fail "  Последние ошибки в логах:"
-      echo "$ERRORS" | while read line; do
-        echo -e "    ${RED}$line${NC}"
-      done
-    fi
-
-    # Записываются ли логи сейчас — смотрим последнюю строку лога
-    LAST_LOG=$(kubectl logs -n $NS $POD --tail=1 2>/dev/null)
-    info "  Последняя строка лога: $LAST_LOG"
-
-  done
+echo "============================================"
+echo "  ТОП — по количеству ключей"
+echo "============================================"
+printf "%-10s %-10s %s\n" "КЛЮЧЕЙ" "ПАМЯТЬ" "NAMESPACE"
+echo "-------------------------------------------"
+sort -rn $TMP | while read KEYS MEM NS; do
+  if [ "${KEYS:-0}" -gt 0 ] 2>/dev/null; then
+    printf "%-10s %-10s %s\n" "$KEYS" "$MEM" "$NS"
+  fi
 done
 
-# ============================================================
-# Итог
-# ============================================================
 echo ""
-head "============================================"
-head "  ИТОГ"
-head "============================================"
-echo -e "  Всего namespace с Redis : ${CYAN}$TOTAL${NC}"
-echo -e "  Подов Running           : ${GREEN}$COUNT_OK${NC}"
-echo -e "  Подов не Running        : ${RED}$COUNT_FAIL${NC}"
-echo -e "  С PVC                   : ${GREEN}$COUNT_WITH_PVC${NC}"
-echo -e "  С активными клиентами   : ${YELLOW}$COUNT_WITH_CLIENTS${NC}"
+echo "============================================"
+printf "%-10s %s\n" "КЛЮЧЕЙ" "NAMESPACE"
+echo "--- Пустые (dbsize=0) ---"
+sort -rn $TMP | while read KEYS MEM NS; do
+  if [ "${KEYS:-0}" -eq 0 ] 2>/dev/null; then
+    printf "%-10s %s\n" "$KEYS" "$NS"
+  fi
+done
+
 echo ""
+TOTAL_NS=$(wc -l < $TMP)
+NON_EMPTY=$(awk '$1>0' $TMP | wc -l)
+echo "Всего namespace: $TOTAL_NS | С данными: $NON_EMPTY | Пустых: $((TOTAL_NS-NON_EMPTY))"
+
+rm -f $TMP
 
 
-# Полный вывод
-bash redis_overview.sh 2>&1 | tee /tmp/redis_overview.log
+---
 
-# Только namespace где есть активные клиенты
-bash redis_overview.sh 2>&1 | grep -A5 "Активных клиентов: [^01]"
-
-# Только namespace где нет PVC (приоритет для миграции)
-bash redis_overview.sh 2>&1 | grep -B2 "PVC: нет"
-
-
+bash redis_dbsize.sh 2>&1 | tee /tmp/redis_dbsize.log
