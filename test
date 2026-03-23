@@ -1,3 +1,6 @@
-# В StatefulSet команда запуска сейчас выглядит как?
-kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get appendonly
-kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get save
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get appendonly
+appendonly
+yes
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli config get save
+save
+3600 1 300 100 60 10000
