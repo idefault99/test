@@ -1,5 +1,247 @@
-curl -i --request PUT \
-  --header "PRIVATE-TOKEN: <your_token>" \
-  --header "Content-Type: application/json" \
-  --data '{"name":"new-reponame","path":"new-reponame"}' \
-  "https://gitlab.example.com/api/v4/projects/123"
+#!/bin/bash
+
+# ─────────────────────────────────────────────
+#  GitLab Registry Migration Tool
+# ─────────────────────────────────────────────
+
+set -euo pipefail
+
+# ── Конфиг (заполни перед запуском) ──────────
+GITLAB_URL="https://gitlab.example.com"
+PRIVATE_TOKEN=""
+PROJECT_ID=""
+REGISTRY_OLD=""   # gitlab.example.com:5050/group/old-reponame
+REGISTRY_NEW=""   # gitlab.example.com:5050/group/new-reponame
+DOCKER_USER=""
+DOCKER_PASS=""    # токен или пароль
+# ─────────────────────────────────────────────
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+STATE_FILE=".registry_migrate_state"
+TAGS_FILE=".registry_tags"
+REPO_ID_FILE=".registry_repo_id"
+
+log()    { echo -e "${GREEN}[OK]${NC} $*"; }
+warn()   { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error()  { echo -e "${RED}[ERR]${NC} $*"; }
+info()   { echo -e "${CYAN}[INFO]${NC} $*"; }
+header() { echo -e "\n${BOLD}${CYAN}══ $* ══${NC}\n"; }
+
+check_deps() {
+  local missing=()
+  for cmd in curl docker python3 jq; do
+    command -v "$cmd" &>/dev/null || missing+=("$cmd")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    error "Не найдены зависимости: ${missing[*]}"
+    exit 1
+  fi
+}
+
+check_config() {
+  local empty=()
+  [[ -z "$GITLAB_URL" ]]     && empty+=("GITLAB_URL")
+  [[ -z "$PRIVATE_TOKEN" ]]  && empty+=("PRIVATE_TOKEN")
+  [[ -z "$PROJECT_ID" ]]     && empty+=("PROJECT_ID")
+  [[ -z "$REGISTRY_OLD" ]]   && empty+=("REGISTRY_OLD")
+  [[ -z "$REGISTRY_NEW" ]]   && empty+=("REGISTRY_NEW")
+  [[ -z "$DOCKER_USER" ]]    && empty+=("DOCKER_USER")
+  [[ -z "$DOCKER_PASS" ]]    && empty+=("DOCKER_PASS")
+  if [[ ${#empty[@]} -gt 0 ]]; then
+    error "Заполни в скрипте переменные: ${empty[*]}"
+    exit 1
+  fi
+}
+
+# ── Получить repo_id из registry ─────────────
+get_repo_id() {
+  if [[ -f "$REPO_ID_FILE" ]]; then
+    cat "$REPO_ID_FILE"
+    return
+  fi
+  info "Получаю список registry repositories..."
+  local repos
+  repos=$(curl -sf --header "PRIVATE-TOKEN: $PRIVATE_TOKEN" \
+    "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories?per_page=100")
+
+  echo "$repos" | jq -r '.[] | "\(.id)\t\(.path)"'
+  echo ""
+  read -rp "Введи ID репозитория registry: " repo_id
+  echo "$repo_id" > "$REPO_ID_FILE"
+  echo "$repo_id"
+}
+
+# ── Получить все теги ─────────────────────────
+fetch_tags() {
+  header "Получение тегов"
+  local repo_id
+  repo_id=$(get_repo_id)
+
+  info "Загружаю теги (repo_id=$repo_id)..."
+  local page=1
+  > "$TAGS_FILE"
+
+  while true; do
+    local result
+    result=$(curl -sf --header "PRIVATE-TOKEN: $PRIVATE_TOKEN" \
+      "$GITLAB_URL/api/v4/projects/$PROJECT_ID/registry/repositories/$repo_id/tags?per_page=100&page=$page")
+
+    local count
+    count=$(echo "$result" | jq 'length')
+    [[ "$count" -eq 0 ]] && break
+
+    echo "$result" | jq -r '.[].name' >> "$TAGS_FILE"
+    ((page++))
+  done
+
+  local total
+  total=$(wc -l < "$TAGS_FILE" | tr -d ' ')
+  log "Найдено тегов: $total"
+  cat "$TAGS_FILE"
+}
+
+# ── Docker login ──────────────────────────────
+docker_login() {
+  info "Docker login в ${1}..."
+  echo "$DOCKER_PASS" | docker login "$1" -u "$DOCKER_USER" --password-stdin
+}
+
+# ── Pull всех образов ─────────────────────────
+pull_all() {
+  header "Pull образов → локально"
+  [[ ! -f "$TAGS_FILE" ]] && { error "Сначала запусти: Получить теги (пункт 1)"; return 1; }
+
+  docker_login "$(echo "$REGISTRY_OLD" | cut -d'/' -f1)"
+
+  local total failed=0 success=0
+  total=$(wc -l < "$TAGS_FILE" | tr -d ' ')
+  local i=0
+
+  while IFS= read -r tag; do
+    ((i++)) || true
+    info "[$i/$total] Pulling $REGISTRY_OLD:$tag"
+    if docker pull "$REGISTRY_OLD:$tag"; then
+      ((success++)) || true
+    else
+      warn "Не удалось: $tag"
+      ((failed++)) || true
+    fi
+  done < "$TAGS_FILE"
+
+  echo ""
+  log "Успешно: $success / $total"
+  [[ $failed -gt 0 ]] && warn "Ошибок: $failed"
+  echo "pull_done" > "$STATE_FILE"
+}
+
+# ── Push всех образов в новый репо ───────────
+push_all() {
+  header "Push образов → $REGISTRY_NEW"
+  [[ ! -f "$TAGS_FILE" ]] && { error "Сначала запусти: Получить теги (пункт 1)"; return 1; }
+
+  if [[ ! -f "$STATE_FILE" ]] || ! grep -q "pull_done" "$STATE_FILE"; then
+    warn "Pull не был выполнен. Продолжить всё равно? (y/n)"
+    read -rn1 ans; echo
+    [[ "$ans" != "y" ]] && return 0
+  fi
+
+  docker_login "$(echo "$REGISTRY_NEW" | cut -d'/' -f1)"
+
+  local total failed=0 success=0
+  total=$(wc -l < "$TAGS_FILE" | tr -d ' ')
+  local i=0
+
+  while IFS= read -r tag; do
+    ((i++)) || true
+    info "[$i/$total] $REGISTRY_OLD:$tag → $REGISTRY_NEW:$tag"
+    if docker tag "$REGISTRY_OLD:$tag" "$REGISTRY_NEW:$tag" && \
+       docker push "$REGISTRY_NEW:$tag"; then
+      ((success++)) || true
+    else
+      warn "Ошибка на теге: $tag"
+      ((failed++)) || true
+    fi
+  done < "$TAGS_FILE"
+
+  echo ""
+  log "Успешно запушено: $success / $total"
+  [[ $failed -gt 0 ]] && warn "Ошибок: $failed"
+}
+
+# ── Показать локальные образы ─────────────────
+show_local() {
+  header "Локальные образы из $REGISTRY_OLD"
+  docker images | grep "$REGISTRY_OLD" || warn "Образов нет локально"
+}
+
+# ── Очистить локальные образы ─────────────────
+cleanup_local() {
+  header "Очистка локальных образов"
+  [[ ! -f "$TAGS_FILE" ]] && { error "Нет файла тегов"; return 1; }
+
+  warn "Удалить все локальные образы $REGISTRY_OLD и $REGISTRY_NEW ? (y/n)"
+  read -rn1 ans; echo
+  [[ "$ans" != "y" ]] && return 0
+
+  while IFS= read -r tag; do
+    docker rmi "$REGISTRY_OLD:$tag" 2>/dev/null && info "Удалён: $REGISTRY_OLD:$tag" || true
+    docker rmi "$REGISTRY_NEW:$tag" 2>/dev/null && info "Удалён: $REGISTRY_NEW:$tag" || true
+  done < "$TAGS_FILE"
+
+  log "Готово"
+}
+
+# ── Сбросить состояние ────────────────────────
+reset_state() {
+  rm -f "$STATE_FILE" "$TAGS_FILE" "$REPO_ID_FILE"
+  log "Состояние сброшено"
+}
+
+# ── Меню ──────────────────────────────────────
+menu() {
+  while true; do
+    echo -e "\n${BOLD}╔══════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║   GitLab Registry Migration Tool     ║${NC}"
+    echo -e "${BOLD}╠══════════════════════════════════════╣${NC}"
+    echo -e "${BOLD}║${NC}  ${CYAN}1)${NC} Получить теги из registry          ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  ${CYAN}2)${NC} Pull все образы локально            ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  ${CYAN}3)${NC} Push в новый репозиторий            ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  ${CYAN}4)${NC} Pull + Push (всё сразу)             ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  ${CYAN}5)${NC} Показать локальные образы           ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  ${CYAN}6)${NC} Очистить локальные образы           ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  ${CYAN}7)${NC} Сбросить состояние                  ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}  ${RED}0)${NC} Выход                               ${BOLD}║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════╝${NC}"
+
+    # Показать статус
+    if [[ -f "$TAGS_FILE" ]]; then
+      local cnt; cnt=$(wc -l < "$TAGS_FILE" | tr -d ' ')
+      echo -e "  ${GREEN}●${NC} Тегов загружено: $cnt"
+    fi
+    if [[ -f "$STATE_FILE" ]] && grep -q "pull_done" "$STATE_FILE"; then
+      echo -e "  ${GREEN}●${NC} Pull выполнен"
+    fi
+
+    echo -e ""
+    read -rp "Выбор: " choice
+
+    case $choice in
+      1) fetch_tags ;;
+      2) pull_all ;;
+      3) push_all ;;
+      4) pull_all && push_all ;;
+      5) show_local ;;
+      6) cleanup_local ;;
+      7) reset_state ;;
+      0) info "Выход"; exit 0 ;;
+      *) warn "Неверный выбор" ;;
+    esac
+  done
+}
+
+# ── Точка входа ───────────────────────────────
+check_deps
+check_config
+menu
