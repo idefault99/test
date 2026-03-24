@@ -1,2 +1,75 @@
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
+#10 [2/6] WORKDIR /app
+#10 DONE 1.1s
+#11 [3/6] COPY package*.json .
+#11 DONE 0.1s
+#12 [4/6] RUN npm config set strict-ssl false
+#12 DONE 0.9s
+#13 [5/6] RUN npm install && npm install -g serve
+#13 3.163 npm WARN EBADENGINE Unsupported engine {
+#13 3.163 npm WARN EBADENGINE   package: 'cli-truncate@5.1.1',
+#13 3.164 npm WARN EBADENGINE   required: { node: '>=20' },
+#13 3.164 npm WARN EBADENGINE   current: { node: 'v18.17.1', npm: '9.6.7' }
+#13 3.164 npm WARN EBADENGINE }
+#13 3.165 npm WARN EBADENGINE Unsupported engine {
+#13 3.165 npm WARN EBADENGINE   package: 'string-width@8.1.0',
+#13 3.165 npm WARN EBADENGINE   required: { node: '>=20' },
+#13 3.166 npm WARN EBADENGINE   current: { node: 'v18.17.1', npm: '9.6.7' }
+#13 3.166 npm WARN EBADENGINE }
+#13 3.175 npm WARN EBADENGINE Unsupported engine {
+#13 3.175 npm WARN EBADENGINE   package: 'lint-staged@16.2.6',
+#13 3.175 npm WARN EBADENGINE   required: { node: '>=20.17' },
+#13 3.175 npm WARN EBADENGINE   current: { node: 'v18.17.1', npm: '9.6.7' }
+#13 3.175 npm WARN EBADENGINE }
+#13 3.175 npm WARN EBADENGINE Unsupported engine {
+#13 3.175 npm WARN EBADENGINE   package: 'commander@14.0.2',
+#13 3.175 npm WARN EBADENGINE   required: { node: '>=20' },
+#13 3.175 npm WARN EBADENGINE   current: { node: 'v18.17.1', npm: '9.6.7' }
+#13 3.175 npm WARN EBADENGINE }
+#13 3.176 npm WARN EBADENGINE Unsupported engine {
+#13 3.176 npm WARN EBADENGINE   package: 'listr2@9.0.5',
+#13 3.176 npm WARN EBADENGINE   required: { node: '>=20.0.0' },
+#13 3.176 npm WARN EBADENGINE   current: { node: 'v18.17.1', npm: '9.6.7' }
+#13 3.176 npm WARN EBADENGINE }
+#13 3.178 npm WARN EBADENGINE Unsupported engine {
+#13 3.178 npm WARN EBADENGINE   package: 'nano-spawn@2.0.0',
+#13 3.178 npm WARN EBADENGINE   required: { node: '>=20.17' },
+#13 3.178 npm WARN EBADENGINE   current: { node: 'v18.17.1', npm: '9.6.7' }
+#13 3.179 npm WARN EBADENGINE }
+#13 12.44 npm ERR! code E401
+#13 12.44 npm ERR! Unable to authenticate, need: BASIC realm="Sonatype Nexus Repository Manager"
+#13 12.47 
+#13 12.47 npm ERR! A complete log of this run can be found in: /root/.npm/_logs/2026-03-24T13_23_44_023Z-debug-0.log
+#13 ERROR: process "/bin/sh -c npm install && npm install -g serve" did not complete successfully: exit code: 1
+------
+ > [5/6] RUN npm install && npm install -g serve:
+3.176 npm WARN EBADENGINE }
+3.178 npm WARN EBADENGINE Unsupported engine {
+3.178 npm WARN EBADENGINE   package: 'nano-spawn@2.0.0',
+3.178 npm WARN EBADENGINE   required: { node: '>=20.17' },
+3.178 npm WARN EBADENGINE   current: { node: 'v18.17.1', npm: '9.6.7' }
+3.179 npm WARN EBADENGINE }
+12.44 npm ERR! code E401
+12.44 npm ERR! Unable to authenticate, need: BASIC realm="Sonatype Nexus Repository Manager"
+12.47 
+12.47 npm ERR! A complete log of this run can be found in: /root/.npm/_logs/2026-03-24T13_23_44_023Z-debug-0.log
+------
+ 10 warnings found (use docker --debug to expand):
+ - FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 3)
+ - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 13)
+ - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 17)
+ - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "LOGIN_PASSWORD") (line 19)
+ - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ARG "LOGIN_PASSWORD") (line 11)
+ - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 14)
+ - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 15)
+ - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 16)
+ - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 18)
+ - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 19)
+Dockerfile:27
+--------------------
+  25 |     
+  26 |     RUN npm config set strict-ssl false
+  27 | >>> RUN npm install && npm install -g serve
+  28 |     
+  29 |     COPY . .
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c npm install && npm install -g serve" did not complete successfully: exit code: 1
