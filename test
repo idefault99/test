@@ -1,33 +1,16 @@
- > [7/8] RUN npm install && npm install -g serve:
-121.2 npm ERR! syscall read
-121.2 npm ERR! errno ECONNRESET
-121.2 npm ERR! network request to https://registry.npmjs.org/serve failed, reason: read ECONNRESET
-121.2 npm ERR! network This is a problem related to network connectivity.
-121.2 npm ERR! network In most cases you are behind a proxy or have bad network settings.
-121.2 npm ERR! network 
-121.2 npm ERR! network If you are behind a proxy, please make sure that the
-121.2 npm ERR! network 'proxy' config is set properly.  See: 'npm help config'
-121.2 
-121.2 npm ERR! A complete log of this run can be found in: /root/.npm/_logs/2026-03-24T13_52_58_459Z-debug-0.log
-------
- 11 warnings found (use docker --debug to expand):
- - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 21)
- - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 23)
- - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 17)
- - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 22)
- - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "LOGIN_PASSWORD") (line 23)
- - FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 3)
- - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ARG "LOGIN_PASSWORD") (line 11)
- - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ARG "NEXUS_PASSWORD") (line 15)
- - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 18)
- - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 19)
- - LegacyKeyValueFormat: "ENV key=value" should be used instead of legacy "ENV key value" format (line 20)
-Dockerfile:34
---------------------
-  32 |     
-  33 |     RUN npm config set strict-ssl false
-  34 | >>> RUN npm install && npm install -g serve
-  35 |     
-  36 |     COPY . .
---------------------
-ERROR: failed to build: failed to solve: process "/bin/sh -c npm install && npm install -g serve" did not complete successfully: exit code: 1
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG}.src \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --target ${TARGET} \
+      --build-arg PROJECT_NAME=${RELEASE_NAME} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg PROJECT_COMMIT_SHA=${CI_COMMIT_SHA::8} \
+      --build-arg NEXUS_NPM_URL=${NEXUS_NPM_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
