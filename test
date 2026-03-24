@@ -1,5 +1,3 @@
-# Переименовать проект через API
-curl --request PUT \
-  --header "PRIVATE-TOKEN: <your_token>" \
-  --data "name=new-reponame&path=new-reponame" \
-  "https://gitlab.example.com/api/v4/projects/<project_id>"
+# Проверить токен
+curl --header "PRIVATE-TOKEN: <your_token>" \
+  "https://gitlab.example.com/api/v4/user"
