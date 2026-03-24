@@ -1,76 +1,25 @@
-# ─────────────────────────────────────────────────────────────
-#  Переименование GitLab проекта через Rails Console
-#  (без удаления Container Registry)
-# ─────────────────────────────────────────────────────────────
-
-
-# ══ 1. КАК ПОПАСТЬ В КОНСОЛЬ ══════════════════════════════════
-
-# Если GitLab установлен через Omnibus (стандарт):
-sudo gitlab-rails console
-
-# Если GitLab в Docker:
-docker exec -it <container_name> gitlab-rails console
-
-# Если GitLab в Kubernetes:
-kubectl exec -it -n <namespace> $(kubectl get pods -n <namespace> | grep webservice | head -1 | awk '{print $1}') -- gitlab-rails console
-
-# Ждать пока появится приглашение:
-#   Loading production environment (Rails 7.x.x)
-#   irb(main):001:0>
-
-
-# ══ 2. ПРОВЕРИТЬ ПРОЕКТ ПЕРЕД ПЕРЕИМЕНОВАНИЕМ ═════════════════
-
-# Найти по ID
 project = Project.find(123)
 
-# Или найти по текущему пути
-project = Project.find_by_full_path('group/old-reponame')
+# Посмотреть что в registry
+project.container_repositories.each do |repo|
+  puts "#{repo.id} #{repo.path} #{repo.name}"
+end
 
-# Проверить что нашли правильный
-puts project.name
-puts project.path
-puts project.full_path
-puts project.id
+---
+# Обновить пути в БД
+project.container_repositories.each do |repo|
+  new_path = repo.path.gsub('old-reponame', 'new-reponame')
+  repo.update!(path: new_path)
+  puts "Updated: #{repo.path}"
+end
 
+---
+# Найти где лежит registry
+sudo find /var/opt/gitlab -type d -name "old-reponame" 2>/dev/null
 
-# ══ 3. ПЕРЕИМЕНОВАТЬ ══════════════════════════════════════════
+# Переименовать
+sudo mv /var/opt/gitlab/gitlab-rails/shared/registry/docker/registry/v2/repositories/group/old-reponame \
+        /var/opt/gitlab/gitlab-rails/shared/registry/docker/registry/v2/repositories/group/new-reponame
 
-project.update!(
-  name: 'new-reponame',   # отображаемое имя
-  path: 'new-reponame'    # путь в URL и registry
-)
-
-# Успех выглядит так:
-#   => true
-
-
-# ══ 4. ПРОВЕРИТЬ РЕЗУЛЬТАТ ════════════════════════════════════
-
-project.reload
-puts project.name
-puts project.path
-puts project.full_path
-
-# Должно вернуть:
-#   new-reponame
-#   new-reponame
-#   group/new-reponame
-
-
-# ══ 5. ВЫЙТИ ИЗ КОНСОЛИ ══════════════════════════════════════
-
-exit
-
-
-# ══ ИТОГ ══════════════════════════════════════════════════════
-#
-#  - Проект переименован
-#  - Registry URL обновится автоматически:
-#    gitlab.example.com:5050/group/old-reponame
-#    → gitlab.example.com:5050/group/new-reponame
-#  - Все 85 тегов остаются нетронутыми
-#  - GitLab создаёт redirect со старого URL
-#  - CI/CD переменные с хардкодом старого пути нужно обновить вручную
-#
+# Перезапустить registry
+sudo gitlab-ctl restart registry
