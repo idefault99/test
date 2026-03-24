@@ -1,12 +1,106 @@
-deactivate
+[32;1m$ poetry publish --build -r pypi-nexus -vvv[0;m
 
----
-# Войти в venv (нужно каждый раз в новом терминале, если не добавлено в .bashrc)
-source ~/.ansible-venv/bin/activate
+  Stack trace:
 
-# Убедиться что используется нужный ansible
-which ansible
-# → /home/user/.ansible-venv/bin/ansible
+  12  /usr/local/lib/python3.12/site-packages/cleo/application.py:327 in run
+       325│ 
+       326│             try:
+     → 327│                 exit_code = self._run(io)
+       328│             except BrokenPipeError:
+       329│                 # If we are piped to another process, it may close early and send a
 
-# Выйти из venv
-deactivate
+  11  /usr/local/lib/python3.12/site-packages/poetry/console/application.py:260 in _run
+       258│ 
+       259│             try:
+     → 260│                 exit_code = super()._run(io)
+       261│             except PoetryRuntimeError as e:
+       262│                 io.write_error_line("")
+
+  10  /usr/local/lib/python3.12/site-packages/cleo/application.py:431 in _run
+       429│             io.input.interactive(interactive)
+       430│ 
+     → 431│         exit_code = self._run_command(command, io)
+       432│         self._running_command = None
+       433│ 
+
+   9  /usr/local/lib/python3.12/site-packages/cleo/application.py:473 in _run_command
+       471│ 
+       472│         if error is not None:
+     → 473│             raise error
+       474│ 
+       475│         return terminate_event.exit_code
+
+   8  /usr/local/lib/python3.12/site-packages/cleo/application.py:457 in _run_command
+       455│ 
+       456│             if command_event.command_should_run():
+     → 457│                 exit_code = command.run(io)
+       458│             else:
+       459│                 exit_code = ConsoleCommandEvent.RETURN_CODE_DISABLED
+
+   7  /usr/local/lib/python3.12/site-packages/cleo/commands/base_command.py:117 in run
+       115│         io.input.validate()
+       116│ 
+     → 117│         return self.execute(io) or 0
+       118│ 
+       119│     def merge_application_definition(self, merge_args: bool = True) -> None:
+
+   6  /usr/local/lib/python3.12/site-packages/cleo/commands/command.py:61 in execute
+        59│ 
+        60│         try:
+     →  61│             return self.handle()
+        62│         except KeyboardInterrupt:
+        63│             return 1
+
+   5  /usr/local/lib/python3.12/site-packages/poetry/console/commands/publish.py:65 in handle
+        63│         from poetry.publishing.publisher import Publisher
+        64│ 
+     →  65│         if not self.poetry.is_package_mode:
+        66│             self.line_error("Publishing a package is not possible in non-package mode.")
+        67│             return 1
+
+   4  /usr/local/lib/python3.12/site-packages/poetry/console/commands/command.py:24 in poetry
+        22│     def poetry(self) -> Poetry:
+        23│         if self._poetry is None:
+     →  24│             return self.get_application().poetry
+        25│ 
+        26│         return self._poetry
+
+   3  /usr/local/lib/python3.12/site-packages/poetry/console/application.py:199 in poetry
+       197│             return self._poetry
+       198│ 
+     → 199│         self._poetry = Factory().create_poetry(
+       200│             cwd=self.project_directory,
+       201│             io=self._io,
+
+   2  /usr/local/lib/python3.12/site-packages/poetry/factory.py:60 in create_poetry
+        58│             io = NullIO()
+        59│ 
+     →  60│         base_poetry = super().create_poetry(cwd=cwd, with_groups=with_groups)
+        61│ 
+        62│         if version_str := base_poetry.local_config.get("requires-poetry"):
+
+   1  /usr/local/lib/python3.12/site-packages/poetry/core/factory.py:50 in create_poetry
+        48│         from poetry.core.pyproject.toml import PyProjectTOML
+        49│ 
+     →  50│         poetry_file = self.locate(cwd)
+        51│         pyproject = PyProjectTOML(path=poetry_file)
+        52│ 
+
+  RuntimeError
+
+  Poetry could not find a pyproject.toml file in /builds/dpm/airport_digital_ecosystem/aodb/libs/statehook/client or its parents
+
+  at /usr/local/lib/python3.12/site-packages/poetry/core/factory.py:842 in locate
+      838│             if poetry_file.exists():
+      839│                 return poetry_file
+      840│ 
+      841│         else:
+    → 842│             raise RuntimeError(
+      843│                 f"Poetry could not find a pyproject.toml file in {cwd} or its parents"
+      844│             )
+      845│ 
+section_end:1774335800:step_script
+[0Ksection_start:1774335800:cleanup_file_variables
+[0K[0K[36;1mCleaning up project directory and file based variables[0;m[0;m
+section_end:1774335801:cleanup_file_variables
+[0K[31;1mERROR: Job failed: exit code 1
