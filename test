@@ -1,1 +1,2 @@
-kubectl exec -it <pod-name> -n <namespace> -- /bin/sh -c 'export MY_VAR=new_value && <command>'
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
