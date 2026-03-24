@@ -1,18 +1,12 @@
-#!/bin/bash
-set -e
+deactivate
 
-echo "==> Установка pip и venv..."
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv
-
-echo "==> Создание venv и установка Ansible..."
-python3 -m venv ~/.ansible-venv
+---
+# Войти в venv (нужно каждый раз в новом терминале, если не добавлено в .bashrc)
 source ~/.ansible-venv/bin/activate
-pip install --upgrade pip ansible
 
-echo "==> Добавление в PATH (~/.bashrc)..."
-grep -qxF 'source ~/.ansible-venv/bin/activate' ~/.bashrc \
-  || echo 'source ~/.ansible-venv/bin/activate' >> ~/.bashrc
+# Убедиться что используется нужный ansible
+which ansible
+# → /home/user/.ansible-venv/bin/ansible
 
-ansible --version
-echo "✅ Готово! Перезапусти терминал или выполни: source ~/.bashrc"
+# Выйти из venv
+deactivate
