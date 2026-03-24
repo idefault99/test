@@ -1,135 +1,18 @@
-{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: redis-waiter-sa
-  namespace: {{ $ns }}
-automountServiceAccountToken: true
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: pod-reader-role
-  namespace: {{ $ns }}
-rules:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/status"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: redis-waiter-rolebinding
-  namespace: {{ $ns }}
-subjects:
-  - kind: ServiceAccount
-    name: redis-waiter-sa
-    namespace: {{ $ns }}
-roleRef:
-  kind: Role
-  name: pod-reader-role
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ $.Values.labels.redis }}-job-{{ $.Release.Revision }}
-  labels:
-    app: {{ $.Values.labels.redis }}-init
-  namespace: {{ $ns }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 600
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      serviceAccountName: redis-waiter-sa
-      restartPolicy: Never
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
-      initContainers:
-        - name: wait-for-redis-nodes
-          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
-          command: ['sh', '-c']
-          args:
-            - |
-              echo "Ожидаем готовности подов..."
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-0 --timeout=300s
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-1 --timeout=300s
-              kubectl wait --for=condition=Ready \
-                -n {{ $ns }} \
-                pod/{{ $.Values.labels.redis }}-deployment-2 --timeout=300s
-              echo "Все поды готовы"
-      containers:
-        - name: {{ $.Values.labels.redis }}
-          image: {{ $.Values.images.redis }}
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c"]
-          args:
-            - |
-              POD0="{{ $.Values.labels.redis }}-deployment-0.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD1="{{ $.Values.labels.redis }}-deployment-1.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD2="{{ $.Values.labels.redis }}-deployment-2.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              PORT="{{ $.Values.ports.internal.redis.client }}"
+#!/bin/bash
+set -e
 
-              echo "==> Проверяем состояние кластера..."
-              CLUSTER_STATE=$(redis-cli -h $POD0 -p $PORT cluster info \
-                | grep cluster_state | cut -d: -f2 | tr -d '[:space:]')
-              CLUSTER_NODES=$(redis-cli -h $POD0 -p $PORT cluster info \
-                | grep cluster_known_nodes | cut -d: -f2 | tr -d '[:space:]')
+echo "==> Установка pip и venv..."
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv
 
-              if [ "$CLUSTER_STATE" = "ok" ] && [ "$CLUSTER_NODES" -ge "3" ]; then
-                echo "==> Кластер уже инициализирован (state=$CLUSTER_STATE, nodes=$CLUSTER_NODES). Пропускаем."
-                exit 0
-              fi
+echo "==> Создание venv и установка Ansible..."
+python3 -m venv ~/.ansible-venv
+source ~/.ansible-venv/bin/activate
+pip install --upgrade pip ansible
 
-              echo "==> Кластер не инициализирован (state=$CLUSTER_STATE, nodes=$CLUSTER_NODES)"
-              echo "==> Сбрасываем состояние на всех нодах..."
+echo "==> Добавление в PATH (~/.bashrc)..."
+grep -qxF 'source ~/.ansible-venv/bin/activate' ~/.bashrc \
+  || echo 'source ~/.ansible-venv/bin/activate' >> ~/.bashrc
 
-              for POD in $POD0 $POD1 $POD2; do
-                echo "  Сбрасываем $POD..."
-                redis-cli -h $POD -p $PORT flushall 2>/dev/null || true
-                redis-cli -h $POD -p $PORT cluster reset hard 2>/dev/null || true
-                echo "  OK: $POD сброшен"
-              done
-
-              echo "==> Ждём 2 секунды после сброса..."
-              sleep 2
-
-              echo "==> Инициализируем Redis Cluster..."
-              redis-cli --cluster create \
-                $POD0:$PORT \
-                $POD1:$PORT \
-                $POD2:$PORT \
-                --cluster-replicas 0 \
-                --cluster-yes
-
-              if [ $? -ne 0 ]; then
-                echo "==> ОШИБКА: не удалось создать кластер"
-                exit 1
-              fi
-
-              echo "==> Проверяем итоговое состояние..."
-              sleep 2
-              redis-cli -h $POD0 -p $PORT cluster info
-              redis-cli -h $POD0 -p $PORT cluster nodes
-              echo "==> Готово!"
-{{- end }}
-{{- end }}
-{{- end }}
+ansible --version
+echo "✅ Готово! Перезапусти терминал или выполни: source ~/.bashrc"
