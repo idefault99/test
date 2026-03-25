@@ -3,3 +3,5 @@ kubectl get pods -A -o wide --no-headers | awk '{print $8}' | sort | uniq -c | s
 
 # Подробно по каждой ноде
 kubectl describe nodes | grep -E "Name:|pods:" | paste - -
+
+kubectl get pods -A -o wide --no-headers | awk '{print $8}' | sort | uniq -c | sort -rn
