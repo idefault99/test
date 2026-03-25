@@ -1,216 +1,929 @@
-# tmux — шпаргалка
+#!/usr/bin/env bash
+# =============================================================================
+#  kafka-manager.sh — Интерактивный менеджер Kafka для WSL
+#  Требования: kafkacat/kcat  или  kafka-topics.sh из kafka/bin
+# =============================================================================
 
-tmux — терминальный мультиплексор. Позволяет держать несколько терминалов в одном окне, не терять сессию при обрыве SSH и возвращаться к запущенным процессам.
+set -euo pipefail
 
------
+# ─────────────────────────────────────────────────────────────────────────────
+# ЦВЕТА И ФОРМАТИРОВАНИЕ
+# ─────────────────────────────────────────────────────────────────────────────
+R='\033[0;31m'   # красный
+G='\033[0;32m'   # зелёный
+Y='\033[1;33m'   # жёлтый
+B='\033[0;34m'   # синий
+C='\033[0;36m'   # циан
+M='\033[0;35m'   # магента
+W='\033[1;37m'   # белый жирный
+D='\033[2m'      # тёмный/dim
+NC='\033[0m'     # сброс
 
-## Установка
+# ─────────────────────────────────────────────────────────────────────────────
+# КОНФИГУРАЦИЯ (можно переопределить через .kafka-manager.env)
+# ─────────────────────────────────────────────────────────────────────────────
+BROKER="localhost:9092"
+KAFKA_BIN=""          # путь к kafka/bin, например /opt/kafka/bin
+KCAT_CMD=""           # kcat или kafkacat
+SASL_USER=""
+SASL_PASS=""
+SASL_MECHANISM=""     # PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512
+SSL_CAFILE=""
+CONFIG_FILE="$HOME/.kafka-manager.env"
 
-```bash
-# Ubuntu / Debian
-sudo apt install tmux
+# ─────────────────────────────────────────────────────────────────────────────
+# УТИЛИТЫ
+# ─────────────────────────────────────────────────────────────────────────────
+banner() {
+  clear
+  echo -e "${C}"
+  echo "  ██╗  ██╗ █████╗ ███████╗██╗  ██╗ █████╗     ███╗   ███╗ ██████╗ ██████╗ "
+  echo "  ██║ ██╔╝██╔══██╗██╔════╝██║ ██╔╝██╔══██╗    ████╗ ████║██╔════╝ ██╔══██╗"
+  echo "  █████╔╝ ███████║█████╗  █████╔╝ ███████║    ██╔████╔██║██║  ███╗██████╔╝"
+  echo "  ██╔═██╗ ██╔══██║██╔══╝  ██╔═██╗ ██╔══██║    ██║╚██╔╝██║██║   ██║██╔══██╗"
+  echo "  ██║  ██╗██║  ██║██║     ██║  ██╗██║  ██║    ██║ ╚═╝ ██║╚██████╔╝██║  ██║"
+  echo "  ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝    ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝"
+  echo -e "${NC}"
+  echo -e "  ${D}Брокер: ${W}${BROKER}${NC}"
+  echo -e "  ${D}─────────────────────────────────────────────────────────────────${NC}"
+  echo ""
+}
 
-# CentOS / RHEL / Rocky
-sudo yum install tmux
-# или
-sudo dnf install tmux
+info()    { echo -e "  ${G}✔${NC}  $*"; }
+warn()    { echo -e "  ${Y}⚠${NC}  $*"; }
+err()     { echo -e "  ${R}✖${NC}  $*" >&2; }
+section() { echo -e "\n  ${B}▶${NC}  ${W}$*${NC}\n"; }
+sep()     { echo -e "  ${D}────────────────────────────────────────────────────────────────${NC}"; }
+press_any() { echo -e "\n  ${D}Нажмите Enter для продолжения...${NC}"; read -r; }
 
-# macOS
-brew install tmux
+# Спиннер для долгих операций
+spinner() {
+  local pid=$1 msg=${2:-"Загрузка..."}
+  local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  local i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "  ${C}%s${NC}  %s\r" "${frames[$((i % 10))]}" "$msg"
+    sleep 0.1
+    ((i++))
+  done
+  printf "%-60s\r" " "
+}
 
-# Alpine
-apk add tmux
-```
+# ─────────────────────────────────────────────────────────────────────────────
+# ОПРЕДЕЛЕНИЕ ИНСТРУМЕНТОВ
+# ─────────────────────────────────────────────────────────────────────────────
+detect_tools() {
+  # Ищем kcat / kafkacat
+  for cmd in kcat kafkacat; do
+    if command -v "$cmd" &>/dev/null; then
+      KCAT_CMD="$cmd"
+      break
+    fi
+  done
 
-Проверить версию:
+  # Ищем kafka-topics.sh
+  if [[ -z "$KAFKA_BIN" ]]; then
+    for dir in /opt/kafka/bin /usr/local/kafka/bin /usr/share/kafka/bin "$HOME/kafka/bin"; do
+      if [[ -x "$dir/kafka-topics.sh" ]]; then
+        KAFKA_BIN="$dir"
+        break
+      fi
+    done
+  fi
+}
 
-```bash
-tmux -V
-```
+check_tools() {
+  local ok=true
+  if [[ -z "$KCAT_CMD" && -z "$KAFKA_BIN" ]]; then
+    err "Не найдены инструменты Kafka!"
+    echo ""
+    echo -e "  Установите один из вариантов:"
+    echo -e "  ${Y}•${NC} ${W}kcat${NC}:          sudo apt install kcat"
+    echo -e "  ${Y}•${NC} ${W}kafkacat${NC}:      sudo apt install kafkacat"
+    echo -e "  ${Y}•${NC} ${W}Kafka binaries${NC}: скачайте с https://kafka.apache.org/downloads"
+    echo ""
+    ok=false
+  fi
+  $ok
+}
 
------
+# Строим строку аутентификации для kcat
+kcat_auth_args() {
+  local args=()
+  if [[ -n "$SASL_USER" && -n "$SASL_PASS" ]]; then
+    args+=(-X "security.protocol=SASL_PLAINTEXT")
+    args+=(-X "sasl.mechanisms=${SASL_MECHANISM:-PLAIN}")
+    args+=(-X "sasl.username=$SASL_USER")
+    args+=(-X "sasl.password=$SASL_PASS")
+  fi
+  if [[ -n "$SSL_CAFILE" ]]; then
+    args+=(-X "ssl.ca.location=$SSL_CAFILE")
+  fi
+  echo "${args[@]+"${args[@]}"}"
+}
 
-## Концепция: сессии → окна → панели
-
-```
-Сессия (session)
- └── Окно 0 (window)
- │    ├── Панель слева (pane)
- │    └── Панель справа (pane)
- └── Окно 1 (window)
-      └── Панель (pane)
-```
-
-- **Сессия** — набор окон, живёт независимо от терминала
-- **Окно** — как вкладка в браузере
-- **Панель** — разделение одного окна на части
-
------
-
-## Быстрый старт
-
-```bash
-# Создать новую сессию
-tmux
-
-# Создать сессию с именем
-tmux new -s myproject
-
-# Подключиться к существующей сессии
-tmux attach -t myproject
-# или короче
-tmux a -t myproject
-
-# Список сессий
-tmux ls
-
-# Убить сессию
-tmux kill-session -t myproject
-```
-
------
-
-## Горячие клавиши
-
-Все команды начинаются с префикса **`Ctrl+B`** (нажать, отпустить, затем нажать клавишу).
-
-### Сессии
-
-|Действие                                              |Клавиши           |
-|------------------------------------------------------|------------------|
-|Отсоединиться от сессии (процессы продолжают работать)|`Ctrl+B` затем `d`|
-|Список сессий                                         |`Ctrl+B` затем `s`|
-|Переименовать сессию                                  |`Ctrl+B` затем `$`|
-
-### Окна (вкладки)
-
-|Действие              |Клавиши             |
-|----------------------|--------------------|
-|Новое окно            |`Ctrl+B` затем `c`  |
-|Следующее окно        |`Ctrl+B` затем `n`  |
-|Предыдущее окно       |`Ctrl+B` затем `p`  |
-|Выбрать окно по номеру|`Ctrl+B` затем `0-9`|
-|Список окон           |`Ctrl+B` затем `w`  |
-|Переименовать окно    |`Ctrl+B` затем `,`  |
-|Закрыть окно          |`Ctrl+B` затем `&`  |
-
-### Панели (split)
-
-|Действие                              |Клавиши                     |
-|--------------------------------------|----------------------------|
-|Разделить горизонтально (сверху/снизу)|`Ctrl+B` затем `"`          |
-|Разделить вертикально (слева/справа)  |`Ctrl+B` затем `%`          |
-|Переключиться между панелями          |`Ctrl+B` затем стрелки      |
-|Закрыть панель                        |`Ctrl+B` затем `x`          |
-|Развернуть панель на весь экран       |`Ctrl+B` затем `z`          |
-|Изменить размер панели                |`Ctrl+B` затем `Alt+стрелка`|
-
-### Прочее
-
-|Действие                   |Клавиши           |
-|---------------------------|------------------|
-|Режим скролла (копирования)|`Ctrl+B` затем `[`|
-|Выйти из режима скролла    |`q` или `Escape`  |
-|Командная строка tmux      |`Ctrl+B` затем `:`|
-
------
-
-## Типичные сценарии
-
-### Запустить что-то и оставить работать после выхода из SSH
-
-```bash
-tmux new -s deploy
-# запустить нужную команду
-./deploy.sh
-
-# отсоединиться — процесс продолжит работать
-Ctrl+B → d
-
-# вернуться позже
-tmux attach -t deploy
-```
-
-### Два терминала рядом
-
-```bash
-tmux new -s work
-# разделить вертикально
-Ctrl+B → %
-# переключиться в правую панель
-Ctrl+B → →
-# теперь слева один процесс, справа другой
-```
-
-### Посмотреть лог длинной команды
-
-```bash
-# войти в режим скролла
-Ctrl+B → [
-# скроллить стрелками или PgUp/PgDn
-# выйти
-q
-```
-
------
-
-## Конфиг `~/.tmux.conf`
-
-Минимальный удобный конфиг:
-
-```bash
-cat > ~/.tmux.conf << 'EOF'
-# Мышь (скролл, клик по панелям)
-set -g mouse on
-
-# Нумерация окон с 1
-set -g base-index 1
-
-# Историю скролла увеличить
-set -g history-limit 10000
-
-# Цветной терминал
-set -g default-terminal "screen-256color"
-
-# Статус-бар — имя сессии и список окон
-set -g status-bg colour235
-set -g status-fg colour136
+# Строим --command-config для kafka-tools
+kafka_client_props() {
+  local tmpfile
+  tmpfile=$(mktemp /tmp/kafka-client-XXXX.properties)
+  if [[ -n "$SASL_USER" && -n "$SASL_PASS" ]]; then
+    cat >"$tmpfile" <<EOF
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=${SASL_MECHANISM:-PLAIN}
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="${SASL_USER}" password="${SASL_PASS}";
 EOF
-```
+  fi
+  echo "$tmpfile"
+}
 
-Применить без перезапуска:
+# Загружаем конфиг
+load_config() {
+  [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE" || true
+}
 
-```bash
-tmux source-file ~/.tmux.conf
-# или внутри tmux:
-Ctrl+B → :source-file ~/.tmux.conf
-```
+# Сохраняем конфиг
+save_config() {
+  cat >"$CONFIG_FILE" <<EOF
+BROKER="$BROKER"
+KAFKA_BIN="$KAFKA_BIN"
+SASL_USER="$SASL_USER"
+SASL_PASS="$SASL_PASS"
+SASL_MECHANISM="$SASL_MECHANISM"
+SSL_CAFILE="$SSL_CAFILE"
+EOF
+  chmod 600 "$CONFIG_FILE"
+  info "Конфигурация сохранена в $CONFIG_FILE"
+}
 
------
+# ─────────────────────────────────────────────────────────────────────────────
+# ЭКРАН НАСТРОЕК ПОДКЛЮЧЕНИЯ
+# ─────────────────────────────────────────────────────────────────────────────
+settings_menu() {
+  while true; do
+    banner
+    section "Настройки подключения"
+    echo -e "  ${D}Текущие параметры:${NC}"
+    echo -e "  ${Y}1)${NC}  Брокер(ы)        : ${W}${BROKER}${NC}"
+    echo -e "  ${Y}2)${NC}  Kafka bin dir    : ${W}${KAFKA_BIN:-не задан}${NC}"
+    echo -e "  ${Y}3)${NC}  SASL пользователь: ${W}${SASL_USER:-не задан}${NC}"
+    echo -e "  ${Y}4)${NC}  SASL пароль      : ${W}${SASL_PASS:+*****}${SASL_PASS:-не задан}${NC}"
+    echo -e "  ${Y}5)${NC}  SASL механизм    : ${W}${SASL_MECHANISM:-PLAIN}${NC}"
+    echo -e "  ${Y}6)${NC}  SSL CA файл      : ${W}${SSL_CAFILE:-не задан}${NC}"
+    sep
+    echo -e "  ${Y}7)${NC}  Проверить соединение"
+    echo -e "  ${Y}8)${NC}  Сохранить конфигурацию"
+    echo -e "  ${Y}0)${NC}  ${R}← Назад${NC}"
+    echo ""
+    read -rp "  Выбор: " choice
+    case "$choice" in
+      1) read -rp "  Брокер (host:port[,host:port]): " v; [[ -n "$v" ]] && BROKER="$v" ;;
+      2) read -rp "  Путь к kafka/bin: " v; [[ -n "$v" ]] && KAFKA_BIN="$v" ;;
+      3) read -rp "  SASL пользователь: " v; SASL_USER="$v" ;;
+      4) read -rsp "  SASL пароль: " v; echo; SASL_PASS="$v" ;;
+      5)
+        echo -e "\n  ${D}Варианты:${NC} PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512"
+        read -rp "  Механизм: " v; [[ -n "$v" ]] && SASL_MECHANISM="$v"
+        ;;
+      6) read -rp "  Путь к CA сертификату: " v; SSL_CAFILE="$v" ;;
+      7) test_connection ;;
+      8) save_config ;;
+      0) return ;;
+      *) warn "Неверный выбор" ;;
+    esac
+  done
+}
 
-## Полезные команды из shell
+test_connection() {
+  section "Проверка соединения с $BROKER"
+  local ok=false
 
-```bash
-# Выполнить команду в новой сессии (без входа в интерактив)
-tmux new-session -d -s background -c /path/to/dir 'watch kubectl get pods'
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    if timeout 5 "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" -L -q &>/dev/null; then
+      info "kcat: соединение установлено ✓"
+      ok=true
+    else
+      err "kcat: не удалось подключиться к $BROKER"
+    fi
+  fi
 
-# Переименовать сессию
-tmux rename-session -t old_name new_name
+  if [[ -n "$KAFKA_BIN" && -x "$KAFKA_BIN/kafka-topics.sh" ]]; then
+    local props
+    props=$(kafka_client_props)
+    if timeout 5 "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" --list &>/dev/null; then
+      info "kafka-topics.sh: соединение установлено ✓"
+      ok=true
+    else
+      err "kafka-topics.sh: не удалось подключиться"
+    fi
+    rm -f "$props"
+  fi
 
-# Убить все сессии
-tmux kill-server
-```
+  $ok || warn "Проверьте параметры подключения"
+  press_any
+}
 
------
+# ─────────────────────────────────────────────────────────────────────────────
+# МЕНЮ ПРОСМОТРА
+# ─────────────────────────────────────────────────────────────────────────────
+view_menu() {
+  while true; do
+    banner
+    echo -e "  ${C}╔══════════════════════════════╗${NC}"
+    echo -e "  ${C}║${NC}    ${W}📋  МЕНЮ ПРОСМОТРА${NC}         ${C}║${NC}"
+    echo -e "  ${C}╚══════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  ${G}Топики${NC}"
+    echo -e "  ${Y}1)${NC}  Список всех топиков"
+    echo -e "  ${Y}2)${NC}  Описание топика (partitions, replicas, ISR)"
+    echo -e "  ${Y}3)${NC}  Количество сообщений в топике (offsets)"
+    echo ""
+    echo -e "  ${G}Сообщения${NC}"
+    echo -e "  ${Y}4)${NC}  Чтение последних N сообщений"
+    echo -e "  ${Y}5)${NC}  Чтение с начала (с фильтром)"
+    echo -e "  ${Y}6)${NC}  Мониторинг в реальном времени (live tail)"
+    echo ""
+    echo -e "  ${G}Consumer Groups${NC}"
+    echo -e "  ${Y}7)${NC}  Список consumer groups"
+    echo -e "  ${Y}8)${NC}  Подробности группы (lag, offsets)"
+    echo -e "  ${Y}9)${NC}  Общий lag по всем группам"
+    echo ""
+    echo -e "  ${G}Брокер${NC}"
+    echo -e "  ${Y}10)${NC} Метаданные кластера"
+    echo -e "  ${Y}11)${NC} Список брокеров"
+    sep
+    echo -e "  ${Y}0)${NC}  ${R}← Главное меню${NC}"
+    echo ""
+    read -rp "  Выбор: " choice
+    case "$choice" in
+      1)  view_list_topics ;;
+      2)  view_describe_topic ;;
+      3)  view_topic_offsets ;;
+      4)  view_last_messages ;;
+      5)  view_from_beginning ;;
+      6)  view_live_tail ;;
+      7)  view_consumer_groups ;;
+      8)  view_group_detail ;;
+      9)  view_all_lag ;;
+      10) view_cluster_meta ;;
+      11) view_brokers ;;
+      0)  return ;;
+      *)  warn "Неверный выбор" ;;
+    esac
+  done
+}
 
-## Шпаргалка одной картинкой
+view_list_topics() {
+  section "Список топиков"
+  local topics
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    topics=$("$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" -L -J 2>/dev/null \
+      | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+topics=sorted([t['topic'] for t in d.get('topics',[])])
+for i,t in enumerate(topics,1): print(f'  {i:3}. {t}')
+print(f'\n  Итого: {len(topics)} топиков')
+" 2>/dev/null || true)
+  elif [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    topics=$("$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" --list 2>/dev/null \
+      | awk '{printf "  %3d. %s\n", NR, $0}')
+    rm -f "$props"
+  fi
 
-```
-Ctrl+B  d     — отсоединиться
-Ctrl+B  c     — новое окно
-Ctrl+B  %     — разделить вертикально
-Ctrl+B  "     — разделить горизонтально
-Ctrl+B  →↑←↓  — переключить панель
-Ctrl+B  z     — zoom панели
-Ctrl+B  [     — скролл
-```
+  if [[ -n "$topics" ]]; then
+    echo "$topics"
+  else
+    warn "Не удалось получить список топиков"
+  fi
+  press_any
+}
+
+view_describe_topic() {
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  section "Описание топика: $topic"
+
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" -L -t "$topic" 2>/dev/null \
+    | grep -A999 "topic \"$topic\"" || warn "Топик не найден"
+  elif [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" --describe --topic "$topic" 2>/dev/null \
+      || warn "Ошибка описания топика"
+    rm -f "$props"
+  fi
+  press_any
+}
+
+view_topic_offsets() {
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  section "Offsets топика: $topic"
+
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    echo -e "  ${D}Earliest offsets:${NC}"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+      -Q -t "$topic" -p all -o beginning -e 2>/dev/null \
+      | awk -F'[: ]' '{print "  Partition "$2"  earliest="$3}' || true
+    echo -e "\n  ${D}Latest offsets:${NC}"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+      -Q -t "$topic" -p all -o end -e 2>/dev/null \
+      | awk -F'[: ]' '{print "  Partition "$2"  latest="$3}' || true
+  elif [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    echo -e "  ${D}Earliest:${NC}"
+    "$KAFKA_BIN/kafka-run-class.sh" kafka.tools.GetOffsetShell \
+      --broker-list "$BROKER" --topic "$topic" --time -2 2>/dev/null || true
+    echo -e "\n  ${D}Latest:${NC}"
+    "$KAFKA_BIN/kafka-run-class.sh" kafka.tools.GetOffsetShell \
+      --broker-list "$BROKER" --topic "$topic" --time -1 2>/dev/null || true
+    rm -f "$props"
+  fi
+  press_any
+}
+
+view_last_messages() {
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  read -rp "  Сколько последних сообщений [10]: " n
+  n=${n:-10}
+  section "Последние $n сообщений из '$topic'"
+
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+      -C -t "$topic" -o "-$n" -e \
+      -f "  ${Y}[%p|%o]${NC} ${D}%T${NC}  %s\n" 2>/dev/null \
+      || warn "Ошибка чтения"
+  else
+    warn "Для чтения сообщений нужен kcat/kafkacat"
+    echo -e "  Установите: ${W}sudo apt install kcat${NC}"
+  fi
+  press_any
+}
+
+view_from_beginning() {
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  read -rp "  Фильтр (grep, пусто = без фильтра): " filter
+  read -rp "  Максимум сообщений [100]: " max_msgs
+  max_msgs=${max_msgs:-100}
+  section "Чтение '$topic' с начала (макс $max_msgs)"
+  echo -e "  ${D}Ctrl+C для остановки${NC}\n"
+
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    if [[ -n "$filter" ]]; then
+      "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+        -C -t "$topic" -o beginning -c "$max_msgs" -e \
+        -f "  [%p|%o] %s\n" 2>/dev/null | grep --color=always "$filter" || true
+    else
+      "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+        -C -t "$topic" -o beginning -c "$max_msgs" -e \
+        -f "  ${Y}[%p|%o]${NC} %s\n" 2>/dev/null || true
+    fi
+  else
+    warn "Нужен kcat/kafkacat"
+  fi
+  press_any
+}
+
+view_live_tail() {
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  section "Live tail: '$topic'"
+  echo -e "  ${R}Ctrl+C для остановки${NC}\n"
+
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+      -C -t "$topic" -o end \
+      -f "  ${G}$(date '+%H:%M:%S')${NC} ${Y}[%p|%o]${NC}  %s\n" 2>/dev/null || true
+  else
+    warn "Нужен kcat/kafkacat"
+  fi
+  press_any
+}
+
+view_consumer_groups() {
+  section "Consumer Groups"
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-consumer-groups.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" --list 2>/dev/null \
+      | awk '{printf "  %3d. %s\n", NR, $0}' || warn "Ошибка получения групп"
+    rm -f "$props"
+  elif [[ -n "$KCAT_CMD" ]]; then
+    warn "kafka-topics.sh требуется для работы с consumer groups"
+    echo -e "  Установите kafka binaries и укажите путь в настройках"
+  fi
+  press_any
+}
+
+view_group_detail() {
+  read -rp "  Имя consumer group: " group
+  [[ -z "$group" ]] && return
+  section "Детали группы: $group"
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-consumer-groups.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" --describe --group "$group" 2>/dev/null \
+      | awk 'NR==1{print "  "$0; next} {
+          lag=$6
+          color="\033[0;32m"
+          if(lag+0>0) color="\033[1;33m"
+          if(lag+0>1000) color="\033[0;31m"
+          printf "  %s%s\033[0m\n", color, $0
+        }' || warn "Группа не найдена"
+    rm -f "$props"
+  else
+    warn "Нужны kafka binaries"
+  fi
+  press_any
+}
+
+view_all_lag() {
+  section "Lag по всем consumer groups"
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    echo -e "  ${W}GROUP${NC}                            ${W}TOPIC${NC}              ${W}LAG${NC}"
+    sep
+    "$KAFKA_BIN/kafka-consumer-groups.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" --all-groups --describe 2>/dev/null \
+      | awk 'NR>1 && $6 != "-" && $6+0 > 0 {
+          lag=$6+0
+          color="\033[1;33m"
+          if(lag>1000) color="\033[0;31m"
+          printf "  %-32s %-18s %s%d\033[0m\n", $1, $2, color, lag
+        }' \
+      | sort -t' ' -k3 -rn \
+      || warn "Ошибка получения lag"
+    rm -f "$props"
+  else
+    warn "Нужны kafka binaries"
+  fi
+  press_any
+}
+
+view_cluster_meta() {
+  section "Метаданные кластера"
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" -L 2>/dev/null \
+      | head -5 || true
+  fi
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-broker-api-versions.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" 2>/dev/null | head -20 || true
+    rm -f "$props"
+  fi
+  press_any
+}
+
+view_brokers() {
+  section "Брокеры кластера"
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" -L -J 2>/dev/null \
+      | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+brokers=d.get('brokers',[])
+for b in brokers:
+  print(f'  Broker {b[\"id\"]:3d}  {b[\"name\"]}')
+print(f'\n  Итого: {len(brokers)} брокеров')
+" 2>/dev/null || true
+  fi
+  press_any
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# МЕНЮ УПРАВЛЕНИЯ
+# ─────────────────────────────────────────────────────────────────────────────
+manage_menu() {
+  while true; do
+    banner
+    echo -e "  ${M}╔══════════════════════════════╗${NC}"
+    echo -e "  ${M}║${NC}    ${W}⚙️   МЕНЮ УПРАВЛЕНИЯ${NC}        ${M}║${NC}"
+    echo -e "  ${M}╚══════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  ${G}Топики${NC}"
+    echo -e "  ${Y}1)${NC}  Создать топик"
+    echo -e "  ${Y}2)${NC}  Изменить retention / конфигурацию топика"
+    echo -e "  ${Y}3)${NC}  Изменить количество партиций"
+    echo -e "  ${Y}4)${NC}  Удалить топик"
+    echo ""
+    echo -e "  ${G}Сообщения${NC}"
+    echo -e "  ${Y}5)${NC}  Отправить сообщение (produce)"
+    echo -e "  ${Y}6)${NC}  Отправить из файла"
+    echo ""
+    echo -e "  ${G}Consumer Groups${NC}"
+    echo -e "  ${Y}7)${NC}  Сбросить offset группы (reset)"
+    echo -e "  ${Y}8)${NC}  Удалить consumer group"
+    echo ""
+    echo -e "  ${G}Конфигурация${NC}"
+    echo -e "  ${Y}9)${NC}  Показать конфиг топика"
+    echo -e "  ${Y}10)${NC} Показать конфиг брокера"
+    sep
+    echo -e "  ${Y}0)${NC}  ${R}← Главное меню${NC}"
+    echo ""
+    read -rp "  Выбор: " choice
+    case "$choice" in
+      1)  manage_create_topic ;;
+      2)  manage_alter_config ;;
+      3)  manage_add_partitions ;;
+      4)  manage_delete_topic ;;
+      5)  manage_produce ;;
+      6)  manage_produce_file ;;
+      7)  manage_reset_offset ;;
+      8)  manage_delete_group ;;
+      9)  manage_show_topic_config ;;
+      10) manage_show_broker_config ;;
+      0)  return ;;
+      *)  warn "Неверный выбор" ;;
+    esac
+  done
+}
+
+manage_create_topic() {
+  section "Создание топика"
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  read -rp "  Количество партиций [1]: " partitions
+  partitions=${partitions:-1}
+  read -rp "  Фактор репликации [1]: " replication
+  replication=${replication:-1}
+  read -rp "  Retention (мс, пусто = не задавать): " retention
+  read -rp "  Cleanup policy [delete]: " cleanup
+  cleanup=${cleanup:-delete}
+
+  echo ""
+  echo -e "  ${D}Параметры:${NC}"
+  echo -e "    Топик:       ${W}$topic${NC}"
+  echo -e "    Партиции:    ${W}$partitions${NC}"
+  echo -e "    Репликация:  ${W}$replication${NC}"
+  [[ -n "$retention" ]] && echo -e "    Retention:   ${W}${retention}ms${NC}"
+  echo -e "    Cleanup:     ${W}$cleanup${NC}"
+  echo ""
+  read -rp "  Подтвердить? (y/N): " confirm
+  [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { warn "Отменено"; press_any; return; }
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props extra_configs=""
+    props=$(kafka_client_props)
+    [[ -n "$retention" ]]  && extra_configs+="retention.ms=$retention,"
+    [[ -n "$cleanup" ]]    && extra_configs+="cleanup.policy=$cleanup"
+    extra_configs="${extra_configs%,}"
+
+    local cmd=("$KAFKA_BIN/kafka-topics.sh"
+      --bootstrap-server "$BROKER"
+      --command-config "$props"
+      --create --topic "$topic"
+      --partitions "$partitions"
+      --replication-factor "$replication")
+    [[ -n "$extra_configs" ]] && cmd+=(--config "$extra_configs")
+
+    if "${cmd[@]}" 2>&1; then
+      info "Топик '$topic' создан"
+    else
+      err "Ошибка создания топика"
+    fi
+    rm -f "$props"
+  else
+    err "Нужны kafka binaries для создания топика"
+  fi
+  press_any
+}
+
+manage_alter_config() {
+  section "Изменение конфигурации топика"
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+
+  echo -e "\n  ${D}Примеры параметров:${NC}"
+  echo -e "    retention.ms=86400000  (1 день)"
+  echo -e "    retention.bytes=1073741824  (1 GB)"
+  echo -e "    max.message.bytes=10485760  (10 MB)"
+  echo -e "    cleanup.policy=compact"
+  echo ""
+  read -rp "  Параметр=значение: " config_entry
+  [[ -z "$config_entry" ]] && return
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-configs.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" \
+      --entity-type topics --entity-name "$topic" \
+      --alter --add-config "$config_entry" 2>&1 \
+      && info "Конфигурация обновлена" || err "Ошибка"
+    rm -f "$props"
+  else
+    err "Нужны kafka binaries"
+  fi
+  press_any
+}
+
+manage_add_partitions() {
+  section "Увеличение партиций"
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  read -rp "  Новое количество партиций (должно быть > текущего): " partitions
+  [[ -z "$partitions" ]] && return
+
+  warn "Уменьшение числа партиций невозможно!"
+  read -rp "  Продолжить? (y/N): " confirm
+  [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" \
+      --alter --topic "$topic" --partitions "$partitions" 2>&1 \
+      && info "Партиции обновлены" || err "Ошибка"
+    rm -f "$props"
+  fi
+  press_any
+}
+
+manage_delete_topic() {
+  section "Удаление топика"
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+
+  echo -e "\n  ${R}⚠  ВНИМАНИЕ: Все данные топика будут удалены!${NC}\n"
+  read -rp "  Введите имя топика ещё раз для подтверждения: " confirm_topic
+  [[ "$confirm_topic" != "$topic" ]] && { warn "Имена не совпадают. Отменено."; press_any; return; }
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-topics.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" \
+      --delete --topic "$topic" 2>&1 \
+      && info "Топик '$topic' удалён" || err "Ошибка удаления"
+    rm -f "$props"
+  fi
+  press_any
+}
+
+manage_produce() {
+  section "Отправка сообщения"
+  read -rp "  Топик: " topic
+  [[ -z "$topic" ]] && return
+  read -rp "  Ключ (пусто = без ключа): " key
+  read -rp "  Сообщение: " message
+  [[ -z "$message" ]] && return
+
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    if [[ -n "$key" ]]; then
+      echo "$key:$message" | "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+        -P -t "$topic" -K ":" 2>/dev/null \
+        && info "Сообщение отправлено с ключом '$key'" || err "Ошибка"
+    else
+      echo "$message" | "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+        -P -t "$topic" 2>/dev/null \
+        && info "Сообщение отправлено" || err "Ошибка"
+    fi
+  else
+    err "Нужен kcat/kafkacat для produce"
+  fi
+  press_any
+}
+
+manage_produce_file() {
+  section "Отправка сообщений из файла"
+  read -rp "  Топик: " topic
+  [[ -z "$topic" ]] && return
+  read -rp "  Путь к файлу (каждая строка = сообщение): " filepath
+  [[ -z "$filepath" || ! -f "$filepath" ]] && { err "Файл не найден"; press_any; return; }
+
+  local count
+  count=$(wc -l <"$filepath")
+  echo -e "  Строк в файле: ${W}$count${NC}"
+  read -rp "  Подтвердить отправку? (y/N): " confirm
+  [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return
+
+  if [[ -n "$KCAT_CMD" ]]; then
+    local auth_args=()
+    IFS=' ' read -ra auth_args <<<"$(kcat_auth_args)"
+    "$KCAT_CMD" -b "$BROKER" "${auth_args[@]+"${auth_args[@]}"}" \
+      -P -t "$topic" "$filepath" 2>/dev/null \
+      && info "$count сообщений отправлено" || err "Ошибка"
+  fi
+  press_any
+}
+
+manage_reset_offset() {
+  section "Сброс offset consumer group"
+  if [[ -z "$KAFKA_BIN" ]]; then
+    err "Нужны kafka binaries"; press_any; return
+  fi
+
+  read -rp "  Consumer group: " group
+  [[ -z "$group" ]] && return
+  read -rp "  Топик (пусто = все топики группы): " topic
+
+  echo -e "\n  ${D}Варианты сброса:${NC}"
+  echo -e "  ${Y}1)${NC} --to-earliest    (в самое начало)"
+  echo -e "  ${Y}2)${NC} --to-latest      (в конец, пропустить всё)"
+  echo -e "  ${Y}3)${NC} --to-offset N    (на конкретный offset)"
+  echo -e "  ${Y}4)${NC} --to-datetime    (на дату, формат: 2024-01-01T00:00:00.000)"
+  echo -e "  ${Y}5)${NC} --shift-by N     (сдвинуть на N вперёд/назад)"
+  echo ""
+  read -rp "  Выбор: " reset_type
+
+  local reset_arg=""
+  case "$reset_type" in
+    1) reset_arg="--to-earliest" ;;
+    2) reset_arg="--to-latest" ;;
+    3)
+      read -rp "  Значение offset: " offset_val
+      reset_arg="--to-offset $offset_val"
+      ;;
+    4)
+      read -rp "  Дата (2024-01-01T00:00:00.000): " dt_val
+      reset_arg="--to-datetime $dt_val"
+      ;;
+    5)
+      read -rp "  Сдвиг (например -100 или 50): " shift_val
+      reset_arg="--shift-by $shift_val"
+      ;;
+    *) warn "Неверный выбор"; press_any; return ;;
+  esac
+
+  local props
+  props=$(kafka_client_props)
+  local topic_arg=""
+  [[ -n "$topic" ]] && topic_arg="--topic $topic" || topic_arg="--all-topics"
+
+  echo -e "\n  ${D}Dry-run (без применения):${NC}"
+  # shellcheck disable=SC2086
+  "$KAFKA_BIN/kafka-consumer-groups.sh" --bootstrap-server "$BROKER" \
+    --command-config "$props" \
+    --group "$group" $topic_arg \
+    --reset-offsets $reset_arg --dry-run 2>/dev/null || true
+
+  echo ""
+  read -rp "  Применить? (y/N): " apply
+  if [[ "$apply" == "y" || "$apply" == "Y" ]]; then
+    # shellcheck disable=SC2086
+    "$KAFKA_BIN/kafka-consumer-groups.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" \
+      --group "$group" $topic_arg \
+      --reset-offsets $reset_arg --execute 2>/dev/null \
+      && info "Offset сброшен" || err "Ошибка сброса"
+  fi
+  rm -f "$props"
+  press_any
+}
+
+manage_delete_group() {
+  section "Удаление consumer group"
+  read -rp "  Consumer group: " group
+  [[ -z "$group" ]] && return
+
+  warn "Группа '$group' будет удалена (все offsets будут потеряны)"
+  read -rp "  Подтвердить? (y/N): " confirm
+  [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-consumer-groups.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" \
+      --delete --group "$group" 2>/dev/null \
+      && info "Группа '$group' удалена" || err "Ошибка"
+    rm -f "$props"
+  fi
+  press_any
+}
+
+manage_show_topic_config() {
+  read -rp "  Имя топика: " topic
+  [[ -z "$topic" ]] && return
+  section "Конфигурация топика: $topic"
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-configs.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" \
+      --entity-type topics --entity-name "$topic" \
+      --describe 2>/dev/null \
+      | sed 's/^/  /' || warn "Ошибка"
+    rm -f "$props"
+  fi
+  press_any
+}
+
+manage_show_broker_config() {
+  read -rp "  ID брокера [0]: " broker_id
+  broker_id=${broker_id:-0}
+  section "Конфигурация брокера: $broker_id"
+
+  if [[ -n "$KAFKA_BIN" ]]; then
+    local props
+    props=$(kafka_client_props)
+    "$KAFKA_BIN/kafka-configs.sh" --bootstrap-server "$BROKER" \
+      --command-config "$props" \
+      --entity-type brokers --entity-name "$broker_id" \
+      --describe 2>/dev/null \
+      | sed 's/^/  /' || warn "Ошибка"
+    rm -f "$props"
+  fi
+  press_any
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ГЛАВНОЕ МЕНЮ
+# ─────────────────────────────────────────────────────────────────────────────
+main_menu() {
+  while true; do
+    banner
+    echo -e "  ${W}Выберите раздел:${NC}"
+    echo ""
+    echo -e "  ${C}╔═══════════════════════════════════════╗${NC}"
+    echo -e "  ${C}║${NC}  ${G}1)${NC}  📋  Просмотр                      ${C}║${NC}"
+    echo -e "  ${C}║${NC}       Топики, сообщения, consumer lag  ${C}║${NC}"
+    echo -e "  ${C}╠═══════════════════════════════════════╣${NC}"
+    echo -e "  ${C}║${NC}  ${M}2)${NC}  ⚙️   Управление                     ${C}║${NC}"
+    echo -e "  ${C}║${NC}       Создание, удаление, produce      ${C}║${NC}"
+    echo -e "  ${C}╠═══════════════════════════════════════╣${NC}"
+    echo -e "  ${C}║${NC}  ${Y}3)${NC}  🔧  Настройки подключения           ${C}║${NC}"
+    echo -e "  ${C}║${NC}       Брокер, SASL, SSL                 ${C}║${NC}"
+    echo -e "  ${C}╠═══════════════════════════════════════╣${NC}"
+    echo -e "  ${C}║${NC}  ${Y}4)${NC}  🔌  Проверить соединение            ${C}║${NC}"
+    echo -e "  ${C}╠═══════════════════════════════════════╣${NC}"
+    echo -e "  ${C}║${NC}  ${R}0)${NC}  🚪  Выход                           ${C}║${NC}"
+    echo -e "  ${C}╚═══════════════════════════════════════╝${NC}"
+    echo ""
+    # Статус инструментов
+    local tools_status=""
+    [[ -n "$KCAT_CMD" ]] && tools_status+="${G}kcat✓${NC} "
+    [[ -n "$KAFKA_BIN" ]] && tools_status+="${G}kafka-bin✓${NC} "
+    [[ -z "$tools_status" ]] && tools_status="${R}инструменты не найдены${NC}"
+    echo -e "  ${D}Инструменты: ${NC}${tools_status}"
+    echo ""
+    read -rp "  Выбор: " choice
+    case "$choice" in
+      1) view_menu ;;
+      2) manage_menu ;;
+      3) settings_menu ;;
+      4) test_connection ;;
+      0) echo -e "\n  ${C}До свидания!${NC}\n"; exit 0 ;;
+      *) warn "Неверный выбор" ;;
+    esac
+  done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ТОЧКА ВХОДА
+# ─────────────────────────────────────────────────────────────────────────────
+main() {
+  # Аргументы командной строки
+  case "${1:-}" in
+    --broker|-b)   BROKER="${2:-$BROKER}" ;;
+    --help|-h)
+      echo "Usage: $0 [--broker host:port]"
+      echo "  Конфиг сохраняется в $CONFIG_FILE"
+      exit 0
+      ;;
+  esac
+
+  load_config
+  detect_tools
+  check_tools || { press_any; }
+  main_menu
+}
+
+main "$@"
