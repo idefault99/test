@@ -1,13 +1,26 @@
-# 1. Что сейчас в /data у redis
-kubectl exec -n test-gis-svo redis-deployment-0 -- ls -la /data/
-
-# 2. Владелец файлов
-kubectl exec -n test-gis-svo redis-deployment-0 -- stat /data/
-
-# 3. Может ли Redis писать в /data
-kubectl exec -n test-gis-svo redis-deployment-0 -- sh -c \
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-1 -- ls -la /data/
+total 24
+drwxr-xr-x 3 nobody nogroup 4096 Mar 25 11:55 .
+drwxr-xr-x 1 root   root    4096 Mar 25 11:50 ..
+-rw-r--r-- 1 nobody nogroup  769 Mar 24 21:16 .nfs000000000044033d00000001
+drwxr-xr-x 2 nobody nogroup 4096 Mar 25 11:50 appendonlydir
+-rw-r--r-- 1 nobody nogroup  440 Mar 25 11:55 dump.rdb
+-rw-r--r-- 1 nobody nogroup  753 Mar 25 11:50 nodes.conf
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-1 -- stat /data/
+  File: /data/
+  Size: 4096            Blocks: 8          IO Block: 262144 directory
+Device: 0,258   Inode: 4457276     Links: 3
+Access: (0755/drwxr-xr-x)  Uid: (65534/  nobody)   Gid: (65534/ nogroup)
+Access: 2026-03-25 12:07:51.216048424 +0000
+Modify: 2026-03-25 11:55:43.777690777 +0000
+Change: 2026-03-25 11:55:43.777690777 +0000
+ Birth: -
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-1 -- sh -c \
   'touch /data/test_write && echo "OK" && rm /data/test_write || echo "CANNOT WRITE"'
-
-# 4. Что говорит Redis про persistence
-kubectl exec -n test-gis-svo redis-deployment-0 -- redis-cli info persistence \
+OK
+ik.belykh@microk8s:~/test$ kubectl exec -n test-gis-svo redis-deployment-1 -- redis-cli info persistence \
   | grep -E "aof_enabled|rdb_last_bgsave|aof_last_write"
+rdb_last_bgsave_status:ok
+rdb_last_bgsave_time_sec:0
+aof_enabled:1
+aof_last_write_status:ok
