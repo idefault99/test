@@ -1,73 +1,13 @@
-test@microk8s:~$ k get pod -n kube-system | grep nfs
-csi-nfs-controller-d494c569f-bpfvp                5/5     Running     232 (6m41s ago)   69d
-csi-nfs-node-5rvk8                                3/3     Running     9 (69d ago)       216d
-csi-nfs-node-7fqkv                                3/3     Running     14 (47d ago)      169d
-csi-nfs-node-9fg2p                                3/3     Running     3 (141d ago)      216d
-csi-nfs-node-9m9dr                                3/3     Running     13 (134d ago)     154d
-csi-nfs-node-g4zc6                                3/3     Running     15                216d
-csi-nfs-node-h6wvm                                3/3     Running     3 (43d ago)       216d
-csi-nfs-node-ls594                                3/3     Running     3 (141d ago)      168d
-csi-nfs-node-p9wg2                                3/3     Running     11 (43m ago)      216d
-csi-nfs-node-pbdbb                                3/3     Running     0                 42d
-csi-nfs-node-sqn8x                                3/3     Running     7 (47d ago)       216d
-csi-nfs-node-t4n44                                3/3     Running     13 (134d ago)     154d
-nfs-subdir-external-provisioner-d98f8d666-fjvjs   1/1     Running     84 (19h ago)      69d
-test@microk8s:~$ k get all -n kube-system | grep nfs
-pod/csi-nfs-controller-d494c569f-bpfvp                5/5     Running     232 (6m58s ago)   69d
-pod/csi-nfs-node-5rvk8                                3/3     Running     9 (69d ago)       216d
-pod/csi-nfs-node-7fqkv                                3/3     Running     14 (47d ago)      169d
-pod/csi-nfs-node-9fg2p                                3/3     Running     3 (141d ago)      216d
-pod/csi-nfs-node-9m9dr                                3/3     Running     13 (134d ago)     154d
-pod/csi-nfs-node-g4zc6                                3/3     Running     15                216d
-pod/csi-nfs-node-h6wvm                                3/3     Running     3 (43d ago)       216d
-pod/csi-nfs-node-ls594                                3/3     Running     3 (141d ago)      168d
-pod/csi-nfs-node-p9wg2                                3/3     Running     11 (43m ago)      216d
-pod/csi-nfs-node-pbdbb                                3/3     Running     0                 42d
-pod/csi-nfs-node-sqn8x                                3/3     Running     7 (47d ago)       216d
-pod/csi-nfs-node-t4n44                                3/3     Running     13 (134d ago)     154d
-pod/nfs-subdir-external-provisioner-d98f8d666-fjvjs   1/1     Running     84 (19h ago)      69d
-daemonset.apps/csi-nfs-node   11        11        11      11           11          kubernetes.io/os=linux   300d
-deployment.apps/csi-nfs-controller                1/1     1            1           300d
-deployment.apps/nfs-subdir-external-provisioner   1/1     1            1           287d
-replicaset.apps/csi-nfs-controller-5bfd48748f               0         0         0       216d
-replicaset.apps/csi-nfs-controller-8487968cc9               0         0         0       300d
-replicaset.apps/csi-nfs-controller-d494c569f                1         1         1       216d
-replicaset.apps/nfs-subdir-external-provisioner-d98f8d666   1         1         1       216d
-replicaset.apps/nfs-subdir-external-provisioner-dbf8bf96c   0         0         0       287d
-test@microk8s:~$ k logs -n kube-system daemonset.apps/csi-nfs-node
-Found 11 pods, using pod/csi-nfs-node-ls594
-Defaulted container "liveness-probe" out of: liveness-probe, node-driver-registrar, nfs
-I1105 08:32:26.037745       1 main.go:135] "Calling CSI driver to discover driver name"
-I1105 08:32:26.067336       1 main.go:143] "CSI driver name" driver="nfs.csi.k8s.io"
-I1105 08:32:26.067612       1 main.go:172] "ServeMux listening" address="localhost:29653"
-test@microk8s:~$ k logs -n kube-system deployment.apps/csi-nfs-controller
-Defaulted container "csi-provisioner" out of: csi-provisioner, csi-resizer, csi-snapshotter, liveness-probe, nfs
-I0325 09:42:09.995118       1 feature_gate.go:387] feature gates: {map[HonorPVReclaimPolicy:true]}
-I0325 09:42:09.995313       1 csi-provisioner.go:166] "Version" version="v5.2.0"
-I0325 09:42:09.995326       1 csi-provisioner.go:189] Building kube configs for running in cluster...
-I0325 09:42:09.995850       1 envvar.go:172] "Feature gate default state" feature="ClientsPreferCBOR" enabled=false
-I0325 09:42:09.995883       1 envvar.go:172] "Feature gate default state" feature="InformerResourceVersion" enabled=false
-I0325 09:42:09.995889       1 envvar.go:172] "Feature gate default state" feature="WatchListClient" enabled=false
-I0325 09:42:09.995894       1 envvar.go:172] "Feature gate default state" feature="ClientsAllowCBOR" enabled=false
-I0325 09:42:09.998037       1 common.go:143] "Probing CSI driver for readiness"
-I0325 09:42:10.000749       1 csi-provisioner.go:244] Detected CSI driver nfs.csi.k8s.io
-I0325 09:42:10.003349       1 csi-provisioner.go:316] CSI driver does not support PUBLISH_UNPUBLISH_VOLUME, not watching VolumeAttachments
-I0325 09:42:10.006313       1 controller.go:758] "Using saving PVs to API server in background"
-I0325 09:42:10.008898       1 leaderelection.go:257] attempting to acquire leader lease kube-system/nfs-csi-k8s-io...
-I0325 09:42:30.303513       1 leaderelection.go:271] successfully acquired lease kube-system/nfs-csi-k8s-io
-I0325 09:42:30.304265       1 leader_election.go:184] "became leader, starting"
-I0325 09:42:30.307431       1 reflector.go:376] Caches populated for *v1.StorageClass from k8s.io/client-go/informers/factory.go:160
-I0325 09:42:30.313207       1 reflector.go:376] Caches populated for *v1.PersistentVolumeClaim from k8s.io/client-go/informers/factory.go:160
-I0325 09:42:30.404790       1 controller.go:838] "Starting provisioner controller" component="nfs.csi.k8s.io_microk8s-6_8420485c-a564-43a4-97d1-bc81f67552df"
-I0325 09:42:30.404861       1 volume_store.go:98] "Starting save volume queue"
-I0325 09:42:30.404867       1 clone_controller.go:66] Starting CloningProtection controller
-I0325 09:42:30.405050       1 clone_controller.go:82] Started CloningProtection controller
-I0325 09:42:30.410187       1 reflector.go:376] Caches populated for *v1.StorageClass from sigs.k8s.io/sig-storage-lib-external-provisioner/v11/controller/controller.go:875
-I0325 09:42:30.422086       1 reflector.go:376] Caches populated for *v1.PersistentVolume from sigs.k8s.io/sig-storage-lib-external-provisioner/v11/controller/controller.go:872
-I0325 09:42:30.506170       1 controller.go:887] "Started provisioner controller" component="nfs.csi.k8s.io_microk8s-6_8420485c-a564-43a4-97d1-bc81f67552df"
-test@microk8s:~$ k logs -n kube-system deployment.apps/nfs-subdir-external-provisioner
-I0324 14:08:21.302977       1 leaderelection.go:242] attempting to acquire leader lease  kube-system/cluster.local-nfs-subdir-external-provisioner...
-I0324 14:08:38.658975       1 leaderelection.go:252] successfully acquired lease kube-system/cluster.local-nfs-subdir-external-provisioner
-I0324 14:08:38.659831       1 event.go:278] Event(v1.ObjectReference{Kind:"Endpoints", Namespace:"kube-system", Name:"cluster.local-nfs-subdir-external-provisioner", UID:"0243fdcf-b2b1-4f6b-86e6-468bc258fbc2", APIVersion:"v1", ResourceVersion:"486632571", FieldPath:""}): type: 'Normal' reason: 'LeaderElection' nfs-subdir-external-provisioner-d98f8d666-fjvjs_a2a01580-f78f-48c9-bdde-f3626098bb48 became leader
-I0324 14:08:38.663858       1 controller.go:820] Starting provisioner controller cluster.local/nfs-subdir-external-provisioner_nfs-subdir-external-provisioner-d98f8d666-fjvjs_a2a01580-f78f-48c9-bdde-f3626098bb48!
-I0324 14:08:38.764470       1 controller.go:869] Started provisioner controller cluster.local/nfs-subdir-external-provisioner_nfs-subdir-external-provisioner-d98f8d666-fjvjs_a2a01580-f78f-48c9-bdde-f3626098bb48!
+# Узнаём адрес NFS сервера
+kubectl get sc nfs-csi -o jsonpath='{.parameters.server}'
+echo ""
+
+# Узнаём какой под csi-nfs-node на microk8s-5
+kubectl get pods -n kube-system -o wide | grep csi-nfs-node | grep microk8s-5
+
+# Логи именно этого пода
+kubectl logs -n kube-system <csi-nfs-node-pod-на-microk8s-5> -c nfs | tail -30
+
+# Проверяем доступность NFS с самой ноды
+ssh microk8s-5 "showmount -e <nfs-server-ip>"
+ssh microk8s-5 "mount -t nfs <nfs-server-ip>:/ /mnt && echo OK && umount /mnt"
