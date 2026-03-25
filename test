@@ -1,13 +1,41 @@
-# Узнаём адрес NFS сервера
-kubectl get sc nfs-csi -o jsonpath='{.parameters.server}'
-echo ""
-
-# Узнаём какой под csi-nfs-node на microk8s-5
-kubectl get pods -n kube-system -o wide | grep csi-nfs-node | grep microk8s-5
-
-# Логи именно этого пода
-kubectl logs -n kube-system <csi-nfs-node-pod-на-microk8s-5> -c nfs | tail -30
-
-# Проверяем доступность NFS с самой ноды
-ssh microk8s-5 "showmount -e <nfs-server-ip>"
-ssh microk8s-5 "mount -t nfs <nfs-server-ip>:/ /mnt && echo OK && umount /mnt"
+Addresses:
+  InternalIP:  192.168.0.221
+  Hostname:    microk8s
+Capacity:
+  cpu:                8
+  ephemeral-storage:  203056560Ki
+  hugepages-2Mi:      0
+  memory:             16372212Ki
+  pods:               160
+Allocatable:
+  cpu:                6500m
+  ephemeral-storage:  191295524417
+  hugepages-2Mi:      0
+  memory:             13750772Ki
+  pods:               160
+System Info:
+  Machine ID:                 5ce191ae7cf14a038734b8f1011e0f8e
+  System UUID:                5ce191ae-7cf1-4a03-8734-b8f1011e0f8e
+  Boot ID:                    b229943f-fb6f-4e95-bc7d-4131c11b4712
+  Kernel Version:             5.15.0-87-generic
+  OS Image:                   Ubuntu 22.04.5 LTS
+  Operating System:           linux
+  Architecture:               amd64
+  Container Runtime Version:  containerd://1.6.28
+  Kubelet Version:            v1.30.14
+  Kube-Proxy Version:         v1.30.14
+Non-terminated Pods:          (4 in total)
+  Namespace                   Name                   CPU Requests  CPU Limits  Memory Requests  Memory Limits  Age
+  ---------                   ----                   ------------  ----------  ---------------  -------------  ---
+  kube-system                 calico-node-dwpmh      250m (3%)     0 (0%)      0 (0%)           0 (0%)         95d
+  kube-system                 csi-nfs-node-g4zc6     30m (0%)      0 (0%)      60Mi (0%)        500Mi (3%)     216d
+  monitoring                  node-exporter-gbzfb    0 (0%)        0 (0%)      0 (0%)           0 (0%)         212d
+  observability               vector-t64z9           0 (0%)        0 (0%)      0 (0%)           0 (0%)         34d
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests   Limits
+  --------           --------   ------
+  cpu                280m (4%)  0 (0%)
+  memory             60Mi (0%)  500Mi (3%)
+  ephemeral-storage  0 (0%)     0 (0%)
+  hugepages-2Mi      0 (0%)     0 (0%)
