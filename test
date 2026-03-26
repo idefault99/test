@@ -2,73 +2,113 @@
 set -e
 
 # ==============================================================================
-# Установка MinIO Client (mc)
-# Поддерживает: Linux (amd64/arm64), macOS (amd64/arm64)
+# Установка MinIO Client (mc) с разрешением конфликта
 # ==============================================================================
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
-# Нормализация архитектуры
 case "$ARCH" in
     x86_64)  ARCH="amd64" ;;
     aarch64) ARCH="arm64" ;;
     arm64)   ARCH="arm64" ;;
-    *)
-        echo "Неподдерживаемая архитектура: $ARCH"
-        exit 1
-        ;;
+    *) echo "Неподдерживаемая архитектура: $ARCH"; exit 1 ;;
 esac
 
-# URL для скачивания
 case "$OS" in
-    linux)
-        URL="https://dl.min.io/client/mc/release/linux-${ARCH}/mc"
-        ;;
-    darwin)
-        URL="https://dl.min.io/client/mc/release/darwin-${ARCH}/mc"
-        ;;
-    *)
-        echo "Неподдерживаемая ОС: $OS"
-        echo "Windows: скачай вручную https://dl.min.io/client/mc/release/windows-amd64/mc.exe"
-        exit 1
-        ;;
+    linux)  URL="https://dl.min.io/client/mc/release/linux-${ARCH}/mc" ;;
+    darwin) URL="https://dl.min.io/client/mc/release/darwin-${ARCH}/mc" ;;
+    *) echo "Неподдерживаемая ОС: $OS"; exit 1 ;;
 esac
 
-echo "ОС: $OS | Архитектура: $ARCH"
-echo "Скачиваю mc с $URL ..."
+# ==============================================================================
+# Найти все mc в PATH и проверить — наш это или чужой
+# ==============================================================================
 
-curl -sSL "$URL" -o /tmp/mc
-chmod +x /tmp/mc
+echo "=== Поиск существующих 'mc' в системе ==="
 
-# Установка в /usr/local/bin (нужен sudo) или ~/bin (без sudo)
-if [ -w /usr/local/bin ]; then
-    mv /tmp/mc /usr/local/bin/mc
-    INSTALL_PATH="/usr/local/bin/mc"
+FOUND_PATHS=$(which -a mc 2>/dev/null || true)
+
+if [ -z "$FOUND_PATHS" ]; then
+    echo "mc не найден в PATH — чисто, просто ставим."
 else
-    mkdir -p "$HOME/bin"
-    mv /tmp/mc "$HOME/bin/mc"
-    INSTALL_PATH="$HOME/bin/mc"
-
-    # Добавить ~/bin в PATH если ещё нет
-    if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-        echo ""
-        echo "Добавь в ~/.bashrc или ~/.zshrc:"
-        echo '  export PATH="$HOME/bin:$PATH"'
-        echo "Затем: source ~/.bashrc"
-    fi
+    echo "Найдено:"
+    while IFS= read -r MC_PATH; do
+        echo -n "  $MC_PATH → "
+        VERSION_OUT=$("$MC_PATH" --version 2>&1 || true)
+        if echo "$VERSION_OUT" | grep -qi "minio"; then
+            echo "это MinIO mc (оставляем)"
+        else
+            echo "НЕ MinIO (удаляем)"
+            sudo rm -f "$MC_PATH"
+            echo "  Удалён: $MC_PATH"
+        fi
+    done <<< "$FOUND_PATHS"
 fi
 
-echo ""
-echo "mc установлен: $INSTALL_PATH"
-mc --version
+# ==============================================================================
+# Скачать и установить MinIO mc
+# ==============================================================================
 
 echo ""
-echo "Следующий шаг — добавить alias для твоего MinIO:"
-echo "  mc alias set <name> <endpoint> <access-key> <secret-key>"
+echo "=== Установка MinIO mc ==="
+echo "Скачиваю с $URL ..."
+
+curl -sSL "$URL" -o /tmp/minio-mc
+chmod +x /tmp/minio-mc
+
+# Проверить что скачали именно MinIO mc
+VERSION_CHECK=$(/tmp/minio-mc --version 2>&1 || true)
+if ! echo "$VERSION_CHECK" | grep -qi "minio"; then
+    echo "Ошибка: скачанный бинарник не похож на MinIO mc"
+    echo "Вывод: $VERSION_CHECK"
+    exit 1
+fi
+
+# Установить
+if [ -w /usr/local/bin ]; then
+    mv /tmp/minio-mc /usr/local/bin/mc
+    INSTALL_PATH="/usr/local/bin/mc"
+else
+    sudo mv /tmp/minio-mc /usr/local/bin/mc
+    INSTALL_PATH="/usr/local/bin/mc"
+fi
+
+echo "Установлен: $INSTALL_PATH"
+mc --version
+
+# ==============================================================================
+# Добавить алиас mcli → mc в shell rc файлы
+# ==============================================================================
+
 echo ""
-echo "Пример:"
-echo "  mc alias set myminio http://localhost:9000 myaccesskey mysecretkey"
+echo "=== Добавление алиаса 'mcli' → mc ==="
+
+ALIAS_LINE="alias mcli='mc'"
+
+for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [ -f "$RC" ]; then
+        if grep -q "alias mcli=" "$RC"; then
+            echo "  $RC — алиас уже есть, пропускаем"
+        else
+            echo "$ALIAS_LINE" >> "$RC"
+            echo "  $RC — алиас добавлен"
+        fi
+    fi
+done
+
+# ==============================================================================
+# Итог
+# ==============================================================================
+
 echo ""
-echo "Проверка подключения:"
+echo "=== Готово ==="
+echo ""
+echo "Чтобы применить алиас в текущей сессии:"
+echo "  source ~/.bashrc   # или source ~/.zshrc"
+echo ""
+echo "Добавить подключение к MinIO:"
+echo "  mc alias set myminio http://localhost:9000 your-access-key your-secret-key"
+echo ""
+echo "Проверка:"
 echo "  mc ls myminio"
