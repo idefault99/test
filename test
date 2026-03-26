@@ -1,10 +1,15 @@
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:*"],
-      "Resource": ["arn:aws:s3:::*"]
-    }
-  ]
-}
+Traceback (most recent call last):
+  File "/mnt/c/Users/ik.belykh/test/minio.py", line 119, in <module>
+    list_buckets()
+  File "/mnt/c/Users/ik.belykh/test/minio.py", line 54, in list_buckets
+    response = s3.list_buckets()
+               ^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (SignatureDoesNotMatch) when calling the ListBuckets operation: The request signature we calculated does not match the signature you provided. Check your key and signing method.
