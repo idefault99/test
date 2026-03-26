@@ -1,15 +1,74 @@
-Traceback (most recent call last):
-  File "/mnt/c/Users/ik.belykh/test/minio.py", line 119, in <module>
-    list_buckets()
-  File "/mnt/c/Users/ik.belykh/test/minio.py", line 54, in list_buckets
-    response = s3.list_buckets()
-               ^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
-    return self._make_api_call(operation_name, kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
-    raise error_class(parsed_response, operation_name)
-botocore.exceptions.ClientError: An error occurred (SignatureDoesNotMatch) when calling the ListBuckets operation: The request signature we calculated does not match the signature you provided. Check your key and signing method.
+#!/bin/bash
+set -e
+
+# ==============================================================================
+# Установка MinIO Client (mc)
+# Поддерживает: Linux (amd64/arm64), macOS (amd64/arm64)
+# ==============================================================================
+
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+
+# Нормализация архитектуры
+case "$ARCH" in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64" ;;
+    arm64)   ARCH="arm64" ;;
+    *)
+        echo "Неподдерживаемая архитектура: $ARCH"
+        exit 1
+        ;;
+esac
+
+# URL для скачивания
+case "$OS" in
+    linux)
+        URL="https://dl.min.io/client/mc/release/linux-${ARCH}/mc"
+        ;;
+    darwin)
+        URL="https://dl.min.io/client/mc/release/darwin-${ARCH}/mc"
+        ;;
+    *)
+        echo "Неподдерживаемая ОС: $OS"
+        echo "Windows: скачай вручную https://dl.min.io/client/mc/release/windows-amd64/mc.exe"
+        exit 1
+        ;;
+esac
+
+echo "ОС: $OS | Архитектура: $ARCH"
+echo "Скачиваю mc с $URL ..."
+
+curl -sSL "$URL" -o /tmp/mc
+chmod +x /tmp/mc
+
+# Установка в /usr/local/bin (нужен sudo) или ~/bin (без sudo)
+if [ -w /usr/local/bin ]; then
+    mv /tmp/mc /usr/local/bin/mc
+    INSTALL_PATH="/usr/local/bin/mc"
+else
+    mkdir -p "$HOME/bin"
+    mv /tmp/mc "$HOME/bin/mc"
+    INSTALL_PATH="$HOME/bin/mc"
+
+    # Добавить ~/bin в PATH если ещё нет
+    if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+        echo ""
+        echo "Добавь в ~/.bashrc или ~/.zshrc:"
+        echo '  export PATH="$HOME/bin:$PATH"'
+        echo "Затем: source ~/.bashrc"
+    fi
+fi
+
+echo ""
+echo "mc установлен: $INSTALL_PATH"
+mc --version
+
+echo ""
+echo "Следующий шаг — добавить alias для твоего MinIO:"
+echo "  mc alias set <name> <endpoint> <access-key> <secret-key>"
+echo ""
+echo "Пример:"
+echo "  mc alias set myminio http://localhost:9000 myaccesskey mysecretkey"
+echo ""
+echo "Проверка подключения:"
+echo "  mc ls myminio"
