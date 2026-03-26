@@ -1,3 +1,45 @@
-sudo tar -xvf kafka_2.13-3.8.0.tgz -C /opt/kafka --strip-components=1
-
-/opt/kafka/bin/kafka-topics.sh --version
+192.168.0.122 - - [26/Mar/2026:09:22:51 +0000] "GET /index.html HTTP/1.1" 499 0 "-" "kube-probe/1.30" "-" "-" "x-request-id=8a41c961bf12d88bfe55ca3ac3a7e43c"
+192.168.0.122 - - [26/Mar/2026:09:22:56 +0000] "GET /index.html HTTP/1.1" 499 0 "-" "kube-probe/1.30" "-" "-" "x-request-id=7e9a5e9cf6200a9dc31809a9599cd9c1"
+192.168.0.122 - - [26/Mar/2026:09:22:59 +0000] "GET /index.html HTTP/1.1" 499 0 "-" "kube-probe/1.30" "-" "-" "x-request-id=10acc3fe878e36474e87daad6c8f0f73"
+192.168.0.122 - - [26/Mar/2026:09:23:21 +0000] "GET /index.html HTTP/1.1" 499 0 "-" "kube-probe/1.30" "-" "-" "x-request-id=d21cf46f04559763aaad57e257504b00"
+192.168.0.122 - - [26/Mar/2026:09:23:29 +0000] "GET /index.html HTTP/1.1" 499 0 "-" "kube-probe/1.30" "-" "-" "x-request-id=dce0f624e2b38182736dae47ba9322cd"
+192.168.0.122 - - [26/Mar/2026:09:23:51 +0000] "GET /index.html HTTP/1.1" 499 0 "-" "kube-probe/1.30" "-" "-" "x-request-id=f38254cfb7224ecfbf9a3b9c197a92e9"
+192.168.0.122 - - [26/Mar/2026:09:23:59 +0000] "GET /index.html HTTP/1.1" 499 0 "-" "kube-probe/1.30" "-" "-" "x-request-id=4dfef800885557dee782fb47528fb591"
+192.168.0.122 - - [26/Mar/2026:09:23:59 +0000] "GET /index.html HTTP/1.1" 503 382 "-" "kube-probe/1.30" "-" "-" "x-request-id=94c14bf813f6afdb8c063d42bfb3680f"
+2026/03/26 09:23:59 [notice] 1#1: signal 3 (SIGQUIT) received, shutting down
+2026/03/26 09:23:59 [notice] 22#22: gracefully shutting down
+2026/03/26 09:23:59 [notice] 23#23: gracefully shutting down
+2026/03/26 09:23:59 [notice] 21#21: gracefully shutting down
+2026/03/26 09:23:59 [notice] 25#25: gracefully shutting down
+2026/03/26 09:23:59 [notice] 24#24: gracefully shutting down
+2026/03/26 09:23:59 [notice] 22#22: exiting
+2026/03/26 09:23:59 [notice] 26#26: gracefully shutting down
+2026/03/26 09:23:59 [notice] 27#27: gracefully shutting down
+2026/03/26 09:23:59 [notice] 21#21: exiting
+2026/03/26 09:23:59 [notice] 28#28: gracefully shutting down
+2026/03/26 09:23:59 [notice] 24#24: exiting
+2026/03/26 09:23:59 [notice] 29#29: gracefully shutting down
+2026/03/26 09:23:59 [notice] 23#23: exiting
+2026/03/26 09:23:59 [notice] 26#26: exiting
+2026/03/26 09:23:59 [notice] 27#27: exiting
+2026/03/26 09:23:59 [notice] 28#28: exiting
+2026/03/26 09:23:59 [notice] 29#29: exiting
+2026/03/26 09:23:59 [notice] 25#25: exiting
+2026/03/26 09:23:59 [notice] 30#30: gracefully shutting down
+2026/03/26 09:23:59 [notice] 31#31: gracefully shutting down
+2026/03/26 09:23:59 [notice] 30#30: exiting
+2026/03/26 09:23:59 [notice] 31#31: exiting
+2026/03/26 09:23:59 [notice] 32#32: gracefully shutting down
+2026/03/26 09:23:59 [notice] 32#32: exiting
+2026/03/26 09:23:59 [notice] 33#33: gracefully shutting down
+2026/03/26 09:23:59 [notice] 33#33: exiting
+2026/03/26 09:23:59 [notice] 36#36: gracefully shutting down
+2026/03/26 09:23:59 [notice] 36#36: exiting
+2026/03/26 09:23:59 [notice] 34#34: gracefully shutting down
+2026/03/26 09:23:59 [notice] 34#34: exiting
+2026/03/26 09:23:59 [notice] 35#35: gracefully shutting down
+2026/03/26 09:23:59 [notice] 35#35: exiting
+2026/03/26 09:23:59 [notice] 25#25: exit
+2026/03/26 09:23:59 [notice] 1#1: signal 17 (SIGCHLD) received from 25
+2026/03/26 09:23:59 [notice] 1#1: worker process 25 exited with code 0
+2026/03/26 09:23:59 [notice] 1#1: signal 29 (SIGIO) received
