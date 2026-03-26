@@ -1,10 +1,1 @@
-sudo ntpdate -u pool.ntp.org
-# или
-sudo hwclock -s
-
-
-# Твоё время
-date -u
-
-# Время сервера
-curl -sI https://dev.host.ru/api/s3minio | grep -i date
+curl -v https://dev.host.ru/api/s3minio/ 2>&1 | grep -E "Location|HTTP/"
