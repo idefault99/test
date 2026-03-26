@@ -1,13 +1,10 @@
-Traceback (most recent call last):
-  File "/mnt/c/Users/ik.belykh/test/r.py", line 14, in <module>
-    response = s3.list_buckets()
-               ^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
-    return self._make_api_call(operation_name, kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/ik.belykh/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
-    raise error_class(parsed_response, operation_name)
-botocore.exceptions.ClientError: An error occurred (SignatureDoesNotMatch) when calling the ListBuckets operation: The request signature we calculated does not match the signature you provided. Check your key and signing method.
+sudo ntpdate -u pool.ntp.org
+# или
+sudo hwclock -s
+
+
+# Твоё время
+date -u
+
+# Время сервера
+curl -sI https://dev.host.ru/api/s3minio | grep -i date
