@@ -1,9 +1,29 @@
+Ошибка: An error occurred (SignatureDoesNotMatch) when calling the ListBuckets operation: The request signature we calculated does not match the signature you provided. Check your key and signing method.
+
+import boto3
+from botocore.client import Config
+
+s3 = boto3.client(
+    's3',
+    endpoint_url='https://dev.host.ru/api/s3minio',  # Полный URL с путем
+    aws_access_key_id='***',
+    aws_secret_access_key='***',
+    config=Config(
+    signature_version="s3v4",
+    s3={"addressing_style": "path"},
+    ),
+    region_name='us-east-1'  # любое значение
+)
+
+try:
+    buckets = s3.list_buckets()
+    print("Подключение успешно!")
+    for bucket in buckets['Buckets']:
+        print(f"  {bucket['Name']}")
+except Exception as e:
+    print(f"Ошибка: {e}")
+
 config=Config(
     signature_version="s3v4",
     s3={"addressing_style": "path"},
 )
-
-
-curl -v "https://dev.host.ru/api/s3minio/" 2>&1 | grep -E "< HTTP|< |Location"
-
-
