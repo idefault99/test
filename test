@@ -1,3 +1,15 @@
-mc: <ERROR> Invalid URL. URL `https://dev.host.ru/api/s3minio` for MinIO Client should be of the form scheme://host[:port]/ without resource component.
- (0) typed-errors.go:77 cmd.init.func22(..)
- Commit:7394ce0dd2a8 | Release-Tag:RELEASE.2025-08-13T08-35-41Z | Host:ITO-W-01105 | OS:linux | Arch:amd64 | Lang:go1.24.6 | Mem:2.9 MiB/18 MiB | Heap:2.9 MiB/11 MiB.
+import boto3
+from botocore.client import Config
+
+s3 = boto3.client(
+    "s3",
+    endpoint_url="https://dev.host.ru/api/s3minio",
+    aws_access_key_id="your-access-key",
+    aws_secret_access_key="your-secret-key",
+    region_name="us-east-1",
+    config=Config(signature_version="s3v4"),
+)
+
+# Проверка
+response = s3.list_buckets()
+print(response)
