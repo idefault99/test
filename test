@@ -1,3 +1,62 @@
-print(f"Ошибка {response.status_code}: {response.text}")
-print(f"Headers запроса: {dict(request.headers)}")
-print(f"URL запроса: {final_url}")
+[before-send] path before: /
+[before-send] path after:  /api/s3minio/
+[before-send] GET https://dev.host/api/s3minio/
+Подключение успешно!
+  - hotels
+  - interviews
+[before-send] path before: /
+[before-send] path after:  /api/s3minio/
+[before-send] GET https://dev.host/api/s3minio/
+Ошибка 400: <?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>BadRequest</Code><Message>An error occurred when parsing the HTTP request PUT at &#39;/&#39;</Message><Resource>/</Resource><RequestId></RequestId><HostId></HostId></Error>
+Headers запроса: {'X-Amz-Date': '20260327T104528Z', 'Authorization': 'AWS4-HMAC-SHA256 Credential=icQODDIe0K2IT5pQUTG4/20260327/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=f26eb9b0a0c09d3018f55d9b4e64de5f40b9c13cc5c9a0503458ed32c28261rr'}
+URL запроса: https://dev.host/api/s3minio/test
+Ошибка 400: <?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>BadRequest</Code><Message>An error occurred when parsing the HTTP request PUT at &#39;/&#39;</Message><Resource>/</Resource><RequestId></RequestId><HostId></HostId></Error>
+Бакет создан: test
+Загружаю: ./test.txt (25 bytes) → s3://test/test.txt
+[before-send] path before: /test/test.txt
+[before-send] path after:  /api/s3minio/test/test.txt
+[before-send] PUT https://dev.host/api/s3minio/test/test.txt
+Traceback (most recent call last):
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/boto3/s3/transfer.py", line 452, in upload_file
+    future.result()
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/s3transfer/futures.py", line 111, in result
+    return self._coordinator.result()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/s3transfer/futures.py", line 287, in result
+    raise self._exception
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/s3transfer/tasks.py", line 142, in __call__
+    return self._execute_main(kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/s3transfer/tasks.py", line 165, in _execute_main
+    return_value = self._main(**kwargs)
+                   ^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/s3transfer/upload.py", line 796, in _main
+    client.put_object(Bucket=bucket, Key=key, Body=body, **extra_args)
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (BadRequest) when calling the PutObject operation: An error occurred when parsing the HTTP request PUT at '/'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/mnt/c/Users/user/test/minio_test.py", line 108, in <module>
+    create_bucket_and_upload(
+  File "/mnt/c/Users/user/test/minio_test.py", line 85, in create_bucket_and_upload
+    s3.upload_file(local_path, bucket, object_key)
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/boto3/s3/inject.py", line 175, in upload_file
+    return transfer.upload_file(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/boto3/s3/transfer.py", line 458, in upload_file
+    raise S3UploadFailedError(
+boto3.exceptions.S3UploadFailedError: Failed to upload ./test.txt to test/test.txt: An error occurred (BadRequest) when calling the PutObject operation: An error occurred when parsing the HTTP request PUT at '/'
