@@ -1,8 +1,11 @@
-# Было:
-s3.create_bucket(Bucket=bucket)
-
-# Надо:
-s3.create_bucket(
-    Bucket=bucket,
-    CreateBucketConfiguration={"LocationConstraint": "us-east-1"},
-)
+def add_prefix_before_send(request, **kwargs):
+    parsed = urlsplit(request.url)
+    new_path = MINIO_PREFIX + parsed.path
+    request.url = urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        new_path,
+        parsed.query,
+        parsed.fragment,
+    ))
+    print(f"[before-send] {request.method} {request.url}")  # добавь эту строку
