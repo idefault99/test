@@ -9,14 +9,13 @@ metadata:
   annotations:
     meta.helm.sh/release-name: infra
     meta.helm.sh/release-namespace: trip-dev
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      rewrite ^/s3minio/(.*) /$1 break;
     nginx.ingress.kubernetes.io/proxy-body-size: 500m
     nginx.ingress.kubernetes.io/proxy-buffer-size: 128k
     nginx.ingress.kubernetes.io/proxy-buffers: 4 256k
     nginx.ingress.kubernetes.io/proxy-busy-buffers-size: 256k
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     nginx.ingress.kubernetes.io/use-regex: 'true'
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"  # важно для upload
 spec:
   ingressClassName: nginx
   tls:
@@ -27,21 +26,17 @@ spec:
     - host: trip-dev.code-discovery.ru
       http:
         paths:
-          - path: /api/s3minio
-            pathType: Prefix
+          - path: /api/s3minio(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: s3minio-api-service
                 port:
                   number: 9000
-          - path: /s3minio
-            pathType: Prefix
+          - path: /s3minio(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: s3minio-console-service
                 port:
                   number: 9001
-status:
-  loadBalancer:
-    ingress:
-      - ip: 127.0.0.1
