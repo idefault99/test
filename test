@@ -1,17 +1,8 @@
-Подключение успешно!
-  - buckettest
-  - goods
-Traceback (most recent call last):
-  File "/mnt/c/Users/user/test/minio_test.py", line 74, in <module>
-    create_bucket_and_upload(
-  File "/mnt/c/Users/user/test/minio_test.py", line 53, in create_bucket_and_upload
-    s3.create_bucket(Bucket=bucket)
-  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
-    return self._make_api_call(operation_name, kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
-    raise error_class(parsed_response, operation_name)
-botocore.exceptions.ClientError: An error occurred (BadRequest) when calling the CreateBucket operation: An error occurred when parsing the HTTP request PUT at '/'
+# Было:
+s3.create_bucket(Bucket=bucket)
+
+# Надо:
+s3.create_bucket(
+    Bucket=bucket,
+    CreateBucketConfiguration={"LocationConstraint": "us-east-1"},
+)
