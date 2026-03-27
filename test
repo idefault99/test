@@ -1,10 +1,26 @@
-def add_prefix(request, **kwargs):
-    parsed = urlsplit(request.url)
-    new_path = MINIO_PREFIX + parsed.path
-    print(f"[before-send] path before: {parsed.path}")
-    print(f"[before-send] path after:  {new_path}")
-    request.url = urlunsplit((
-        parsed.scheme, parsed.netloc,
-        new_path, parsed.query, parsed.fragment,
-    ))
-    print(f"[before-send] {request.method} {request.url}")
+[before-send] path before: /
+[before-send] path after:  /api/s3minio/
+[before-send] GET https://dev.host/api/s3minio/
+Подключение успешно!
+  - hotels
+  - interviews
+[before-send] path before: /
+[before-send] path after:  /api/s3minio/
+[before-send] GET https://dev.host/api/s3minio/
+[before-send] path before: /test
+[before-send] path after:  /api/s3minio/test
+[before-send] PUT https://dev.host/api/s3minio/test
+Traceback (most recent call last):
+  File "/mnt/c/Users/user/test/minio_test.py", line 88, in <module>
+    create_bucket_and_upload(
+  File "/mnt/c/Users/user/test/minio_test.py", line 38, in create_bucket_and_upload
+    s3.create_bucket(
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (BadRequest) when calling the CreateBucket operation: An error occurred when parsing the HTTP request PUT at '/'
