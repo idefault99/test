@@ -1,53 +1,135 @@
-import boto3
-from botocore.config import Config
-from urllib.parse import urlsplit, urlunsplit
+# Почему подпись не проходила и как мы это починили
 
-# ==============================================================================
-# НАСТРОЙКИ
-# ==============================================================================
+## Что такое SigV4 и зачем он нужен
 
-MINIO_HOST     = "https://dev.host.ru"   # БЕЗ префикса!
-MINIO_PREFIX   = "/api/s3minio"          # Префикс который nginx срезает
-ACCESS_KEY     = "your-access-key"
-SECRET_KEY     = "your-secret-key"
-BUCKET_NAME    = "your-bucket"
+Когда boto3 обращается к MinIO (или к AWS S3), он не просто шлёт логин и пароль в запросе. Вместо этого он **подписывает каждый запрос** — вычисляет криптографическую подпись на основе:
 
-# ==============================================================================
-# КЛИЕНТ
-# ==============================================================================
+- секретного ключа
+- времени запроса
+- заголовков
+- **пути запроса** (например `/mybucket/myfile.txt`)
+- тела запроса
 
-s3 = boto3.client(
-    "s3",
-    endpoint_url=MINIO_HOST,             # Подпись считается для корневого пути
-    aws_access_key_id=ACCESS_KEY,
-    aws_secret_access_key=SECRET_KEY,
-    region_name="us-east-1",
-    config=Config(
-        signature_version="s3v4",
-        s3={"addressing_style": "path"},
-    ),
-)
+Эта подпись добавляется в заголовок `Authorization`. MinIO при получении запроса делает то же самое вычисление на своей стороне и сравнивает результаты. Если они совпали — запрос разрешён. Если нет — `SignatureDoesNotMatch`.
 
+Ключевой момент: **подпись жёстко привязана к пути запроса**. Изменишь путь — подпись сломается.
+
+-----
+
+## Как была настроена инфраструктура
+
+```
+boto3  →  https://dev.host.ru/api/s3minio  →  nginx ingress  →  MinIO
+```
+
+nginx ingress был настроен с аннотацией:
+
+```
+nginx.ingress.kubernetes.io/rewrite-target: /$2
+```
+
+Это значит: nginx **срезает префикс** `/api/s3minio` и передаёт MinIO только то, что идёт после него.
+
+-----
+
+## Почему подпись не проходила
+
+boto3 подписывал запрос для пути `/api/s3minio`:
+
+```
+CanonicalRequest:
+GET
+/api/s3minio        ← подпись вычислена для этого пути
+...
+```
+
+nginx получал запрос, срезал `/api/s3minio` и отправлял MinIO уже на `/`:
+
+```
+GET / HTTP/1.1      ← MinIO получал этот путь
+```
+
+MinIO пытался проверить подпись для пути `/`, но подпись была вычислена для `/api/s3minio`.
+
+```
+Подпись от boto3:   hash("/api/s3minio" + ключ + время + ...)
+Подпись от MinIO:   hash("/"           + ключ + время + ...)
+
+Результат: ❌ SignatureDoesNotMatch
+```
+
+В ответе MinIO это было видно явно:
+
+```xml
+<Resource>/</Resource>   ← MinIO проверял для этого пути
+```
+
+Это не баг nginx и не баг MinIO — это фундаментальное ограничение протокола S3. **MinIO официально не поддерживает размещение S3 API на subpath за rewrite-прокси.**
+
+-----
+
+## Почему это нельзя починить на стороне nginx
+
+Чтобы MinIO мог проверить подпись, он должен получить запрос на **тот же путь**, для которого считалась подпись. Любой rewrite ломает это соответствие.
+
+Передать оригинальный путь через заголовок (`X-Original-URI` и т.п.) не помогает — MinIO использует только реальный путь HTTP-запроса, заголовки при верификации подписи игнорируются.
+
+-----
+
+## Как мы починили
+
+Решение: **разделить путь для подписи и путь для маршрутизации**.
+
+Шаг 1 — boto3 подписывает запрос для корневого пути `/`:
+
+```python
+endpoint_url="https://dev.host.ru"   # без префикса
+```
+
+Подпись теперь вычисляется для `/`:
+
+```
+CanonicalRequest:
+GET
+/mybucket/myfile.txt   ← подписан этот путь
+```
+
+Шаг 2 — после подписания, но **до отправки**, перехватываем запрос и добавляем префикс в URL:
+
+```python
 def add_prefix_before_send(request, **kwargs):
-    """После подписания, перед отправкой — добавляем префикс в URL."""
     parsed = urlsplit(request.url)
     request.url = urlunsplit((
-        parsed.scheme,
-        parsed.netloc,
-        MINIO_PREFIX + parsed.path,
-        parsed.query,
-        parsed.fragment,
+        parsed.scheme, parsed.netloc,
+        "/api/s3minio" + parsed.path,   # добавляем префикс
+        parsed.query, parsed.fragment,
     ))
 
-# Регистрируем для всех S3 операций
 s3.meta.events.register("before-send.s3.*", add_prefix_before_send)
+```
 
-# ==============================================================================
-# ПРОВЕРКА
-# ==============================================================================
+Теперь цепочка выглядит так:
 
-if __name__ == "__main__":
-    response = s3.list_buckets()
-    print("Подключение успешно!")
-    for bucket in response.get("Buckets", []):
-        print(f"  - {bucket['Name']}")
+```
+1. boto3 подписывает:     /mybucket/myfile.txt
+2. before-send добавляет: /api/s3minio/mybucket/myfile.txt
+3. Запрос уходит на:      https://dev.host.ru/api/s3minio/mybucket/myfile.txt
+4. nginx срезает:         /api/s3minio  →  MinIO получает /mybucket/myfile.txt
+5. MinIO проверяет:       hash("/mybucket/myfile.txt" + ...) == подпись из запроса
+
+Результат: ✅ OK
+```
+
+Подпись совпадает, потому что и boto3, и MinIO работают с одним и тем же путём `/mybucket/myfile.txt`.
+
+-----
+
+## Почему `before-send` а не `before-sign`
+
+В botocore есть несколько событий в жизненном цикле запроса:
+
+```
+before-sign   →   [подписание]   →   before-send   →   [отправка]
+```
+
+Нам нужно добавить префикс **после** подписания и **до** отправки — именно это делает `before-send`. Если бы мы добавили префикс в `before-sign`, подпись снова вычислялась бы для `/api/s3minio/...` и проблема вернулась бы.
