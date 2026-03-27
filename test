@@ -1,56 +1,23 @@
-* Host dev.host.ru:443 was resolved.
-* IPv6: (none)
-* IPv4: 11.92.11.11
-*   Trying 11.92.11.11:443...
-* Connected to dev.host.ru (11.92.11.11) port 443
-* ALPN: curl offers h2,http/1.1
-* TLSv1.3 (OUT), TLS handshake, Client hello (1):
-*  CAfile: /etc/ssl/certs/ca-certificates.crt
-*  CApath: /etc/ssl/certs
-* TLSv1.3 (IN), TLS handshake, Server hello (2):
-* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
-* TLSv1.3 (IN), TLS handshake, Certificate (11):
-* TLSv1.3 (IN), TLS handshake, CERT verify (15):
-* TLSv1.3 (IN), TLS handshake, Finished (20):
-* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
-* TLSv1.3 (OUT), TLS handshake, Finished (20):
-* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
-* ALPN: server accepted http/1.1
-* Server certificate:
-*  subject: C=RU; ST=Moscow; L=Moscow; O=OOO DER; CN=*.host.ru
-*  start date: Jul 11 07:53:58 2025 GMT
-*  expire date: Jul 20 10:24:07 2026 GMT
-*  subjectAltName: host "dev.host.ru" matched cert's "*.host.ru"
-*  issuer: C=BE; O=GlobalSign nv-sa; CN=GlobalSign RSA OV SSL CA 2018
-*  SSL certificate verify ok.
-*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
-*   Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
-*   Certificate level 2: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
-* using HTTP/1.x
-> GET /api/s3minio/ HTTP/1.1
-> Host: dev.host.ru
-> User-Agent: curl/8.5.0
-> Accept: */*
->
-* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
-* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
-* old SSL session ID is stale, removing
-< HTTP/1.1 403 Forbidden
-< Server: nginx
-< Date: Thu, 26 Mar 2026 14:24:17 GMT
-< Content-Type: application/xml
-< Content-Length: 254
-< Connection: keep-alive
-< Accept-Ranges: bytes
-< Strict-Transport-Security: max-age=15724800; includeSubDomains
-< Vary: Origin
-< Vary: Accept-Encoding
-< X-Amz-Id-2: dd9025bab4ad464b049177c95eb6ebf374d3b3fd1af58df7ac2e3e8
-< X-Amz-Request-Id: 18A06A3BB1418CCB
-< X-Content-Type-Options: nosniff
-< X-Xss-Protection: 1; mode=block
-< X-Request-ID: 34adf0f081d79b8ed902e7c72e6c3622
-<
-<?xml version="1.0" encoding="UTF-8"?>
-* Connection #0 to host dev.host.ru left intact
-<Error><Code>AccessDenied</Code><Message>Access Denied.</Message><Resource>/</Resource><RequestId>18A06A3BB1418CCB</RequestId><HostId>dd9025bab4ad464b049177c95eb6ebf374d3b3fd1af58df7ac2e3e8</HostId></Error>
+import boto3
+from botocore.client import Config
+from botocore import awsrequest
+import botocore.session
+
+s3 = boto3.client(
+    's3',
+    endpoint_url='https://dev.host.ru/api/s3minio',
+    aws_access_key_id='***',
+    aws_secret_access_key='***',
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "path"},
+    ),
+    region_name='us-east-1',
+)
+
+# Посмотреть какой Host идёт в запросе
+import logging
+logging.basicConfig(level=logging.DEBUG)
+boto3.set_stream_logger('botocore', level=logging.DEBUG)
+
+buckets = s3.list_buckets()
