@@ -1,123 +1,53 @@
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-parameter-build.s3.ListBuckets: calling handler <function validate_bucket_name at 0x7acf592bea20>
-DEBUG:botocore.hooks:Event before-parameter-build.s3.ListBuckets: calling handler <function validate_bucket_name at 0x7acf592bea20>
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-parameter-build.s3.ListBuckets: calling handler <function remove_bucket_from_url_paths_from_model at 0x7acf590e8ea0>
-DEBUG:botocore.hooks:Event before-parameter-build.s3.ListBuckets: calling handler <function remove_bucket_from_url_paths_from_model at 0x7acf590e8ea0>
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-parameter-build.s3.ListBuckets: calling handler <bound method S3RegionRedirectorv2.annotate_request_context of <botocore.utils.S3RegionRedirectorv2 object at 0x7acf591fc0b0>>
-DEBUG:botocore.hooks:Event before-parameter-build.s3.ListBuckets: calling handler <bound method S3RegionRedirectorv2.annotate_request_context of <botocore.utils.S3RegionRedirectorv2 object at 0x7acf591fc0b0>>
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-parameter-build.s3.ListBuckets: calling handler <bound method ClientCreator._inject_s3_input_parameters of <botocore.client.ClientCreator object at 0x7acf5911e5d0>>
-DEBUG:botocore.hooks:Event before-parameter-build.s3.ListBuckets: calling handler <bound method ClientCreator._inject_s3_input_parameters of <botocore.client.ClientCreator object at 0x7acf5911e5d0>>
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-parameter-build.s3.ListBuckets: calling handler <function generate_idempotent_uuid at 0x7acf592be840>
-DEBUG:botocore.hooks:Event before-parameter-build.s3.ListBuckets: calling handler <function generate_idempotent_uuid at 0x7acf592be840>
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-parameter-build.s3.ListBuckets: calling handler <function _handle_request_validation_mode_member at 0x7acf590e9620>
-DEBUG:botocore.hooks:Event before-parameter-build.s3.ListBuckets: calling handler <function _handle_request_validation_mode_member at 0x7acf590e9620>
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-endpoint-resolution.s3: calling handler <function customize_endpoint_resolver_builtins at 0x7acf590e9080>
-DEBUG:botocore.hooks:Event before-endpoint-resolution.s3: calling handler <function customize_endpoint_resolver_builtins at 0x7acf590e9080>
-2026-03-27 09:24:38,773 botocore.hooks [DEBUG] Event before-endpoint-resolution.s3: calling handler <bound method S3RegionRedirectorv2.redirect_from_cache of <botocore.utils.S3RegionRedirectorv2 object at 0x7acf591fc0b0>>
-DEBUG:botocore.hooks:Event before-endpoint-resolution.s3: calling handler <bound method S3RegionRedirectorv2.redirect_from_cache of <botocore.utils.S3RegionRedirectorv2 object at 0x7acf591fc0b0>>
-2026-03-27 09:24:38,773 botocore.regions [DEBUG] Calling endpoint provider with parameters: {'Region': 'us-east-1', 'UseFIPS': False, 'UseDualStack': False, 'Endpoint': 'https://dev.host/api/s3minio', 'ForcePathStyle': True, 'Accelerate': False, 'UseGlobalEndpoint': True, 'DisableMultiRegionAccessPoints': False, 'UseArnRegion': True}
-DEBUG:botocore.regions:Calling endpoint provider with parameters: {'Region': 'us-east-1', 'UseFIPS': False, 'UseDualStack': False, 'Endpoint': 'https://dev.host/api/s3minio', 'ForcePathStyle': True, 'Accelerate': False, 'UseGlobalEndpoint': True, 'DisableMultiRegionAccessPoints': False, 'UseArnRegion': True}
-2026-03-27 09:24:38,774 botocore.regions [DEBUG] Endpoint provider result: https://dev.host/api/s3minio
-DEBUG:botocore.regions:Endpoint provider result: https://dev.host/api/s3minio
-2026-03-27 09:24:38,774 botocore.regions [DEBUG] Selecting from endpoint provider's list of auth schemes: "sigv4". User selected auth scheme is: "s3v4"
-DEBUG:botocore.regions:Selecting from endpoint provider's list of auth schemes: "sigv4". User selected auth scheme is: "s3v4"
-2026-03-27 09:24:38,774 botocore.regions [DEBUG] Selected auth type "v4" as "s3v4" with signing context params: {'region': 'us-east-1', 'signing_name': 's3', 'disableDoubleEncoding': True}
-DEBUG:botocore.regions:Selected auth type "v4" as "s3v4" with signing context params: {'region': 'us-east-1', 'signing_name': 's3', 'disableDoubleEncoding': True}
-2026-03-27 09:24:38,774 botocore.hooks [DEBUG] Event before-call.s3.ListBuckets: calling handler <function add_expect_header at 0x7acf592bede0>
-DEBUG:botocore.hooks:Event before-call.s3.ListBuckets: calling handler <function add_expect_header at 0x7acf592bede0>
-2026-03-27 09:24:38,774 botocore.hooks [DEBUG] Event before-call.s3.ListBuckets: calling handler <bound method S3ExpressIdentityResolver.apply_signing_cache_key of <botocore.utils.S3ExpressIdentityResolver object at 0x7acf5911e510>>
-DEBUG:botocore.hooks:Event before-call.s3.ListBuckets: calling handler <bound method S3ExpressIdentityResolver.apply_signing_cache_key of <botocore.utils.S3ExpressIdentityResolver object at 0x7acf5911e510>>
-2026-03-27 09:24:38,774 botocore.hooks [DEBUG] Event before-call.s3.ListBuckets: calling handler <function add_recursion_detection_header at 0x7acf592bd580>
-DEBUG:botocore.hooks:Event before-call.s3.ListBuckets: calling handler <function add_recursion_detection_header at 0x7acf592bd580>
-2026-03-27 09:24:38,774 botocore.hooks [DEBUG] Event before-call.s3.ListBuckets: calling handler <function inject_api_version_header_if_needed at 0x7acf590e8360>
-DEBUG:botocore.hooks:Event before-call.s3.ListBuckets: calling handler <function inject_api_version_header_if_needed at 0x7acf590e8360>
-2026-03-27 09:24:38,774 botocore.endpoint [DEBUG] Making request for OperationModel(name=ListBuckets) with params: {'url_path': '/', 'query_string': {}, 'method': 'GET', 'headers': {'User-Agent': 'Boto3/1.42.76 md/Botocore#1.42.76 ua/2.1 os/linux#6.6.87.2-microsoft-standard-WSL2 md/arch#x86_64 lang/python#3.12.3 md/pyimpl#CPython m/e,N,D,b,Z cfg/retry-mode#legacy Botocore/1.42.76'}, 'body': b'', 'url': 'https://dev.host/api/s3minio', 'context': {'client_region': 'us-east-1', 'client_config': <botocore.config.Config object at 0x7acf5858d970>, 'has_streaming_input': False, 'auth_type': 's3v4', 'unsigned_payload': None, 'auth_options': ['aws.auth#sigv4'], 's3_redirect': {'redirected': False, 'bucket': None, 'params': {}}, 'input_params': {}, 'signing': {'region': 'us-east-1', 'signing_name': 's3', 'disableDoubleEncoding': True}, 'endpoint_properties': {'authSchemes': [{'disableDoubleEncoding': True, 'name': 'sigv4', 'signingName': 's3', 'signingRegion': 'us-east-1'}]}}}
-DEBUG:botocore.endpoint:Making request for OperationModel(name=ListBuckets) with params: {'url_path': '/', 'query_string': {}, 'method': 'GET', 'headers': {'User-Agent': 'Boto3/1.42.76 md/Botocore#1.42.76 ua/2.1 os/linux#6.6.87.2-microsoft-standard-WSL2 md/arch#x86_64 lang/python#3.12.3 md/pyimpl#CPython m/e,N,D,b,Z cfg/retry-mode#legacy Botocore/1.42.76'}, 'body': b'', 'url': 'https://dev.host/api/s3minio', 'context': {'client_region': 'us-east-1', 'client_config': <botocore.config.Config object at 0x7acf5858d970>, 'has_streaming_input': False, 'auth_type': 's3v4', 'unsigned_payload': None, 'auth_options': ['aws.auth#sigv4'], 's3_redirect': {'redirected': False, 'bucket': None, 'params': {}}, 'input_params': {}, 'signing': {'region': 'us-east-1', 'signing_name': 's3', 'disableDoubleEncoding': True}, 'endpoint_properties': {'authSchemes': [{'disableDoubleEncoding': True, 'name': 'sigv4', 'signingName': 's3', 'signingRegion': 'us-east-1'}]}}}
-2026-03-27 09:24:38,774 botocore.hooks [DEBUG] Event request-created.s3.ListBuckets: calling handler <bound method RequestSigner.handler of <botocore.signers.RequestSigner object at 0x7acf5911e240>>
-DEBUG:botocore.hooks:Event request-created.s3.ListBuckets: calling handler <bound method RequestSigner.handler of <botocore.signers.RequestSigner object at 0x7acf5911e240>>
-2026-03-27 09:24:38,774 botocore.hooks [DEBUG] Event choose-signer.s3.ListBuckets: calling handler <function set_operation_specific_signer at 0x7acf592be5c0>
-DEBUG:botocore.hooks:Event choose-signer.s3.ListBuckets: calling handler <function set_operation_specific_signer at 0x7acf592be5c0>
-2026-03-27 09:24:38,774 botocore.hooks [DEBUG] Event choose-signer.s3.ListBuckets: calling handler <function _set_auth_scheme_preference_signer at 0x7acf590e9760>
-DEBUG:botocore.hooks:Event choose-signer.s3.ListBuckets: calling handler <function _set_auth_scheme_preference_signer at 0x7acf590e9760>
-2026-03-27 09:24:38,775 botocore.hooks [DEBUG] Event before-sign.s3.ListBuckets: calling handler <function remove_arn_from_signing_path at 0x7acf590e8fe0>
-DEBUG:botocore.hooks:Event before-sign.s3.ListBuckets: calling handler <function remove_arn_from_signing_path at 0x7acf590e8fe0>
-2026-03-27 09:24:38,775 botocore.hooks [DEBUG] Event before-sign.s3.ListBuckets: calling handler <function _set_extra_headers_for_unsigned_request at 0x7acf590e96c0>
-DEBUG:botocore.hooks:Event before-sign.s3.ListBuckets: calling handler <function _set_extra_headers_for_unsigned_request at 0x7acf590e96c0>
-2026-03-27 09:24:38,775 botocore.hooks [DEBUG] Event before-sign.s3.ListBuckets: calling handler <bound method S3ExpressIdentityResolver.resolve_s3express_identity of <botocore.utils.S3ExpressIdentityResolver object at 0x7acf5911e510>>
-DEBUG:botocore.hooks:Event before-sign.s3.ListBuckets: calling handler <bound method S3ExpressIdentityResolver.resolve_s3express_identity of <botocore.utils.S3ExpressIdentityResolver object at 0x7acf5911e510>>
-2026-03-27 09:24:38,775 botocore.auth [DEBUG] Calculating signature using v4 auth.
-DEBUG:botocore.auth:Calculating signature using v4 auth.
-2026-03-27 09:24:38,775 botocore.auth [DEBUG] CanonicalRequest:
-GET
-/api/s3minio
+import boto3
+from botocore.config import Config
+from urllib.parse import urlsplit, urlunsplit
 
-host:dev.host
-x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca128904b7852b855
-x-amz-date:20260327T062438Z
+# ==============================================================================
+# НАСТРОЙКИ
+# ==============================================================================
 
-host;x-amz-content-sha256;x-amz-date
-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca128904b7852b855
-DEBUG:botocore.auth:CanonicalRequest:
-GET
-/api/s3minio
+MINIO_HOST     = "https://dev.host.ru"   # БЕЗ префикса!
+MINIO_PREFIX   = "/api/s3minio"          # Префикс который nginx срезает
+ACCESS_KEY     = "your-access-key"
+SECRET_KEY     = "your-secret-key"
+BUCKET_NAME    = "your-bucket"
 
-host:dev.host
-x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca128904b7852b855
-x-amz-date:20260327T062438Z
+# ==============================================================================
+# КЛИЕНТ
+# ==============================================================================
 
-host;x-amz-content-sha256;x-amz-date
-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca128904b7852b855
-2026-03-27 09:24:38,775 botocore.auth [DEBUG] StringToSign:
-AWS4-HMAC-SHA256
-20260327T062438Z
-20260327/us-east-1/s3/aws4_request
-bcae593f8972c32478f1d88fb1e9f6ec5532fff62702ccc32a6605e1e54f728c
-DEBUG:botocore.auth:StringToSign:
-AWS4-HMAC-SHA256
-20260327T062438Z
-20260327/us-east-1/s3/aws4_request
-bcae593f8972c32478f1d88fb1e9f6ec5532fff62702ccc32a6605e1e54f728c
-2026-03-27 09:24:38,775 botocore.auth [DEBUG] Signature:
-df29f12a2e6c2f04aff67c7c75f5b64267d8f8a2004b2d06f70526ade1da2b37
-DEBUG:botocore.auth:Signature:
-df29f12a2e6c2f04aff67c7c75f5b64267d8f8a2004b2d06f70526ade1da2b37
-2026-03-27 09:24:38,775 botocore.hooks [DEBUG] Event request-created.s3.ListBuckets: calling handler <bound method UserAgentString.rebuild_and_replace_user_agent_handler of <botocore.useragent.UserAgentString object at 0x7acf585deb40>>
-DEBUG:botocore.hooks:Event request-created.s3.ListBuckets: calling handler <bound method UserAgentString.rebuild_and_replace_user_agent_handler of <botocore.useragent.UserAgentString object at 0x7acf585deb40>>
-2026-03-27 09:24:38,775 botocore.hooks [DEBUG] Event request-created.s3.ListBuckets: calling handler <function add_retry_headers at 0x7acf590e8e00>
-DEBUG:botocore.hooks:Event request-created.s3.ListBuckets: calling handler <function add_retry_headers at 0x7acf590e8e00>
-2026-03-27 09:24:38,775 botocore.endpoint [DEBUG] Sending http request: <AWSPreparedRequest stream_output=False, method=GET, url=https://dev.host/api/s3minio, headers={'User-Agent': b'Boto3/1.42.76 md/Botocore#1.42.76 ua/2.1 os/linux#6.6.87.2-microsoft-standard-WSL2 md/arch#x86_64 lang/python#3.12.3 md/pyimpl#CPython m/e,N,D,b,Z cfg/retry-mode#legacy Botocore/1.42.76', 'X-Amz-Date': b'20260327T444438Z', 'X-Amz-Content-SHA256': b'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca128904b7852b855', 'Authorization': b'AWS4-HMAC-SHA256 Credential=rgWbMnUiYgHxsH4ithkV/20260327/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=df29f12a2e6c2f04aff67c7c75f5b64267d8f8a2004b2d06f70526ade1da2b37', 'amz-sdk-invocation-id': b'61c9fc46-c035-4f90-8716-551c708f3b3c', 'amz-sdk-request': b'attempt=1'}>
-DEBUG:botocore.endpoint:Sending http request: <AWSPreparedRequest stream_output=False, method=GET, url=https://dev.host/api/s3minio, headers={'User-Agent': b'Boto3/1.42.76 md/Botocore#1.42.76 ua/2.1 os/linux#6.6.87.2-microsoft-standard-WSL2 md/arch#x86_64 lang/python#3.12.3 md/pyimpl#CPython m/e,N,D,b,Z cfg/retry-mode#legacy Botocore/1.42.76', 'X-Amz-Date': b'20260327T444438Z', 'X-Amz-Content-SHA256': b'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca128904b7852b855', 'Authorization': b'AWS4-HMAC-SHA256 Credential=rgWbMnUiYgHxsH4ithkV/20260327/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=df29f12a2e6c2f04aff67c7c75f5b64267d8f8a2004b2d06f70526ade1da2b37', 'amz-sdk-invocation-id': b'61c9fc46-c035-4f90-8716-551c708f3b3c', 'amz-sdk-request': b'attempt=1'}>
-2026-03-27 09:24:38,776 botocore.httpsession [DEBUG] Certificate path: /mnt/c/Users/test.user/test/myenv/lib/python3.12/site-packages/certifi/cacert.pem
-DEBUG:botocore.httpsession:Certificate path: /mnt/c/Users/test.user/test/myenv/lib/python3.12/site-packages/certifi/cacert.pem
-DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): dev.host:443
-DEBUG:urllib3.connectionpool:https://dev.host:443 "GET /api/s3minio HTTP/1.1" 403 362
-2026-03-27 09:24:39,015 botocore.hooks [DEBUG] Event before-parse.s3.ListBuckets: calling handler <function _handle_200_error at 0x7acf590e93a0>
-DEBUG:botocore.hooks:Event before-parse.s3.ListBuckets: calling handler <function _handle_200_error at 0x7acf590e93a0>
-2026-03-27 09:24:39,015 botocore.hooks [DEBUG] Event before-parse.s3.ListBuckets: calling handler <function handle_expires_header at 0x7acf590e91c0>
-DEBUG:botocore.hooks:Event before-parse.s3.ListBuckets: calling handler <function handle_expires_header at 0x7acf590e91c0>
-2026-03-27 09:24:39,015 botocore.parsers [DEBUG] Response headers: {'Server': 'nginx', 'Date': 'Fri, 27 Mar 2026 06:24:38 GMT', 'Content-Type': 'application/xml', 'Content-Length': '362', 'Connection': 'keep-alive', 'Accept-Ranges': 'bytes', 'Strict-Transport-Security': 'max-age=15724800; includeSubDomains', 'Vary': 'Origin, Accept-Encoding', 'X-Amz-Id-2': 'dd9025bab4ad464b049177c95eb6ebf374d3b3fd1af9251148b658df7ac2e3e8', 'X-Amz-Request-Id': '18A09EA3AA092E08', 'X-Content-Type-Options': 'nosniff', 'X-Xss-Protection': '1; mode=block', 'X-Request-ID': '80d5145c6d0f99adc5dd60296a8a7c7b'}
-DEBUG:botocore.parsers:Response headers: {'Server': 'nginx', 'Date': 'Fri, 27 Mar 2026 06:24:38 GMT', 'Content-Type': 'application/xml', 'Content-Length': '362', 'Connection': 'keep-alive', 'Accept-Ranges': 'bytes', 'Strict-Transport-Security': 'max-age=15724800; includeSubDomains', 'Vary': 'Origin, Accept-Encoding', 'X-Amz-Id-2': 'dd9025bab4ad464b049177c95eb6ebf374d3b3fd1af9251148b658df7ac2e3e8', 'X-Amz-Request-Id': '18A09EA3AA092E08', 'X-Content-Type-Options': 'nosniff', 'X-Xss-Protection': '1; mode=block', 'X-Request-ID': '80d5145c6d0f99adc5dd60296a8a7c7b'}
-2026-03-27 09:24:39,016 botocore.parsers [DEBUG] Response body:
-b'<?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we calculated does not match the signature you provided. Check your key and signing method.</Message><Resource>/</Resource><RequestId>18A09EA3AA092E08</RequestId><HostId>dd9025bab4ad464b049177c95eb6ebf374d3b3fd1af9251148b658df7ac2e3e8</HostId></Error>'
-DEBUG:botocore.parsers:Response body:
-b'<?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we calculated does not match the signature you provided. Check your key and signing method.</Message><Resource>/</Resource><RequestId>18A09EA3AA092E08</RequestId><HostId>dd9025bab4ad464b049177c95eb6ebf374d3b3fd1af9251148b658df7ac2e3e8</HostId></Error>'
-2026-03-27 09:24:39,017 botocore.hooks [DEBUG] Event needs-retry.s3.ListBuckets: calling handler <function _update_status_code at 0x7acf590e9580>
-DEBUG:botocore.hooks:Event needs-retry.s3.ListBuckets: calling handler <function _update_status_code at 0x7acf590e9580>
-2026-03-27 09:24:39,017 botocore.hooks [DEBUG] Event needs-retry.s3.ListBuckets: calling handler <botocore.retryhandler.RetryHandler object at 0x7acf585df9b0>
-DEBUG:botocore.hooks:Event needs-retry.s3.ListBuckets: calling handler <botocore.retryhandler.RetryHandler object at 0x7acf585df9b0>
-2026-03-27 09:24:39,017 botocore.retryhandler [DEBUG] No retry needed.
-DEBUG:botocore.retryhandler:No retry needed.
-2026-03-27 09:24:39,017 botocore.hooks [DEBUG] Event needs-retry.s3.ListBuckets: calling handler <bound method S3RegionRedirectorv2.redirect_from_error of <botocore.utils.S3RegionRedirectorv2 object at 0x7acf591fc0b0>>
-DEBUG:botocore.hooks:Event needs-retry.s3.ListBuckets: calling handler <bound method S3RegionRedirectorv2.redirect_from_error of <botocore.utils.S3RegionRedirectorv2 object at 0x7acf591fc0b0>>
-Traceback (most recent call last):
-  File "/mnt/c/Users/test.user/test/minio_test.py", line 23, in <module>
-    buckets = s3.list_buckets()
-              ^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/test.user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
-    return self._make_api_call(operation_name, kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/test.user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/test.user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
-    raise error_class(parsed_response, operation_name)
-botocore.exceptions.ClientError: An error occurred (SignatureDoesNotMatch) when calling the ListBuckets operation: The request signature we calculated does not match the signature you provided. Check your key and signing method.
+s3 = boto3.client(
+    "s3",
+    endpoint_url=MINIO_HOST,             # Подпись считается для корневого пути
+    aws_access_key_id=ACCESS_KEY,
+    aws_secret_access_key=SECRET_KEY,
+    region_name="us-east-1",
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "path"},
+    ),
+)
+
+def add_prefix_before_send(request, **kwargs):
+    """После подписания, перед отправкой — добавляем префикс в URL."""
+    parsed = urlsplit(request.url)
+    request.url = urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        MINIO_PREFIX + parsed.path,
+        parsed.query,
+        parsed.fragment,
+    ))
+
+# Регистрируем для всех S3 операций
+s3.meta.events.register("before-send.s3.*", add_prefix_before_send)
+
+# ==============================================================================
+# ПРОВЕРКА
+# ==============================================================================
+
+if __name__ == "__main__":
+    response = s3.list_buckets()
+    print("Подключение успешно!")
+    for bucket in response.get("Buckets", []):
+        print(f"  - {bucket['Name']}")
