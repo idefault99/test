@@ -1,26 +1,30 @@
-[before-send] path before: /
-[before-send] path after:  /api/s3minio/
-[before-send] GET https://dev.host/api/s3minio/
-Подключение успешно!
-  - hotels
-  - interviews
-[before-send] path before: /
-[before-send] path after:  /api/s3minio/
-[before-send] GET https://dev.host/api/s3minio/
-[before-send] path before: /test
-[before-send] path after:  /api/s3minio/test
-[before-send] PUT https://dev.host/api/s3minio/test
-Traceback (most recent call last):
-  File "/mnt/c/Users/user/test/minio_test.py", line 88, in <module>
-    create_bucket_and_upload(
-  File "/mnt/c/Users/user/test/minio_test.py", line 38, in create_bucket_and_upload
-    s3.create_bucket(
-  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
-    return self._make_api_call(operation_name, kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
-    raise error_class(parsed_response, operation_name)
-botocore.exceptions.ClientError: An error occurred (BadRequest) when calling the CreateBucket operation: An error occurred when parsing the HTTP request PUT at '/'
+import requests
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.credentials import Credentials
+
+def create_bucket_raw(bucket: str):
+    """Создать бакет через прямой PUT запрос без тела"""
+    url = f"{MINIO_HOST}/{bucket}"
+    
+    # Подписываем запрос
+    credentials = Credentials(ACCESS_KEY, SECRET_KEY)
+    request = AWSRequest(method="PUT", url=url, data=b"")
+    SigV4Auth(credentials, "s3", "us-east-1").add_auth(request)
+    
+    # Добавляем префикс в URL уже после подписания
+    final_url = f"{MINIO_HOST}{MINIO_PREFIX}/{bucket}"
+    
+    response = requests.put(
+        final_url,
+        headers=dict(request.headers),
+        data=b"",
+        verify=True,
+    )
+    
+    if response.status_code in (200, 204):
+        print(f"Бакет создан: {bucket}")
+    elif response.status_code == 409:
+        print(f"Бакет уже существует: {bucket}")
+    else:
+        print(f"Ошибка {response.status_code}: {response.text}")
