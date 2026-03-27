@@ -1,129 +1,124 @@
+[before-send] GET https://dev.host/api/s3minio/
+Подключение успешно!
+  - hotels
+  - interviews
+[before-send] GET https://dev.host/api/s3minio/
+[before-send] PUT https://dev.host/api/s3minio/test
+Traceback (most recent call last):
+  File "/mnt/c/Users/user/test/minio_test.py", line 74, in <module>
+    create_bucket_and_upload(
+  File "/mnt/c/Users/user/test/minio_test.py", line 38, in create_bucket_and_upload
+    s3.create_bucket(Bucket=bucket)
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (BadRequest) when calling the CreateBucket operation: An error occurred when parsing the HTTP request PUT at '/'
+
+
+[before-send] GET https://dev.host/api/s3minio/
+Подключение успешно!
+  - hotels
+  - interviews
+[before-send] GET https://dev.host/api/s3minio/
+[before-send] PUT https://dev.host/api/s3minio/test
+Traceback (most recent call last):
+  File "/mnt/c/Users/user/test/minio_test.py", line 77, in <module>
+    create_bucket_and_upload(
+  File "/mnt/c/Users/user/test/minio_test.py", line 38, in create_bucket_and_upload
+    s3.create_bucket(
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (BadRequest) when calling the CreateBucket operation: An error occurred when parsing the HTTP request PUT at '/'
+
+import boto3
 import os
-from minio import Minio
-from minio.error import S3Error
-from urllib.parse import urlparse
+from botocore.config import Config
+from urllib.parse import urlsplit, urlunsplit
 
-# ==============================================================================
-# НАСТРОЙКИ
-# ==============================================================================
+MINIO_HOST     = "https://dev.host"   # Хост без префикса
+MINIO_PREFIX   = "/api/s3minio"                         # Префикс
+ACCESS_KEY     = "***"
+SECRET_KEY     = "***"
+# BUCKET_NAME    = "hotels"
 
-# Хост БЕЗ схемы (http/https) — только домен и путь
-# Берётся из адреса MinIO сервера
-MINIO_ENDPOINT = "dev.host.ru/api/s3minio"
-
-# Access Key и Secret Key
-# MinIO Console → Identity → Users → Service Accounts
-ACCESS_KEY = "your-access-key"
-SECRET_KEY = "your-secret-key"
-
-# True если https, False если http
-SECURE = True
-
-# ==============================================================================
-# КЛИЕНТ
-# ==============================================================================
-
-client = Minio(
-    endpoint=MINIO_ENDPOINT,
-    access_key=ACCESS_KEY,
-    secret_key=SECRET_KEY,
-    secure=SECURE,
+s3 = boto3.client(
+    "s3",
+    endpoint_url=MINIO_HOST,             # Создаем клиента и считаем подпись для /
+    aws_access_key_id=ACCESS_KEY,
+    aws_secret_access_key=SECRET_KEY,
+    region_name="us-east-1",
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "path"},
+    ),
 )
 
-# ==============================================================================
-# ФУНКЦИИ
-# ==============================================================================
-
-def list_buckets():
-    """Список всех бакетов"""
-    buckets = client.list_buckets()
-    print("Бакеты:")
-    for bucket in buckets:
-        print(f"  - {bucket.name} (создан: {bucket.creation_date})")
-
-
-def list_objects(bucket: str, prefix: str = ""):
-    """Список объектов в бакете"""
-    objects = client.list_objects(bucket, prefix=prefix, recursive=True)
-    print(f"Объекты в '{bucket}/{prefix}':")
-    for obj in objects:
-        print(f"  {obj.object_name}  ({obj.size} bytes)")
-
-
-def create_bucket(bucket: str):
-    """Создать бакет если не существует"""
-    if client.bucket_exists(bucket):
-        print(f"Бакет уже существует: {bucket}")
-    else:
-        client.make_bucket(bucket)
-        print(f"Бакет создан: {bucket}")
-
-
-def upload_file(local_path: str, bucket: str, object_key: str = None):
-    """Загрузить файл с локального ПК в бакет"""
+def create_bucket_and_upload(bucket: str, local_path: str, object_key: str = None):
+    """
+    Создаёт бакет если не существует, загружает файл с локального ПК.
+    
+    bucket     — имя бакета
+    local_path — путь к файлу на локальном ПК
+    object_key — путь внутри бакета (если None — берётся имя файла)
+    """
     if not os.path.exists(local_path):
         raise FileNotFoundError(f"Файл не найден: {local_path}")
 
+    # Создаём бакет если его нет
+    existing = [b["Name"] for b in s3.list_buckets().get("Buckets", [])]
+    if bucket not in existing:
+        s3.create_bucket(
+            Bucket=bucket,
+            CreateBucketConfiguration={"LocationConstraint": "us-east-1"},
+        )
+        print(f"Бакет создан: {bucket}")
+    else:
+        print(f"Бакет уже существует: {bucket}")
+
+    # Если object_key не указан — берём имя файла
     if object_key is None:
         object_key = os.path.basename(local_path)
 
+    # Загружаем файл
     file_size = os.path.getsize(local_path)
-    print(f"Загружаю: {local_path} ({file_size} bytes) → {bucket}/{object_key}")
+    print(f"Загружаю: {local_path} ({file_size} bytes) → s3://{bucket}/{object_key}")
+    s3.upload_file(local_path, bucket, object_key)
+    print(f"Готово")
 
-    client.fput_object(bucket, object_key, local_path)
-    print("Готово ✅")
+# После подписания, перед отправкой — добавляем префикс в URL
+def add_prefix(request, **kwargs):
+    parsed = urlsplit(request.url)
+    request.url = urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        MINIO_PREFIX + parsed.path,
+        parsed.query,
+        parsed.fragment,
+    ))
+    print(f"[before-send] {request.method} {request.url}")
 
+# Регистрируем для всех S3 операций 
+s3.meta.events.register("before-send.s3.*", add_prefix)
 
-def create_bucket_and_upload(bucket: str, local_path: str, object_key: str = None):
-    """Создать бакет и загрузить файл"""
-    create_bucket(bucket)
-    upload_file(local_path, bucket, object_key)
-
-
-def download_file(bucket: str, object_key: str, local_path: str):
-    """Скачать файл из бакета"""
-    client.fget_object(bucket, object_key, local_path)
-    print(f"Скачано: {bucket}/{object_key} → {local_path}")
-
-
-def delete_object(bucket: str, object_key: str):
-    """Удалить объект"""
-    client.remove_object(bucket, object_key)
-    print(f"Удалено: {bucket}/{object_key}")
-
-
-def generate_presigned_url(bucket: str, object_key: str, expires_seconds: int = 3600) -> str:
-    """Получить временную ссылку на скачивание"""
-    from datetime import timedelta
-    url = client.presigned_get_object(bucket, object_key, expires=timedelta(seconds=expires_seconds))
-    print(f"Presigned URL: {url}")
-    return url
-
-
-# ==============================================================================
-# ТОЧКА ВХОДА
-# ==============================================================================
 
 if __name__ == "__main__":
-    try:
-        # Проверка подключения
-        list_buckets()
-
-        # Создать бакет и загрузить файл
-        create_bucket_and_upload(
-            bucket="test-bucket",
-            local_path="/tmp/test.txt",       # путь к файлу на локальном ПК
-            object_key="uploads/test.txt",    # путь внутри бакета (или None)
-        )
-
-        # Раскомментируй нужное:
-
-        # list_objects("test-bucket")
-        # download_file("test-bucket", "uploads/test.txt", "/tmp/downloaded.txt")
-        # delete_object("test-bucket", "uploads/test.txt")
-        # generate_presigned_url("test-bucket", "uploads/test.txt", expires_seconds=86400)
-
-    except S3Error as e:
-        print(f"S3 ошибка: {e}")
-    except Exception as e:
-        print(f"Ошибка: {e}")
+    response = s3.list_buckets()
+    print("Подключение успешно!")
+    for bucket in response.get("Buckets", []):
+        print(f"  - {bucket['Name']}")
+    create_bucket_and_upload(
+        bucket="test",
+        local_path="./test.txt",
+        object_key="test.txt",
+    )
