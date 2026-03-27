@@ -1,11 +1,129 @@
-def add_prefix_before_send(request, **kwargs):
-    parsed = urlsplit(request.url)
-    new_path = MINIO_PREFIX + parsed.path
-    request.url = urlunsplit((
-        parsed.scheme,
-        parsed.netloc,
-        new_path,
-        parsed.query,
-        parsed.fragment,
-    ))
-    print(f"[before-send] {request.method} {request.url}")  # добавь эту строку
+import os
+from minio import Minio
+from minio.error import S3Error
+from urllib.parse import urlparse
+
+# ==============================================================================
+# НАСТРОЙКИ
+# ==============================================================================
+
+# Хост БЕЗ схемы (http/https) — только домен и путь
+# Берётся из адреса MinIO сервера
+MINIO_ENDPOINT = "dev.host.ru/api/s3minio"
+
+# Access Key и Secret Key
+# MinIO Console → Identity → Users → Service Accounts
+ACCESS_KEY = "your-access-key"
+SECRET_KEY = "your-secret-key"
+
+# True если https, False если http
+SECURE = True
+
+# ==============================================================================
+# КЛИЕНТ
+# ==============================================================================
+
+client = Minio(
+    endpoint=MINIO_ENDPOINT,
+    access_key=ACCESS_KEY,
+    secret_key=SECRET_KEY,
+    secure=SECURE,
+)
+
+# ==============================================================================
+# ФУНКЦИИ
+# ==============================================================================
+
+def list_buckets():
+    """Список всех бакетов"""
+    buckets = client.list_buckets()
+    print("Бакеты:")
+    for bucket in buckets:
+        print(f"  - {bucket.name} (создан: {bucket.creation_date})")
+
+
+def list_objects(bucket: str, prefix: str = ""):
+    """Список объектов в бакете"""
+    objects = client.list_objects(bucket, prefix=prefix, recursive=True)
+    print(f"Объекты в '{bucket}/{prefix}':")
+    for obj in objects:
+        print(f"  {obj.object_name}  ({obj.size} bytes)")
+
+
+def create_bucket(bucket: str):
+    """Создать бакет если не существует"""
+    if client.bucket_exists(bucket):
+        print(f"Бакет уже существует: {bucket}")
+    else:
+        client.make_bucket(bucket)
+        print(f"Бакет создан: {bucket}")
+
+
+def upload_file(local_path: str, bucket: str, object_key: str = None):
+    """Загрузить файл с локального ПК в бакет"""
+    if not os.path.exists(local_path):
+        raise FileNotFoundError(f"Файл не найден: {local_path}")
+
+    if object_key is None:
+        object_key = os.path.basename(local_path)
+
+    file_size = os.path.getsize(local_path)
+    print(f"Загружаю: {local_path} ({file_size} bytes) → {bucket}/{object_key}")
+
+    client.fput_object(bucket, object_key, local_path)
+    print("Готово ✅")
+
+
+def create_bucket_and_upload(bucket: str, local_path: str, object_key: str = None):
+    """Создать бакет и загрузить файл"""
+    create_bucket(bucket)
+    upload_file(local_path, bucket, object_key)
+
+
+def download_file(bucket: str, object_key: str, local_path: str):
+    """Скачать файл из бакета"""
+    client.fget_object(bucket, object_key, local_path)
+    print(f"Скачано: {bucket}/{object_key} → {local_path}")
+
+
+def delete_object(bucket: str, object_key: str):
+    """Удалить объект"""
+    client.remove_object(bucket, object_key)
+    print(f"Удалено: {bucket}/{object_key}")
+
+
+def generate_presigned_url(bucket: str, object_key: str, expires_seconds: int = 3600) -> str:
+    """Получить временную ссылку на скачивание"""
+    from datetime import timedelta
+    url = client.presigned_get_object(bucket, object_key, expires=timedelta(seconds=expires_seconds))
+    print(f"Presigned URL: {url}")
+    return url
+
+
+# ==============================================================================
+# ТОЧКА ВХОДА
+# ==============================================================================
+
+if __name__ == "__main__":
+    try:
+        # Проверка подключения
+        list_buckets()
+
+        # Создать бакет и загрузить файл
+        create_bucket_and_upload(
+            bucket="test-bucket",
+            local_path="/tmp/test.txt",       # путь к файлу на локальном ПК
+            object_key="uploads/test.txt",    # путь внутри бакета (или None)
+        )
+
+        # Раскомментируй нужное:
+
+        # list_objects("test-bucket")
+        # download_file("test-bucket", "uploads/test.txt", "/tmp/downloaded.txt")
+        # delete_object("test-bucket", "uploads/test.txt")
+        # generate_presigned_url("test-bucket", "uploads/test.txt", expires_seconds=86400)
+
+    except S3Error as e:
+        print(f"S3 ошибка: {e}")
+    except Exception as e:
+        print(f"Ошибка: {e}")
