@@ -1,38 +1,17 @@
-import os
-
-def create_bucket_and_upload(bucket: str, local_path: str, object_key: str = None):
-    """
-    Создаёт бакет если не существует, загружает файл с локального ПК.
-    
-    bucket     — имя бакета
-    local_path — путь к файлу на локальном ПК
-    object_key — путь внутри бакета (если None — берётся имя файла)
-    """
-    if not os.path.exists(local_path):
-        raise FileNotFoundError(f"Файл не найден: {local_path}")
-
-    # Создаём бакет если его нет
-    existing = [b["Name"] for b in s3.list_buckets().get("Buckets", [])]
-    if bucket not in existing:
-        s3.create_bucket(Bucket=bucket)
-        print(f"Бакет создан: {bucket}")
-    else:
-        print(f"Бакет уже существует: {bucket}")
-
-    # Если object_key не указан — берём имя файла
-    if object_key is None:
-        object_key = os.path.basename(local_path)
-
-    # Загружаем файл
-    file_size = os.path.getsize(local_path)
-    print(f"Загружаю: {local_path} ({file_size} bytes) → s3://{bucket}/{object_key}")
-    s3.upload_file(local_path, bucket, object_key)
-    print(f"Готово ✅")
-
-
-if __name__ == "__main__":
+Подключение успешно!
+  - buckettest
+  - goods
+Traceback (most recent call last):
+  File "/mnt/c/Users/user/test/minio_test.py", line 74, in <module>
     create_bucket_and_upload(
-        bucket="my-new-bucket",
-        local_path="/home/igor/documents/report.pdf",
-        object_key="reports/report.pdf",  # или None — тогда просто "report.pdf"
-    )
+  File "/mnt/c/Users/user/test/minio_test.py", line 53, in create_bucket_and_upload
+    s3.create_bucket(Bucket=bucket)
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/user/test/myenv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (BadRequest) when calling the CreateBucket operation: An error occurred when parsing the HTTP request PUT at '/'
