@@ -1,42 +1,493 @@
-kind: Ingress
-apiVersion: networking.k8s.io/v1
-metadata:
-  name: trip-dev.code-discovery.ru-ingress-s3minio
-  namespace: trip-dev
-  labels:
-    app.kubernetes.io/managed-by: Helm
-    k8slens-edit-resource-version: v1
-  annotations:
-    meta.helm.sh/release-name: infra
-    meta.helm.sh/release-namespace: trip-dev
-    nginx.ingress.kubernetes.io/proxy-body-size: 500m
-    nginx.ingress.kubernetes.io/proxy-buffer-size: 128k
-    nginx.ingress.kubernetes.io/proxy-buffers: 4 256k
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: 256k
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/use-regex: 'true'
-    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"  # важно для upload
-spec:
-  ingressClassName: nginx
-  tls:
-    - hosts:
-        - trip-dev.code-discovery.ru
-      secretName: trip-dev.code-discovery.ru-tls-secret
-  rules:
-    - host: trip-dev.code-discovery.ru
-      http:
-        paths:
-          - path: /api/s3minio(/|$)(.*)
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: s3minio-api-service
-                port:
-                  number: 9000
-          - path: /s3minio(/|$)(.*)
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: s3minio-console-service
-                port:
-                  number: 9001
+# Создание Python-библиотеки для MinIO
+
+## Структура проекта
+
+```
+minio-client/
+├── minio_client/
+│   ├── __init__.py
+│   └── client.py
+├── tests/
+│   └── test_client.py
+├── pyproject.toml
+├── README.md
+└── .gitignore
+```
+
+Создай структуру:
+
+```bash
+mkdir -p minio-client/minio_client minio-client/tests
+cd minio-client
+```
+
+-----
+
+## 1. Код библиотеки
+
+### `minio_client/client.py`
+
+```python
+import os
+import io
+from urllib.parse import urlsplit, urlunsplit
+from typing import Optional, BinaryIO
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+
+
+class MinioClient:
+    """
+    Клиент для работы с MinIO S3.
+    Автоматически обрабатывает subpath за nginx ingress с rewrite.
+    """
+
+    def __init__(self, host: str, access_key: str, secret_key: str, prefix: str = ""):
+        """
+        host       — хост без префикса, например https://dev.example.com
+        access_key — MinIO Access Key
+        secret_key — MinIO Secret Key
+        prefix     — субпуть если MinIO за nginx rewrite, например /api/s3minio
+        """
+        self._prefix = prefix.rstrip("/")
+
+        self._s3 = boto3.client(
+            "s3",
+            endpoint_url=host,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name="us-east-1",
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+            ),
+        )
+
+        if self._prefix:
+            self._s3.meta.events.register("before-send.s3.*", self._add_prefix)
+
+    def _add_prefix(self, request, **kwargs):
+        """Добавляет prefix в URL после подписания, до отправки."""
+        parsed = urlsplit(request.url)
+        request.url = urlunsplit((
+            parsed.scheme,
+            parsed.netloc,
+            self._prefix + parsed.path,
+            parsed.query,
+            parsed.fragment,
+        ))
+
+    # ------------------------------------------------------------------
+    # Бакеты
+    # ------------------------------------------------------------------
+
+    def list_buckets(self) -> list[str]:
+        """Вернуть список имён всех бакетов."""
+        response = self._s3.list_buckets()
+        return [b["Name"] for b in response.get("Buckets", [])]
+
+    def bucket_exists(self, bucket: str) -> bool:
+        """Проверить существует ли бакет."""
+        try:
+            self._s3.head_bucket(Bucket=bucket)
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+                return False
+            raise
+
+    def create_bucket(self, bucket: str) -> None:
+        """Создать бакет. Если уже существует — ничего не делает."""
+        if not self.bucket_exists(bucket):
+            self._s3.create_bucket(Bucket=bucket)
+
+    def delete_bucket(self, bucket: str, force: bool = False) -> None:
+        """
+        Удалить бакет.
+        force=True — сначала удаляет все объекты внутри.
+        """
+        if force:
+            self.delete_all_objects(bucket)
+        self._s3.delete_bucket(Bucket=bucket)
+
+    # ------------------------------------------------------------------
+    # Объекты
+    # ------------------------------------------------------------------
+
+    def list_objects(self, bucket: str, prefix: str = "") -> list[dict]:
+        """
+        Вернуть список объектов в бакете.
+        Каждый элемент: {"key": str, "size": int, "last_modified": datetime}
+        """
+        paginator = self._s3.get_paginator("list_objects_v2")
+        result = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                result.append({
+                    "key": obj["Key"],
+                    "size": obj["Size"],
+                    "last_modified": obj["LastModified"],
+                })
+        return result
+
+    def upload_file(self, bucket: str, local_path: str, object_key: str = None) -> str:
+        """
+        Загрузить файл с диска в бакет.
+        Если object_key не указан — берётся имя файла.
+        Возвращает object_key.
+        """
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f"Файл не найден: {local_path}")
+        if object_key is None:
+            object_key = os.path.basename(local_path)
+        self._s3.upload_file(local_path, bucket, object_key)
+        return object_key
+
+    def upload_bytes(self, bucket: str, object_key: str, data: bytes,
+                     content_type: str = "application/octet-stream") -> None:
+        """Загрузить bytes-объект без сохранения на диск."""
+        self._s3.upload_fileobj(io.BytesIO(data), bucket, object_key,
+                                ExtraArgs={"ContentType": content_type})
+
+    def download_file(self, bucket: str, object_key: str, local_path: str) -> None:
+        """Скачать объект из бакета на диск."""
+        self._s3.download_file(bucket, object_key, local_path)
+
+    def download_bytes(self, bucket: str, object_key: str) -> bytes:
+        """Скачать объект из бакета в память, вернуть bytes."""
+        buf = io.BytesIO()
+        self._s3.download_fileobj(bucket, object_key, buf)
+        return buf.getvalue()
+
+    def delete_object(self, bucket: str, object_key: str) -> None:
+        """Удалить объект."""
+        self._s3.delete_object(Bucket=bucket, Key=object_key)
+
+    def delete_all_objects(self, bucket: str) -> None:
+        """Удалить все объекты в бакете."""
+        objects = self.list_objects(bucket)
+        if not objects:
+            return
+        self._s3.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": obj["key"]} for obj in objects]},
+        )
+
+    def object_exists(self, bucket: str, object_key: str) -> bool:
+        """Проверить существует ли объект."""
+        try:
+            self._s3.head_object(Bucket=bucket, Key=object_key)
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                return False
+            raise
+
+    def copy_object(self, src_bucket: str, src_key: str,
+                    dst_bucket: str, dst_key: str) -> None:
+        """Скопировать объект между бакетами или внутри одного бакета."""
+        self._s3.copy_object(
+            CopySource={"Bucket": src_bucket, "Key": src_key},
+            Bucket=dst_bucket,
+            Key=dst_key,
+        )
+
+    # ------------------------------------------------------------------
+    # Утилиты
+    # ------------------------------------------------------------------
+
+    def presigned_url(self, bucket: str, object_key: str,
+                      expires_in: int = 3600) -> str:
+        """
+        Получить временную ссылку на скачивание объекта.
+        expires_in — время жизни ссылки в секундах (по умолчанию 1 час).
+        """
+        return self._s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": object_key},
+            ExpiresIn=expires_in,
+        )
+
+    def create_bucket_and_upload(self, bucket: str, local_path: str,
+                                  object_key: str = None) -> str:
+        """
+        Создать бакет если не существует и загрузить файл.
+        Возвращает object_key.
+        """
+        self.create_bucket(bucket)
+        return self.upload_file(bucket, local_path, object_key)
+```
+
+### `minio_client/__init__.py`
+
+```python
+from .client import MinioClient
+
+__all__ = ["MinioClient"]
+```
+
+-----
+
+## 2. Сборка пакета
+
+### `pyproject.toml`
+
+```toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "minio-client"
+version = "0.1.0"
+description = "MinIO S3 client с поддержкой nginx subpath rewrite"
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.28",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["minio_client*"]
+```
+
+-----
+
+## 3. Тесты
+
+### `tests/test_client.py`
+
+```python
+import pytest
+from unittest.mock import patch, MagicMock
+from minio_client import MinioClient
+
+
+@pytest.fixture
+def client():
+    with patch("boto3.client"):
+        return MinioClient(
+            host="https://example.com",
+            access_key="key",
+            secret_key="secret",
+            prefix="/api/s3minio",
+        )
+
+
+def test_list_buckets(client):
+    client._s3.list_buckets.return_value = {
+        "Buckets": [{"Name": "test"}, {"Name": "prod"}]
+    }
+    assert client.list_buckets() == ["test", "prod"]
+
+
+def test_bucket_exists_true(client):
+    client._s3.head_bucket.return_value = {}
+    assert client.bucket_exists("test") is True
+
+
+def test_bucket_exists_false(client):
+    from botocore.exceptions import ClientError
+    client._s3.head_bucket.side_effect = ClientError(
+        {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadBucket"
+    )
+    assert client.bucket_exists("test") is False
+
+
+def test_upload_file_not_found(client):
+    with pytest.raises(FileNotFoundError):
+        client.upload_file("bucket", "/nonexistent/file.txt")
+```
+
+Запуск тестов:
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+-----
+
+## 4. Установка и публикация
+
+### Локальная установка (для разработки)
+
+```bash
+pip install -e .
+```
+
+### Сборка wheel-пакета
+
+```bash
+pip install build
+python -m build
+# создаст dist/minio_client-0.1.0-py3-none-any.whl
+```
+
+### Установка из wheel
+
+```bash
+pip install dist/minio_client-0.1.0-py3-none-any.whl
+```
+
+### Публикация в приватный PyPI (Nexus/Artifactory)
+
+```bash
+pip install twine
+twine upload --repository-url https://nexus.example.com/repository/pypi-hosted/ dist/*
+```
+
+Установка из приватного PyPI:
+
+```bash
+pip install minio-client --index-url https://nexus.example.com/repository/pypi-group/
+```
+
+-----
+
+## 5. `.gitignore`
+
+```
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+```
+
+-----
+
+-----
+
+# Документация для разработчиков
+
+## Установка
+
+```bash
+pip install minio-client
+```
+
+## Быстрый старт
+
+```python
+from minio_client import MinioClient
+
+client = MinioClient(
+    host="https://dev.example.com",
+    access_key="your-access-key",
+    secret_key="your-secret-key",
+    prefix="/api/s3minio",  # если MinIO за nginx с rewrite, иначе не указывать
+)
+```
+
+## Параметры подключения
+
+|Параметр    |Тип|Описание                                                |
+|------------|---|--------------------------------------------------------|
+|`host`      |str|Хост MinIO без префикса, с схемой: `https://example.com`|
+|`access_key`|str|MinIO Access Key                                        |
+|`secret_key`|str|MinIO Secret Key                                        |
+|`prefix`    |str|Субпуть за nginx rewrite. По умолчанию `""`             |
+
+## Методы
+
+### Бакеты
+
+```python
+# Список всех бакетов
+buckets = client.list_buckets()
+# → ["hotels", "goods", "uploads"]
+
+# Проверить существование
+exists = client.bucket_exists("hotels")
+# → True / False
+
+# Создать бакет (если уже есть — ничего не происходит)
+client.create_bucket("new-bucket")
+
+# Удалить бакет
+client.delete_bucket("old-bucket")
+
+# Удалить бакет вместе со всеми файлами внутри
+client.delete_bucket("old-bucket", force=True)
+```
+
+### Загрузка и скачивание
+
+```python
+# Загрузить файл с диска
+client.upload_file("hotels", "/tmp/photo.jpg", "images/photo.jpg")
+
+# Загрузить без указания пути — файл ляжет в корень бакета
+client.upload_file("hotels", "/tmp/photo.jpg")
+# → object_key будет "photo.jpg"
+
+# Загрузить bytes из памяти (например из FastAPI UploadFile)
+client.upload_bytes("hotels", "images/photo.jpg", file_content, content_type="image/jpeg")
+
+# Скачать файл на диск
+client.download_file("hotels", "images/photo.jpg", "/tmp/photo.jpg")
+
+# Скачать в память
+data = client.download_bytes("hotels", "images/photo.jpg")
+# → bytes
+```
+
+### Управление объектами
+
+```python
+# Список объектов в бакете
+objects = client.list_objects("hotels")
+# → [{"key": "images/photo.jpg", "size": 204800, "last_modified": datetime(...)}]
+
+# Список объектов по префиксу (папке)
+objects = client.list_objects("hotels", prefix="images/")
+
+# Проверить существование объекта
+exists = client.object_exists("hotels", "images/photo.jpg")
+
+# Удалить объект
+client.delete_object("hotels", "images/photo.jpg")
+
+# Удалить все объекты в бакете
+client.delete_all_objects("hotels")
+
+# Скопировать объект
+client.copy_object("hotels", "images/photo.jpg", "hotels-backup", "images/photo.jpg")
+```
+
+### Утилиты
+
+```python
+# Временная ссылка на скачивание (по умолчанию 1 час)
+url = client.presigned_url("hotels", "images/photo.jpg")
+url = client.presigned_url("hotels", "images/photo.jpg", expires_in=86400)  # 24 часа
+
+# Создать бакет и загрузить файл одной командой
+client.create_bucket_and_upload("new-bucket", "/tmp/file.txt", "uploads/file.txt")
+```
+
+## Обработка ошибок
+
+```python
+from botocore.exceptions import ClientError
+
+try:
+    client.download_file("hotels", "missing.jpg", "/tmp/out.jpg")
+except ClientError as e:
+    code = e.response["Error"]["Code"]
+    if code == "NoSuchKey":
+        print("Файл не найден")
+    elif code == "NoSuchBucket":
+        print("Бакет не найден")
+    else:
+        raise
+except FileNotFoundError as e:
+    print(f"Локальный файл не найден: {e}")
+```
