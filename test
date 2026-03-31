@@ -1,170 +1,56 @@
-{{ if eq .Values.enableService.elastic.enable true }}
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: {{ .Values.labels.elasticsearch }}-deployment
-  labels:
-    app: {{ .Values.labels.elasticsearch }}
-  namespace: {{ .Release.Namespace }}
-spec:
-  serviceName: {{ .Values.labels.elasticsearch }}-service
-  replicas: {{ .Values.enableService.elastic.replicas }}
-  selector:
-    matchLabels:
-      app: {{ .Values.labels.elasticsearch }}
-  template:
-    metadata:
-      labels:
-        app: {{ .Values.labels.elasticsearch }}
-    spec:
-      containers:
-      - name: {{ .Values.labels.elasticsearch }}
-        image: {{ .Values.images.elasticsearch }}
-        imagePullPolicy: "IfNotPresent"
-        livenessProbe:
-          httpGet:
-            path: /_cat/health
-            port: {{ .Values.ports.internal.elasticsearch.http }}
-          initialDelaySeconds: 60
-          periodSeconds: 20
-          timeoutSeconds: 5
-          failureThreshold: 3
-        ports:
-        - name: http
-          containerPort: {{ .Values.ports.internal.elasticsearch.http }}
-        {{ if eq .Values.enableService.elastic.type "multi-node" }}
-        - name: transport
-          containerPort: {{ .Values.ports.internal.elasticsearch.transport }}
-        {{ end }}
-        env:
-          - name: node.name
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.name
-          - name: ES_JAVA_OPTS
-            valueFrom:
-              configMapKeyRef:
-                name: {{ .Values.labels.elasticsearch }}-config
-                key: ES_JAVA_OPTS
-        volumeMounts:
-          - name: {{ .Values.labels.elasticsearch }}-config
-            mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
-            subPath: elasticsearch.yml
-            readOnly: true
-        resources:
-          limits:
-            cpu: {{ (((((.Values.configPods).elasticsearch).resources).limits).cpu) | default "2000m" }}
-            memory: {{ (((((.Values.configPods).elasticsearch).resources).limits).memory) | default "5000Mi" }}
-          requests:
-            cpu: {{ (((((.Values.configPods).elasticsearch).resources).requests).cpu) | default "100m" }}
-            memory: {{ (((((.Values.configPods).elasticsearch).resources).requests).memory) | default "250Mi" }}
-      imagePullSecrets:
-        - name: {{ .Values.imagePullSecret }}
-      volumes:
-        - name: {{ .Values.labels.elasticsearch }}-config
-          configMap:
-              name: {{ .Values.labels.elasticsearch }}-config
-              items:
-                - key: "elasticsearch.yml"
-                  path: "elasticsearch.yml"
-{{ end }}
----
-{{ if eq .Values.enableService.elastic.enable true }}
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: {{ .Values.labels.elasticsearch }}-cleanup
-  labels:
-    app: {{ .Values.labels.elasticsearch }}
-  namespace: {{ .Release.Namespace }}
-spec:
-  schedule: "*/30 * * * *"
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          containers:
-          - name: {{ .Values.labels.elasticsearch }}-cleanup
-            image: {{ .Values.images.curl }}
-            imagePullPolicy: "IfNotPresent"
-            command:
-            - /bin/sh
-            - -c
-            - |
-              curl -XGET http://$ELASTICSEARCH_HOST/_cat/shards | \
-              grep UNASSIGNED | \
-              awk '{print $1}' | \
-              xargs -I {} curl -XDELETE "http://$ELASTICSEARCH_HOST/{}"
-            env:
-            - name: ELASTICSEARCH_HOST
-              value: "{{ .Values.labels.elasticsearch }}-service:{{ .Values.ports.internal.elasticsearch.http }}"
-          restartPolicy: OnFailure
-          imagePullSecrets:
-            - name: {{ .Values.imagePullSecret }}
-      backoffLimit: 3
-      activeDeadlineSeconds: 1800
-      ttlSecondsAfterFinished: 1800
-  successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 2
-{{ end }}
----
-{{ if eq .Values.enableService.elastic.enable true }}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ .Values.labels.elasticsearch }}-config
-  labels:
-    app: {{ .Values.labels.elasticsearch }}
-  namespace: {{ .Release.Namespace }}
-data:
-  {{ if and (eq .Values.enableService.elastic.type "single-node") (ne (int .Values.enableService.elastic.replicas) 1) }}
-    {{ fail "If type is 'single-node', replicas must be 1" }}
-  {{ end }}
-  ES_JAVA_OPTS: "-Xms4g -Xmx4g"
-  elasticsearch.yml: |
-    discovery.type: {{ .Values.enableService.elastic.type }}
-    cluster.name: {{ .Release.Namespace }}-{{ .Values.labels.elasticsearch }}
-    xpack.security.enabled: false
-    action.destructive_requires_name: false
-    network.host: 0.0.0.0
-    cluster.max_shards_per_node: {{ .Values.elasticConfig.cluster.max_shards_per_node | default 1000 }}
-  {{- if eq .Values.enableService.elastic.type "multi-node" }}
-    {{- if lt (int .Values.enableService.elastic.replicas) 2 }}
-      {{ fail "If type is 'multi-node', replicas must be >= 2" }}
-    {{- end }}
-    transport.host: 0.0.0.0
-    discovery.seed_hosts:
-    {{- range $i := until (int .Values.enableService.elastic.replicas) }}
-    - {{ $.Values.labels.elasticsearch }}-deployment-{{ $i }}.{{ $.Values.labels.elasticsearch }}-service
-    {{- end }}
-    cluster.initial_master_nodes:
-    {{- range $i := until (int .Values.enableService.elastic.replicas) }}
-    - {{ $.Values.labels.elasticsearch }}-deployment-{{ $i }}
-    {{- end }}
-  {{ end }}
-{{ end }}
----
-{{ if eq .Values.enableService.elastic.enable true }}
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: {{ .Values.labels.elasticsearch }}
-  name: {{ .Values.labels.elasticsearch }}-service
-  namespace: {{ .Release.Namespace }}
-spec:
-  type: ClusterIP
-  ports:
-  - name: http
-    port: {{ .Values.ports.internal.elasticsearch.http }}
-    protocol: TCP
-  {{ if eq .Values.enableService.elastic.type "multi-node" }}
-  - name: transport
-    port: {{ .Values.ports.internal.elasticsearch.transport }}
-    protocol: TCP
-  clusterIP: None
-  {{ end }}
-  selector:
-    app: {{ .Values.labels.elasticsearch }}
-{{ end }}
----
+# BACKUP
+.backup:
+  stage: backup
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+    ANSIBLE_STDOUT_CALLBACK: "debug"
+  rules:
+    - if: '$BACKUP_DB == "true"'
+      when: on_success
+    - when: never
+
+.upload:
+  stage: upload
+  rules:
+    - if: '$BACKUP_DB == "true"'
+      when: on_success
+    - when: never
+
+backup-probegi-dev:
+  extends: .backup
+  environment: dev
+  script:
+    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/backup/backup.yml
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - dump-meta/*
+
+upload-probegi-dev:
+  extends: .upload
+  environment: dev
+  image:
+    name: registry.test.model.svo.aero/dpm/iac/infra:s3publisher-1.0.0
+    entrypoint: [ "" ]
+  variables:
+    S3_CONNECTOR: ${S3_HOST_IP}:${S3_API_PORT}
+    S3_BUCKET: ${S3_BUCKET}
+    FOLDER_NAME: ${FOLDER_NAME}
+    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+    S3_SECRET_KEY: ${S3_SECRET_KEY}
+    S3_SECURE: "False"
+    SOURCE_PATH: ./dump
+  needs:
+    - job: backup-probegi-dev
+      artifacts: true
+  script:
+    - chmod 400 "$SSH_PRIVATE_KEY"
+    - mkdir -p dump
+    - DUMP_NAME="$(tr -d '\r\n' < dump-meta/dump_name.txt)"
+    - DUMP_PATH="$(tr -d '\r\n' < dump-meta/dump_path.txt)"
+    - DUMP_HOST="$(tr -d '\r\n' < dump-meta/dump_host.txt)"
+    - DUMP_USER="$(tr -d '\r\n' < dump-meta/dump_user.txt)"
+    - apt-get update && apt-get install -y openssh-client
+    - scp -i "$SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no "${DUMP_USER}@${DUMP_HOST}:${DUMP_PATH}" "./dump/${DUMP_NAME}"
+    - ls -lh ./dump
+    - /app/code/main.bin
