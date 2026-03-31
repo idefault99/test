@@ -1,56 +1,101 @@
-# BACKUP
-.backup:
-  stage: backup
-  variables:
-    ANSIBLE_HOST_KEY_CHECKING: "False"
-    ANSIBLE_STDOUT_CALLBACK: "debug"
-  rules:
-    - if: '$BACKUP_DB == "true"'
-      when: on_success
-    - when: never
+#!/usr/bin/env python3
+"""
+Загружает файлы из SOURCE_PATH в MinIO S3.
 
-.upload:
-  stage: upload
-  rules:
-    - if: '$BACKUP_DB == "true"'
-      when: on_success
-    - when: never
+Переменные окружения:
+  S3_HOST        — хост MinIO, например https://dev.example.com
+  S3_PREFIX      — субпуть за nginx rewrite, например /api/s3minio (опционально)
+  S3_ACCESS_KEY  — MinIO Access Key
+  S3_SECRET_KEY  — MinIO Secret Key
+  S3_BUCKET      — имя бакета
+  FOLDER_NAME    — папка внутри бакета, например backup/postgres
+  SOURCE_PATH    — локальная директория с файлами для загрузки (по умолчанию ./dump)
+"""
 
-backup-probegi-dev:
-  extends: .backup
-  environment: dev
-  script:
-    - ansible-playbook -i infra/ansible/inventory.yml infra/ansible/backup/backup.yml
-  artifacts:
-    expire_in: 1 day
-    paths:
-      - dump-meta/*
+import os
+import sys
+import glob
 
-upload-probegi-dev:
-  extends: .upload
-  environment: dev
-  image:
-    name: registry.test.model.svo.aero/dpm/iac/infra:s3publisher-1.0.0
-    entrypoint: [ "" ]
-  variables:
-    S3_CONNECTOR: ${S3_HOST_IP}:${S3_API_PORT}
-    S3_BUCKET: ${S3_BUCKET}
-    FOLDER_NAME: ${FOLDER_NAME}
-    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-    S3_SECRET_KEY: ${S3_SECRET_KEY}
-    S3_SECURE: "False"
-    SOURCE_PATH: ./dump
-  needs:
-    - job: backup-probegi-dev
-      artifacts: true
-  script:
-    - chmod 400 "$SSH_PRIVATE_KEY"
-    - mkdir -p dump
-    - DUMP_NAME="$(tr -d '\r\n' < dump-meta/dump_name.txt)"
-    - DUMP_PATH="$(tr -d '\r\n' < dump-meta/dump_path.txt)"
-    - DUMP_HOST="$(tr -d '\r\n' < dump-meta/dump_host.txt)"
-    - DUMP_USER="$(tr -d '\r\n' < dump-meta/dump_user.txt)"
-    - apt-get update && apt-get install -y openssh-client
-    - scp -i "$SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no "${DUMP_USER}@${DUMP_HOST}:${DUMP_PATH}" "./dump/${DUMP_NAME}"
-    - ls -lh ./dump
-    - /app/code/main.bin
+from minio_client import MinioClient
+
+# ==============================================================================
+# Конфигурация из переменных окружения
+# ==============================================================================
+
+S3_HOST       = os.environ.get("S3_HOST", "")
+S3_PREFIX     = os.environ.get("S3_PREFIX", "")
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "")
+S3_BUCKET     = os.environ.get("S3_BUCKET", "")
+FOLDER_NAME   = os.environ.get("FOLDER_NAME", "backup").strip("/")
+SOURCE_PATH   = os.environ.get("SOURCE_PATH", "./dump")
+
+# ==============================================================================
+# Валидация
+# ==============================================================================
+
+errors = []
+if not S3_HOST:       errors.append("S3_HOST")
+if not S3_ACCESS_KEY: errors.append("S3_ACCESS_KEY")
+if not S3_SECRET_KEY: errors.append("S3_SECRET_KEY")
+if not S3_BUCKET:     errors.append("S3_BUCKET")
+
+if errors:
+    print(f"[ERROR] Не заданы переменные окружения: {', '.join(errors)}")
+    sys.exit(1)
+
+if not os.path.isdir(SOURCE_PATH):
+    print(f"[ERROR] Директория не найдена: {SOURCE_PATH}")
+    sys.exit(1)
+
+# ==============================================================================
+# Загрузка файлов
+# ==============================================================================
+
+files = glob.glob(os.path.join(SOURCE_PATH, "**", "*"), recursive=True)
+files = [f for f in files if os.path.isfile(f)]
+
+if not files:
+    print(f"[ERROR] В директории {SOURCE_PATH} нет файлов")
+    sys.exit(1)
+
+print(f"Найдено файлов: {len(files)}")
+print(f"Подключаюсь к {S3_HOST} → бакет: {S3_BUCKET}/{FOLDER_NAME}")
+
+client = MinioClient(
+    host=S3_HOST,
+    access_key=S3_ACCESS_KEY,
+    secret_key=S3_SECRET_KEY,
+    prefix=S3_PREFIX,
+)
+s3 = client.get_s3()
+
+# ==============================================================================
+# Загрузка
+# ==============================================================================
+
+success = 0
+failed = 0
+
+for local_path in files:
+    filename = os.path.basename(local_path)
+    object_key = f"{FOLDER_NAME}/{filename}"
+
+    try:
+        size = os.path.getsize(local_path)
+        print(f"  Загружаю: {filename} ({size} bytes) → {S3_BUCKET}/{object_key}")
+        s3.upload_file(local_path, S3_BUCKET, object_key)
+        print(f"  ✅ Готово: {object_key}")
+        success += 1
+    except Exception as e:
+        print(f"  ❌ Ошибка: {filename} — {e}")
+        failed += 1
+
+# ==============================================================================
+# Итог
+# ==============================================================================
+
+print(f"\nЗагружено: {success} | Ошибок: {failed}")
+
+if failed > 0:
+    sys.exit(1)
