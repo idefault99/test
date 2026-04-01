@@ -1,41 +1,42 @@
-FROM registry.test:443/test:base-py-3.11 as base
+FROM python:3.12-slim as base
 
-ENV PYTHONWARNINGS="ignore:Unverified HTTPS request"
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    patchelf \
+    ccache \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY ./dev-requirements.txt /app
-RUN python -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r dev-requirements.txt
-RUN python -m pip install Nuitka==2.1.1 --trusted-host pypi.org --trusted-host files.pythonhosted.org
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir nuitka
 
-# Only for local useage for VSCode
-FROM registry.test:443/test/python_dev_3.11:latest as base_develop
+# Копируем весь пакет — нужен для импортов при компиляции
+COPY minio_client/ ./minio_client/
 
-ARG UID
-ARG GID
-ARG USER_PASSWORD
-ARG USER_NAME
-ARG DEV_FOLDER
+# Компилируем upload.py в самодостаточный бинарник
+RUN python -m nuitka \
+    --onefile \
+    --static-libpython=no \
+    --include-package=minio_client \
+    --include-package=boto3 \
+    --include-package=botocore \
+    --output-dir=/app \
+    minio_client/upload.py
 
-USER ${USER_NAME}
-WORKDIR /home/${USER_NAME}/${DEV_FOLDER}
-COPY --chown=${UID}:${GID} ./dev-requirements.txt .
-RUN pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r dev-requirements.txt
-# End of local useage for VSCode
+# Финальный образ — без Nuitka и компилятора
+FROM python:3.12-slim as production
 
-FROM base as source
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-client \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/code
-COPY src src/
+# Копируем только бинарник
+COPY --from=base /app/upload.bin /usr/local/bin/upload.bin
 
-FROM source as build
+ENTRYPOINT ["/usr/local/bin/upload.bin"]
 
-RUN python -m nuitka --nofollow-imports --static-libpython=no --remove-output --no-pyi-file --output-dir=/app/code/ --jobs=4 \
-    --include-package=src \
-    src/main.py
 
-FROM base as production
-WORKDIR /app/code
-COPY --from=build /app/code/main.bin .
+---
+- /usr/local/bin/upload.bin
