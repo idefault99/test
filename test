@@ -1,5 +1,15 @@
-script:
-  - echo "Рабочая директория: $(pwd)"
-  - ls -la /usr/local/bin/upload.bin || echo "НЕТ"
-  - ls -la /app/ || echo "НЕТ"
-  - find / -name "upload.bin" 2>/dev/null
+# Создай тестовый файл
+mkdir -p ./dump
+echo "test backup content" > ./dump/test.txt
+
+# Запусти контейнер
+docker run --rm \
+  -v $(pwd)/dump:/app/dump \
+  -e S3_HOST="http://your-host:9000" \
+  -e S3_PREFIX="" \
+  -e S3_ACCESS_KEY="your-access-key" \
+  -e S3_SECRET_KEY="your-secret-key" \
+  -e S3_BUCKET="your-bucket" \
+  -e FOLDER_NAME="backup/postgres" \
+  -e SOURCE_PATH="/app/dump" \
+  registry.gitlab.com/your-group/minio-client:s3publisher-v2.0.0
