@@ -1,244 +1,41 @@
-# S3 Publisher — полная инструкция
+FROM registry.test:443/test:base-py-3.11 as base
 
-## Структура репозитория minio-client
+ENV PYTHONWARNINGS="ignore:Unverified HTTPS request"
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
 
-```
-minio-client/                  ← репозиторий библиотеки
-├── minio_client/
-│   ├── __init__.py
-│   ├── client.py
-│   └── upload.py              ← НОВЫЙ ФАЙЛ
-├── tests/
-│   └── test_client.py
-├── Dockerfile                 ← НОВЫЙ ФАЙЛ
-├── requirements.txt           ← НОВЫЙ ФАЙЛ
-├── .gitlab-ci.yml             ← НОВЫЙ ФАЙЛ
-└── pyproject.toml             ← уже есть, не трогаем
-```
+WORKDIR /app
 
------
+COPY ./dev-requirements.txt /app
+RUN python -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r dev-requirements.txt
+RUN python -m pip install Nuitka==2.1.1 --trusted-host pypi.org --trusted-host files.pythonhosted.org
 
-## Файл: `minio_client/upload.py`
+# Only for local useage for VSCode
+FROM registry.test:443/test/python_dev_3.11:latest as base_develop
 
-> Добавить рядом с `client.py`. Скрипт читает переменные окружения,
-> берёт файлы из SOURCE_PATH и загружает их в MinIO.
+ARG UID
+ARG GID
+ARG USER_PASSWORD
+ARG USER_NAME
+ARG DEV_FOLDER
 
-```python
-import os
-import sys
-import glob
+USER ${USER_NAME}
+WORKDIR /home/${USER_NAME}/${DEV_FOLDER}
+COPY --chown=${UID}:${GID} ./dev-requirements.txt .
+RUN pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r dev-requirements.txt
+# End of local useage for VSCode
 
-from minio_client import MinioClient
+FROM base as source
 
+WORKDIR /app/code
+COPY src src/
 
-def main():
-    # Переменные окружения — задаются в джобе GitLab CI
-    S3_HOST       = os.environ.get("S3_HOST", "")
-    S3_PREFIX     = os.environ.get("S3_PREFIX", "")
-    S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "")
-    S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "")
-    S3_BUCKET     = os.environ.get("S3_BUCKET", "")
-    FOLDER_NAME   = os.environ.get("FOLDER_NAME", "backup").strip("/")
-    SOURCE_PATH   = os.environ.get("SOURCE_PATH", "./dump")
+FROM source as build
 
-    # Валидация обязательных переменных
-    errors = []
-    if not S3_HOST:       errors.append("S3_HOST")
-    if not S3_ACCESS_KEY: errors.append("S3_ACCESS_KEY")
-    if not S3_SECRET_KEY: errors.append("S3_SECRET_KEY")
-    if not S3_BUCKET:     errors.append("S3_BUCKET")
+RUN python -m nuitka --nofollow-imports --static-libpython=no --remove-output --no-pyi-file --output-dir=/app/code/ --jobs=4 \
+    --include-package=src \
+    src/main.py
 
-    if errors:
-        print(f"[ERROR] Не заданы переменные окружения: {', '.join(errors)}")
-        sys.exit(1)
-
-    if not os.path.isdir(SOURCE_PATH):
-        print(f"[ERROR] Директория не найдена: {SOURCE_PATH}")
-        sys.exit(1)
-
-    # Собираем список файлов из SOURCE_PATH
-    files = glob.glob(os.path.join(SOURCE_PATH, "**", "*"), recursive=True)
-    files = [f for f in files if os.path.isfile(f)]
-
-    if not files:
-        print(f"[ERROR] В директории {SOURCE_PATH} нет файлов")
-        sys.exit(1)
-
-    print(f"Найдено файлов: {len(files)}")
-    print(f"Подключаюсь к {S3_HOST} → бакет: {S3_BUCKET}/{FOLDER_NAME}")
-
-    # Инициализация клиента из нашей библиотеки
-    client = MinioClient(
-        host=S3_HOST,
-        access_key=S3_ACCESS_KEY,
-        secret_key=S3_SECRET_KEY,
-        prefix=S3_PREFIX,
-    )
-    s3 = client.get_s3()
-
-    # Загрузка файлов
-    success = 0
-    failed = 0
-
-    for local_path in files:
-        filename = os.path.basename(local_path)
-        object_key = f"{FOLDER_NAME}/{filename}"
-
-        try:
-            size = os.path.getsize(local_path)
-            print(f"  Загружаю: {filename} ({size} bytes) → {S3_BUCKET}/{object_key}")
-            s3.upload_file(local_path, S3_BUCKET, object_key)
-            print(f"  ✅ Готово: {object_key}")
-            success += 1
-        except Exception as e:
-            print(f"  ❌ Ошибка: {filename} — {e}")
-            failed += 1
-
-    print(f"\nЗагружено: {success} | Ошибок: {failed}")
-
-    if failed > 0:
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
-```
-
------
-
-## Файл: `Dockerfile`
-
-> Положить в корень репозитория minio-client.
-> Образ ставит библиотеку из Nexus и запускает upload.py.
-
-```dockerfile
-FROM python:3.12-slim
-
-# openssh-client нужен для scp в джобе бэкапа
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssh-client \
-    && rm -rf /var/lib/apt/lists/*
-
-# Копируем и устанавливаем зависимости
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Точка входа — скрипт загрузки
-ENTRYPOINT ["python", "-m", "minio_client.upload"]
-```
-
------
-
-## Файл: `requirements.txt`
-
-> Положить в корень репозитория minio-client рядом с Dockerfile.
-> Заменить nexus.example.com на реальный адрес твоего Nexus.
-
-```
---index-url https://nexus.example.com/repository/pypi-group/
---trusted-host nexus.example.com
-
-minio-client>=0.1.0
-```
-
------
-
-## Файл: `.gitlab-ci.yml`
-
-> Положить в корень репозитория minio-client.
-> Собирает и пушит Docker образ при создании тега.
-> Джобу публикации библиотеки не добавляем — она уже есть.
-
-```yaml
-stages:
-  - docker
-
-build-docker:
-  stage: docker
-  image: docker:24
-  services:
-    - docker:24-dind
-  variables:
-    DOCKER_TLS_CERTDIR: "/certs"
-  script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build -t $CI_REGISTRY_IMAGE:s3publisher-$CI_COMMIT_TAG .
-    - docker push $CI_REGISTRY_IMAGE:s3publisher-$CI_COMMIT_TAG
-  only:
-    - tags
-```
-
-После пуша тега `v2.0.0` образ будет доступен как:
-
-```
-registry.gitlab.com/your-group/minio-client:s3publisher-v2.0.0
-```
-
------
-
-## Файл: джоба в репозитории бэкапа
-
-> Это идёт в `.gitlab-ci.yml` того репозитория где уже живут
-> `backup-probegi-dev` и `upload-probegi-dev`.
-> Меняем только image и последнюю строку script.
-
-```yaml
-upload-probegi-dev:
-  extends: .upload
-  environment: dev
-  image:
-    # Образ из репозитория minio-client — поменяй путь на свой
-    name: registry.gitlab.com/your-group/minio-client:s3publisher-v2.0.0
-    entrypoint: [""]
-  variables:
-    S3_HOST: ${S3_HOST}            # https://dev.example.com
-    S3_PREFIX: ${S3_PREFIX}        # /api/s3minio
-    S3_BUCKET: ${S3_BUCKET}        # имя бакета
-    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-    S3_SECRET_KEY: ${S3_SECRET_KEY}
-    FOLDER_NAME: ${FOLDER_NAME}    # backup/postgres
-    SOURCE_PATH: ./dump
-  needs:
-    - job: backup-probegi-dev
-      artifacts: true
-  script:
-    - chmod 400 "$SSH_PRIVATE_KEY"
-    - mkdir -p dump
-    - DUMP_NAME="$(tr -d '\r\n' < dump-meta/dump_name.txt)"
-    - DUMP_PATH="$(tr -d '\r\n' < dump-meta/dump_path.txt)"
-    - DUMP_HOST="$(tr -d '\r\n' < dump-meta/dump_host.txt)"
-    - DUMP_USER="$(tr -d '\r\n' < dump-meta/dump_user.txt)"
-    - apt-get update && apt-get install -y openssh-client
-    - scp -i "$SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no "${DUMP_USER}@${DUMP_HOST}:${DUMP_PATH}" "./dump/${DUMP_NAME}"
-    - ls -lh ./dump
-    - python -m minio_client.upload  # ← вместо /app/code/main.bin
-```
-
------
-
-## Переменные GitLab CI
-
-> Задать в репозитории бэкапа: Settings → CI/CD → Variables
-
-|Переменная       |Пример                   |Описание                          |
-|-----------------|-------------------------|----------------------------------|
-|`S3_HOST`        |`https://dev.example.com`|Хост MinIO без префикса           |
-|`S3_PREFIX`      |`/api/s3minio`           |Субпуть за nginx rewrite          |
-|`S3_BUCKET`      |`backups`                |Имя бакета                        |
-|`S3_ACCESS_KEY`  |`...`                    |MinIO Access Key                  |
-|`S3_SECRET_KEY`  |`...`                    |MinIO Secret Key (masked)         |
-|`FOLDER_NAME`    |`backup/postgres`        |Папка внутри бакета               |
-|`SSH_PRIVATE_KEY`|`...`                    |Приватный ключ для scp (file type)|
-
------
-
-## Порядок действий
-
-```
-1. Добавить upload.py в minio_client/
-2. Добавить Dockerfile, requirements.txt, .gitlab-ci.yml в корень
-3. Запушить тег в репозиторий minio-client → образ соберётся автоматически
-4. Поменять image в джобе бэкапа на новый образ
-5. Добавить переменные в GitLab CI репозитория бэкапа
-6. Запустить пайплайн бэкапа с BACKUP_DB=true
-```
+FROM base as production
+WORKDIR /app/code
+COPY --from=build /app/code/main.bin .
