@@ -1,40 +1,480 @@
-def rotate_backups(s3, bucket: str, folder: str, keep: int):
-    """Оставить только keep последних файлов в папке бакета."""
-    if keep <= 0:
-        return
+# MinIO Client Library
 
-    paginator = s3.get_paginator("list_objects_v2")
-    objects = []
-    for page in paginator.paginate(Bucket=bucket, Prefix=f"{folder}/"):
-        for obj in page.get("Contents", []):
-            objects.append(obj)
+## Структура проекта
 
-    if len(objects) <= keep:
-        print(f"Файлов в бакете: {len(objects)} — ротация не нужна")
-        return
+```
+minio-client/
+├── minio_client/
+│   ├── __init__.py
+│   └── client.py
+├── tests/
+│   └── test_client.py
+├── pyproject.toml
+├── README.md
+└── .gitignore
+```
 
-    # Сортируем по дате — старые первые
-    objects.sort(key=lambda x: x["LastModified"])
-    to_delete = objects[:len(objects) - keep]
+Создай структуру:
 
-    print(f"Удаляю старых файлов: {len(to_delete)}")
-    s3.delete_objects(
-        Bucket=bucket,
-        Delete={"Objects": [{"Key": obj["Key"]} for obj in to_delete]},
-    )
-    for obj in to_delete:
-        print(f"  Удалён: {obj['Key']}")
+```bash
+mkdir -p minio-client/minio_client minio-client/tests
+cd minio-client
+```
 
----
-KEEP_BACKUPS = int(os.environ.get("KEEP_BACKUPS", "0"))  # 0 = не ограничивать
+-----
 
-# ... после цикла загрузки ...
+## 1. Код библиотеки
 
-if success > 0 and KEEP_BACKUPS > 0:
-    print(f"\nРотация: оставляем последних {KEEP_BACKUPS} файлов")
-    rotate_backups(s3, S3_BUCKET, FOLDER_NAME, KEEP_BACKUPS)
+### `minio_client/client.py`
+
+```python
+import boto3
+from botocore.config import Config
+from urllib.parse import urlsplit, urlunsplit
 
 
----
-variables:
-  KEEP_BACKUPS: "2"  # хранить 2 последних бэкапа
+class MinioClient:
+    """
+    Фабрика настроенного boto3 S3 клиента для MinIO.
+    Инкапсулирует логику подключения и обход nginx subpath rewrite.
+    """
+
+    def __init__(self, host: str, access_key: str, secret_key: str, prefix: str = ""):
+        """
+        host       — хост без префикса, например https://dev.example.com
+        access_key — MinIO Access Key
+        secret_key — MinIO Secret Key
+        prefix     — субпуть если MinIO за nginx rewrite, например /api/s3minio
+        """
+        self._prefix = prefix.rstrip("/")
+
+        self._s3 = boto3.client(
+            "s3",
+            endpoint_url=host,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name="us-east-1",
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+            ),
+        )
+
+        if self._prefix:
+            self._s3.meta.events.register("before-send.s3.*", self._add_prefix)
+
+    def _add_prefix(self, request, **kwargs):
+        """Добавляет prefix в URL после подписания, до отправки. Не трогать."""
+        parsed = urlsplit(request.url)
+        request.url = urlunsplit((
+            parsed.scheme,
+            parsed.netloc,
+            self._prefix + parsed.path,
+            parsed.query,
+            parsed.fragment,
+        ))
+
+    def get_s3(self):
+        """Вернуть настроенный boto3 S3 клиент."""
+        return self._s3
+```
+
+### `minio_client/__init__.py`
+
+```python
+from .client import MinioClient
+
+__all__ = ["MinioClient"]
+```
+
+-----
+
+## 2. Сборка пакета
+
+### `pyproject.toml`
+
+```toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "minio-client"
+version = "0.1.0"
+description = "MinIO S3 client с поддержкой nginx subpath rewrite"
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.28",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["minio_client*"]
+```
+
+-----
+
+## 3. Тесты
+
+### `tests/test_client.py`
+
+```python
+import pytest
+from unittest.mock import patch, MagicMock
+from minio_client import MinioClient
+
+
+@pytest.fixture
+def client():
+    with patch("boto3.client"):
+        return MinioClient(
+            host="https://example.com",
+            access_key="key",
+            secret_key="secret",
+            prefix="/api/s3minio",
+        )
+
+
+def test_get_s3_returns_client(client):
+    """get_s3() должен возвращать boto3 клиент"""
+    s3 = client.get_s3()
+    assert s3 is not None
+
+
+def test_prefix_event_registered(client):
+    """При указании prefix должен быть зарегистрирован before-send handler"""
+    handlers = client._s3.meta.events._emitter._lookup_cache
+    assert client._prefix == "/api/s3minio"
+
+
+def test_no_prefix_no_handler():
+    """Без prefix handler не должен регистрироваться"""
+    with patch("boto3.client"):
+        client = MinioClient(
+            host="https://example.com",
+            access_key="key",
+            secret_key="secret",
+        )
+        assert client._prefix == ""
+
+
+def test_add_prefix_modifies_url(client):
+    """_add_prefix должен корректно добавлять префикс в URL"""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.url = "https://example.com/mybucket/file.txt"
+    client._add_prefix(request)
+    assert request.url == "https://example.com/api/s3minio/mybucket/file.txt"
+```
+
+Запуск тестов:
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+-----
+
+## 4. Установка и публикация
+
+### Локальная установка (для разработки)
+
+```bash
+pip install -e .
+```
+
+### Сборка wheel-пакета
+
+```bash
+pip install build
+python -m build
+# создаст dist/minio_client-0.1.0-py3-none-any.whl
+```
+
+### Установка из wheel
+
+```bash
+pip install dist/minio_client-0.1.0-py3-none-any.whl
+```
+
+### Публикация в приватный PyPI (Nexus/Artifactory)
+
+```bash
+pip install twine
+twine upload --repository-url https://nexus.example.com/repository/pypi-hosted/ dist/*
+```
+
+Установка из приватного PyPI:
+
+```bash
+pip install minio-client --index-url https://nexus.example.com/repository/pypi-group/
+```
+
+-----
+
+## 5. `.gitignore`
+
+```
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+```
+
+-----
+
+-----
+
+# Документация для разработчиков
+
+## Установка
+
+```bash
+pip install minio-client
+```
+
+## Подключение
+
+```python
+from minio_client import MinioClient
+
+client = MinioClient(
+    host="https://dev.example.com",      # хост MinIO
+    access_key="your-access-key",        # MinIO Access Key
+    secret_key="your-secret-key",        # MinIO Secret Key
+    prefix="/api/s3minio",               # указывается командой инфраструктуры
+)
+
+# Получить стандартный boto3 S3 клиент
+s3 = client.get_s3()
+```
+
+После `get_s3()` работаешь с обычным boto3. Вся документация по методам:
+https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html
+
+-----
+
+## Примеры
+
+### Бакеты
+
+```python
+s3 = client.get_s3()
+
+# Список бакетов
+response = s3.list_buckets()
+for bucket in response["Buckets"]:
+    print(bucket["Name"])
+
+# Создать бакет
+s3.create_bucket(Bucket="my-bucket")
+
+# Удалить бакет
+s3.delete_bucket(Bucket="my-bucket")
+```
+
+### Загрузка файлов
+
+```python
+s3 = client.get_s3()
+
+# Загрузить файл с диска
+s3.upload_file("/tmp/photo.jpg", "my-bucket", "images/photo.jpg")
+
+# Загрузить bytes из памяти (например из FastAPI UploadFile)
+import io
+s3.upload_fileobj(io.BytesIO(file_bytes), "my-bucket", "images/photo.jpg",
+                  ExtraArgs={"ContentType": "image/jpeg"})
+```
+
+### Скачивание файлов
+
+```python
+s3 = client.get_s3()
+
+# Скачать файл на диск
+s3.download_file("my-bucket", "images/photo.jpg", "/tmp/photo.jpg")
+
+# Скачать в память
+import io
+buf = io.BytesIO()
+s3.download_fileobj("my-bucket", "images/photo.jpg", buf)
+data = buf.getvalue()  # bytes
+```
+
+### Список объектов
+
+```python
+s3 = client.get_s3()
+
+# Все объекты в бакете
+paginator = s3.get_paginator("list_objects_v2")
+for page in paginator.paginate(Bucket="my-bucket"):
+    for obj in page.get("Contents", []):
+        print(obj["Key"], obj["Size"])
+
+# По префиксу (папке)
+for page in paginator.paginate(Bucket="my-bucket", Prefix="images/"):
+    for obj in page.get("Contents", []):
+        print(obj["Key"])
+```
+
+### Удаление объектов
+
+```python
+s3 = client.get_s3()
+
+# Удалить один объект
+s3.delete_object(Bucket="my-bucket", Key="images/photo.jpg")
+
+# Удалить несколько объектов за один запрос
+s3.delete_objects(
+    Bucket="my-bucket",
+    Delete={
+        "Objects": [
+            {"Key": "images/photo1.jpg"},
+            {"Key": "images/photo2.jpg"},
+        ]
+    },
+)
+```
+
+### Временная ссылка на скачивание
+
+```python
+s3 = client.get_s3()
+
+# Ссылка на 1 час (по умолчанию)
+url = s3.generate_presigned_url(
+    "get_object",
+    Params={"Bucket": "my-bucket", "Key": "images/photo.jpg"},
+    ExpiresIn=3600,
+)
+
+# Ссылка на 24 часа
+url = s3.generate_presigned_url(
+    "get_object",
+    Params={"Bucket": "my-bucket", "Key": "images/photo.jpg"},
+    ExpiresIn=86400,
+)
+```
+
+### Копирование объектов
+
+```python
+s3 = client.get_s3()
+
+s3.copy_object(
+    CopySource={"Bucket": "source-bucket", "Key": "images/photo.jpg"},
+    Bucket="dest-bucket",
+    Key="images/photo.jpg",
+)
+```
+
+-----
+
+## Обработка ошибок
+
+```python
+from botocore.exceptions import ClientError
+
+s3 = client.get_s3()
+
+try:
+    s3.download_file("my-bucket", "missing.jpg", "/tmp/out.jpg")
+except ClientError as e:
+    code = e.response["Error"]["Code"]
+    if code == "NoSuchKey":
+        print("Файл не найден")
+    elif code == "NoSuchBucket":
+        print("Бакет не найден")
+    elif code == "403":
+        print("Нет доступа")
+    else:
+        raise
+except FileNotFoundError as e:
+    print(f"Локальный путь не существует: {e}")
+```
+
+-----
+
+## Загрузка бэкапов в S3 (upload.py)
+
+Библиотека включает готовый скрипт для загрузки файлов в MinIO из CI/CD пайплайна.
+Скрипт читает файлы из указанной директории и загружает их в бакет,
+с опциональной ротацией — удаляет старые файлы оставляя только N последних.
+
+### Запуск через Docker
+
+```bash
+docker run --rm \
+  -v /path/to/dump:/app/dump \
+  -e S3_HOST="https://minio-api.example.com" \
+  -e S3_ACCESS_KEY="your-access-key" \
+  -e S3_SECRET_KEY="your-secret-key" \
+  -e S3_BUCKET="backups" \
+  -e FOLDER_NAME="backup/postgres" \
+  -e SOURCE_PATH="/app/dump" \
+  -e KEEP_BACKUPS="2" \
+  registry.gitlab.com/your-group/minio-client:s3publisher-v2.0.0
+```
+
+### Переменные окружения
+
+|Переменная     |Обязательная|Описание                       |Пример                         |
+|---------------|------------|-------------------------------|-------------------------------|
+|`S3_HOST`      |✅           |Хост MinIO с схемой            |`https://minio-api.example.com`|
+|`S3_ACCESS_KEY`|✅           |MinIO Access Key               |`your-access-key`              |
+|`S3_SECRET_KEY`|✅           |MinIO Secret Key               |`your-secret-key`              |
+|`S3_BUCKET`    |✅           |Имя бакета                     |`backups`                      |
+|`S3_PREFIX`    |❌           |Субпуть за nginx rewrite       |`/api/s3minio`                 |
+|`FOLDER_NAME`  |❌           |Папка внутри бакета            |`backup/postgres`              |
+|`SOURCE_PATH`  |❌           |Локальная директория с файлами |`./dump` (по умолчанию)        |
+|`KEEP_BACKUPS` |❌           |Сколько файлов хранить в бакете|`2` (0 = не ограничивать)      |
+
+### Ротация бэкапов
+
+`KEEP_BACKUPS` — максимальное количество файлов которое остаётся в `FOLDER_NAME` после загрузки.
+Старые файлы удаляются по дате — самые новые остаются.
+
+```
+KEEP_BACKUPS=2 → в бакете всегда будет максимум 2 последних файла
+KEEP_BACKUPS=0 → ротация отключена, файлы не удаляются
+```
+
+### Пример джобы GitLab CI
+
+```yaml
+upload-backup:
+  stage: upload
+  image:
+    name: registry.gitlab.com/your-group/minio-client:s3publisher-v2.0.0
+    entrypoint: [""]
+  variables:
+    S3_HOST: ${S3_HOST}
+    S3_PREFIX: ${S3_PREFIX}
+    S3_BUCKET: ${S3_BUCKET}
+    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+    S3_SECRET_KEY: ${S3_SECRET_KEY}
+    FOLDER_NAME: "backup/postgres"
+    SOURCE_PATH: "./dump"
+    KEEP_BACKUPS: "2"
+  script:
+    - # ... scp дамп в ./dump ...
+    - /usr/local/bin/upload.bin
+```
+
+-----
+
+## Важно
+
+- Не создавай `boto3.client("s3", ...)` вручную — используй только `client.get_s3()`
+- Один экземпляр `MinioClient` на всё приложение (singleton), не создавай новый на каждый запрос
+- Параметры подключения (`host`, `access_key`, `secret_key`, `prefix`) уточняй у команды инфраструктуры
+- `S3_PREFIX` нужен только если MinIO за nginx с rewrite — если MinIO доступен напрямую по хосту, оставь пустым
