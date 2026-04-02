@@ -1,8 +1,273 @@
-У меня есть такой sql запрос, мне нужно подготовить правильные запросы для тестирования
-Команда говорит что запросы на стенде выполняются долго, около 40 секунд, в транзакции из 4 запросов, которые вызываются из кода
-Нужно руками выполнить транзакцию в бд и посмотреть в pg_stat сколько реально выполняется транзакция или запрос, отсортированно, чтобы сразу было видно картину
-Также напиши возможные причины и гле и как проверить
-проанализируй и сделай рабочий вариант чтобы я быстро все смог проверить
-Сделай все в md формате
-SELECT *
-FROM pg_stat_statements join pg_database on (pg_database.oid = pg_stat_statements.dbid)
+# 🔍 PostgreSQL — Диагностика медленной транзакции
+
+> **Сценарий:** транзакция из 4 запросов выполняется ~40 секунд. Цель — локализовать причину.
+
+-----
+
+## 1. Подготовка: убедиться что `pg_stat_statements` включён
+
+```sql
+-- Проверить что расширение активно
+SELECT * FROM pg_extension WHERE extname = 'pg_stat_statements';
+
+-- Если нет — включить (нужен суперюзер + restart PG если нет в shared_preload_libraries)
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- Убедиться что параметр установлен (в postgresql.conf должно быть):
+-- shared_preload_libraries = 'pg_stat_statements'
+SHOW shared_preload_libraries;
+```
+
+-----
+
+## 2. Сброс статистики перед тестом (важно!)
+
+```sql
+-- Сбросить накопленную статистику чтобы не мешала старая
+SELECT pg_stat_statements_reset();
+
+-- Также сбросить статистику таблиц/индексов если нужно
+SELECT pg_stat_reset();
+```
+
+-----
+
+## 3. Ручное выполнение транзакции с замером времени
+
+```sql
+-- Включить вывод времени выполнения каждого запроса
+\timing on
+
+BEGIN;
+
+  -- Вставить сюда все 4 запроса из кода команды
+  -- Например:
+  SELECT 1; -- запрос 1
+  SELECT 1; -- запрос 2
+  SELECT 1; -- запрос 3
+  SELECT 1; -- запрос 4
+
+COMMIT;
+```
+
+> ⚠️ Выполнять на том же стенде и с той же БД, что используется в приложении. Желательно с тем же пользователем.
+
+-----
+
+## 4. Анализ `pg_stat_statements` — отсортировано по времени
+
+### 4.1 Топ запросов по суммарному времени
+
+```sql
+SELECT
+    pss.userid::regrole                          AS role,
+    pd.datname                                   AS database,
+    round(pss.total_exec_time::numeric, 2)       AS total_exec_ms,
+    pss.calls,
+    round((pss.total_exec_time / pss.calls)::numeric, 2) AS avg_exec_ms,
+    round(pss.mean_exec_time::numeric, 2)        AS mean_exec_ms,
+    round(pss.max_exec_time::numeric, 2)         AS max_exec_ms,
+    pss.rows,
+    pss.shared_blks_hit,
+    pss.shared_blks_read,
+    round(
+        (pss.shared_blks_hit::numeric /
+         NULLIF(pss.shared_blks_hit + pss.shared_blks_read, 0) * 100), 2
+    )                                            AS cache_hit_pct,
+    left(pss.query, 200)                         AS query_preview
+FROM pg_stat_statements pss
+JOIN pg_database pd ON pd.oid = pss.dbid
+WHERE pd.datname = current_database()   -- только текущая БД
+  AND pss.calls > 0
+ORDER BY pss.total_exec_time DESC
+LIMIT 20;
+```
+
+### 4.2 Топ запросов по среднему времени (хуже всего в среднем)
+
+```sql
+SELECT
+    round(pss.mean_exec_time::numeric, 2)        AS mean_exec_ms,
+    round(pss.max_exec_time::numeric, 2)         AS max_exec_ms,
+    pss.calls,
+    round(pss.total_exec_time::numeric, 2)       AS total_exec_ms,
+    pss.rows,
+    round(
+        (pss.shared_blks_hit::numeric /
+         NULLIF(pss.shared_blks_hit + pss.shared_blks_read, 0) * 100), 2
+    )                                            AS cache_hit_pct,
+    pss.shared_blks_read                         AS disk_reads,
+    left(pss.query, 300)                         AS query_preview
+FROM pg_stat_statements pss
+JOIN pg_database pd ON pd.oid = pss.dbid
+WHERE pd.datname = current_database()
+  AND pss.calls > 0
+ORDER BY pss.mean_exec_time DESC
+LIMIT 20;
+```
+
+### 4.3 Запросы с высоким I/O (много читают с диска — нет индексов или кэша)
+
+```sql
+SELECT
+    pss.shared_blks_read                         AS disk_reads,
+    pss.shared_blks_hit                          AS cache_hits,
+    round(pss.mean_exec_time::numeric, 2)        AS mean_exec_ms,
+    pss.calls,
+    left(pss.query, 300)                         AS query_preview
+FROM pg_stat_statements pss
+JOIN pg_database pd ON pd.oid = pss.dbid
+WHERE pd.datname = current_database()
+  AND pss.shared_blks_read > 1000
+ORDER BY pss.shared_blks_read DESC
+LIMIT 20;
+```
+
+-----
+
+## 5. Активные сессии и блокировки (выполнять пока транзакция висит)
+
+### 5.1 Текущие активные запросы
+
+```sql
+SELECT
+    pid,
+    now() - pg_stat_activity.query_start AS duration,
+    state,
+    wait_event_type,
+    wait_event,
+    left(query, 200) AS query
+FROM pg_stat_activity
+WHERE state != 'idle'
+  AND query_start IS NOT NULL
+ORDER BY duration DESC;
+```
+
+### 5.2 Блокировки: кто кого блокирует
+
+```sql
+SELECT
+    blocked.pid                             AS blocked_pid,
+    blocked.query                           AS blocked_query,
+    blocking.pid                            AS blocking_pid,
+    blocking.query                          AS blocking_query,
+    blocked.wait_event_type,
+    blocked.wait_event
+FROM pg_stat_activity blocked
+JOIN pg_stat_activity blocking
+    ON blocking.pid = ANY(pg_blocking_pids(blocked.pid))
+WHERE blocked.wait_event_type = 'Lock';
+```
+
+### 5.3 Сессии в состоянии `idle in transaction`
+
+```sql
+SELECT
+    pid,
+    state,
+    now() - xact_start AS open_duration,
+    left(query, 100)   AS last_query
+FROM pg_stat_activity
+WHERE state = 'idle in transaction'
+ORDER BY open_duration DESC;
+```
+
+-----
+
+## 6. EXPLAIN ANALYZE на каждый из 4 запросов
+
+```sql
+-- Выполнять отдельно на каждый запрос из транзакции
+EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+<подставить запрос>;
+```
+
+Что смотреть в выводе:
+
+|Признак в EXPLAIN             |Что это значит                        |
+|------------------------------|--------------------------------------|
+|`Seq Scan` на большой таблице |нет нужного индекса                   |
+|`cost=` очень высокий         |план неоптимален                      |
+|`actual rows` >> `rows`       |устаревшая статистика, нужен `ANALYZE`|
+|`Buffers: read=` большое число|данные читаются с диска, не из кэша   |
+|`Filter:` после `Seq Scan`    |условие не использует индекс          |
+
+-----
+
+## 7. Bloat таблиц — dead tuples
+
+```sql
+SELECT
+    relname,
+    n_dead_tup,
+    n_live_tup,
+    round(n_dead_tup * 100.0 / NULLIF(n_live_tup + n_dead_tup, 0), 2) AS dead_pct,
+    last_autovacuum,
+    last_autoanalyze
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC
+LIMIT 20;
+```
+
+> ⚠️ Если `dead_pct` > 10–20% — таблица раздута, нужен `VACUUM ANALYZE <table_name>;`
+
+-----
+
+## 8. Возможные причины медленных запросов
+
+### 🔴 Блокировки (Lock contention)
+
+- Другая транзакция держит `ROW EXCLUSIVE` или `ACCESS EXCLUSIVE` lock
+- Долгие открытые транзакции без коммита
+- **Где смотреть:** п.5.2 — блокировки
+
+### 🔴 Отсутствие индексов / Seq Scan
+
+- Запрос делает полный перебор большой таблицы
+- **Где смотреть:** `EXPLAIN ANALYZE` — ищи `Seq Scan` на больших таблицах
+
+### 🟡 Устаревшая статистика планировщика
+
+- Планировщик строит неоптимальный план из-за старых данных
+- **Исправление:** `ANALYZE <table_name>;`
+- **Где смотреть:** в `EXPLAIN` разница между `rows=` (оценка) и `actual rows=` (факт)
+
+### 🟡 Низкий cache hit / кэш не прогрет
+
+- Данные постоянно читаются с диска, а не из `shared_buffers`
+- **Где смотреть:** `cache_hit_pct` в п.4.1 — должно быть **> 95%**
+
+### 🟡 Bloat таблиц / много dead tuples
+
+- Таблица разрослась из-за UPDATE/DELETE без autovacuum
+- Планировщик переоценивает объём данных
+- **Где смотреть:** п.7
+
+### 🟡 Сетевые задержки / connection pool
+
+- Код делает 4 запроса последовательно — каждый отдельный round-trip
+- Медленный connection pool или его нет вовсе
+- **Проверка:** замерить время в коде между запросами vs время в БД
+
+### 🟢 Долгий `idle in transaction`
+
+- Транзакция открыта, но приложение не шлёт запросы (GC, I/O, бизнес-логика между запросами)
+- Держит локи на таблицы
+- **Где смотреть:** п.5.3
+
+-----
+
+## 9. Быстрый чеклист диагностики
+
+```
+[ ] 1. pg_stat_statements включён?                              (п.1)
+[ ] 2. Сбросил статистику перед тестом?                         (п.2)
+[ ] 3. Выполнил транзакцию вручную с \timing —
+       какой из 4 запросов самый долгий?                        (п.3)
+[ ] 4. EXPLAIN ANALYZE на каждый запрос — есть Seq Scan?        (п.6)
+[ ] 5. cache_hit_pct > 95%?                                     (п.4.1)
+[ ] 6. Есть активные блокировки во время выполнения?            (п.5.2)
+[ ] 7. dead_pct по таблицам не слишком высокий (>10%)?          (п.7)
+[ ] 8. Есть idle in transaction сессии?                         (п.5.3)
+[ ] 9. Время 40с — в БД или в коде (сеть + логика приложения)?
+```
