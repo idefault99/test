@@ -1,1 +1,9 @@
-free -h && ps aux | grep postgres | grep -v grep | awk '{sum += $6} END {printf "Postgres RSS: %.0f MB\n", sum/1024}'
+-- Проверить настройки на уровне БД и пользователя
+SELECT rolname, rolconfig
+FROM pg_roles
+WHERE rolconfig IS NOT NULL;
+
+-- Проверить настройки на уровне конкретной БД
+SELECT datname, datconfig
+FROM pg_database
+WHERE datconfig IS NOT NULL;
