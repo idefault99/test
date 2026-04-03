@@ -1,2 +1,208 @@
-Если есть только один [deployment] - писать это не нужно, если есть оба файла или только job, тогда писать это, только выровни в одну колонку, как ты выводишь пути
-В директории templates вообще не нужно искать values.yaml (Это же чарт)
+#!/usr/bin/env python3
+"""
+Скрипт для извлечения image path и tag из values.yaml в GitLab-репозитории через API.
+
+Использование:
+    python3 scan_values.py --url https://gitlab.example.com --project-id 123 --token YOUR_TOKEN --branch main
+"""
+
+import argparse
+import re
+import sys
+from urllib.parse import quote as url_quote
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+import json
+
+
+SKIP_DIRS = {"inventory", "templates", ".git", ".gitlab"}
+
+
+def gitlab_api(base_url: str, token: str, endpoint: str):
+    """Выполняет GET-запрос к GitLab API."""
+    url = f"{base_url}/api/v4{endpoint}"
+    req = Request(url, headers={"PRIVATE-TOKEN": token})
+    try:
+        with urlopen(req) as resp:
+            return json.loads(resp.read().decode())
+    except HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def get_tree(base_url: str, token: str, project_id: str, path: str, branch: str) -> list:
+    """Получает список файлов/директорий в указанном пути."""
+    encoded_path = url_quote(path, safe="")
+    endpoint = (
+        f"/projects/{project_id}/repository/tree"
+        f"?path={encoded_path}&ref={branch}&per_page=100"
+    )
+    result = gitlab_api(base_url, token, endpoint)
+    return result if result else []
+
+
+def get_file_raw(base_url: str, token: str, project_id: str, file_path: str, branch: str) -> str | None:
+    """Получает содержимое файла через repository/files/.../raw."""
+    encoded = url_quote(file_path, safe="")
+    url = f"{base_url}/api/v4/projects/{project_id}/repository/files/{encoded}/raw?ref={branch}"
+    req = Request(url, headers={"PRIVATE-TOKEN": token})
+    try:
+        with urlopen(req) as resp:
+            return resp.read().decode()
+    except HTTPError:
+        return None
+
+
+def extract_single_image(content: str) -> tuple[str, str] | None:
+    """Извлекает путь и tag из строки image: registry/path:tag (верхний уровень)."""
+    match = re.search(r'^image:\s*[^/\s]+(/\S+):(\S+)', content, re.MULTILINE)
+    if match:
+        return match.group(1), match.group(2)
+    return None
+
+
+def extract_nested_images(content: str) -> list[tuple[str, str, str]]:
+    """Извлекает вложенные images:\n  name: registry/path:tag
+    Возвращает список (name, path, tag)."""
+    results = []
+    pattern = re.compile(r'^images:\s*\n((?:[ \t]+\S.*\n?)+)', re.MULTILINE)
+    block_match = pattern.search(content)
+    if not block_match:
+        return results
+    block = block_match.group(1)
+    line_pattern = re.compile(r'^\s+(\S+):\s*[^/\s]+(/\S+):(\S+)', re.MULTILINE)
+    for m in line_pattern.finditer(block):
+        results.append((m.group(1), m.group(2), m.group(3)))
+    return results
+
+
+def check_templates(base_url: str, token: str, project_id: str, branch: str,
+                    app_path: str) -> str:
+    """Проверяет наличие deployment.yaml и job.yaml в templates/.
+    Возвращает тег только если есть job (или оба)."""
+    templates_items = get_tree(base_url, token, project_id, f"{app_path}/templates", branch)
+    if not templates_items:
+        return ""
+    files = {item["name"] for item in templates_items if item["type"] == "blob"}
+    has_deploy = "deployment.yaml" in files
+    has_job = "job.yaml" in files
+    if has_deploy and has_job:
+        return "[deployment+job]"
+    if has_job:
+        return "[job]"
+    return ""
+
+
+def process_values(base_url: str, token: str, project_id: str, branch: str,
+                   display_path: str, file_path: str, app_path: str,
+                   results: list):
+    """Читает values.yaml, извлекает image/images, проверяет templates."""
+    content = get_file_raw(base_url, token, project_id, file_path, branch)
+    tpl_tag = check_templates(base_url, token, project_id, branch, app_path)
+
+    if content is None:
+        results.append((display_path, "", "values.yaml не найден", "", tpl_tag))
+        return
+
+    nested = extract_nested_images(content)
+    single = extract_single_image(content)
+
+    if not nested and not single:
+        results.append((display_path, "", "image не найден в values.yaml", "", tpl_tag))
+        return
+
+    if single:
+        results.append((display_path, "", single[0], single[1], tpl_tag))
+
+    for name, path, tag in nested:
+        results.append((display_path, name, path, tag, tpl_tag))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Сканирование values.yaml в GitLab-репозитории")
+    parser.add_argument("--url", required=True, help="URL GitLab (например https://gitlab.example.com)")
+    parser.add_argument("--project-id", required=True, help="ID проекта в GitLab")
+    parser.add_argument("--token", required=True, help="GitLab Private Token")
+    parser.add_argument("--branch", required=True, help="Ветка репозитория")
+    args = parser.parse_args()
+
+    base_url = args.url.rstrip("/")
+    token = args.token
+    project_id = args.project_id
+    branch = args.branch
+
+    results: list[tuple[str, str, str, str, str]] = []
+
+    root_items = get_tree(base_url, token, project_id, "", branch)
+    root_dirs = [item["name"] for item in root_items if item["type"] == "tree"]
+
+    for module in sorted(root_dirs):
+        if module.startswith(".") or module in SKIP_DIRS:
+            continue
+
+        if module == "main":
+            fronts_items = get_tree(base_url, token, project_id, "main/fronts", branch)
+            apps = [item["name"] for item in fronts_items if item["type"] == "tree"]
+            for app in sorted(apps):
+                dp = f"main/fronts/{app}"
+                process_values(base_url, token, project_id, branch,
+                               dp, f"{dp}/values.yaml", dp, results)
+            continue
+
+        module_items = get_tree(base_url, token, project_id, module, branch)
+        module_files = [item["name"] for item in module_items if item["type"] == "blob"]
+        module_dirs = [item["name"] for item in module_items if item["type"] == "tree"]
+
+        if "values.yaml" in module_files:
+            process_values(base_url, token, project_id, branch,
+                           module, f"{module}/values.yaml", module, results)
+
+        for app in sorted(module_dirs):
+            if app in SKIP_DIRS:
+                continue
+            dp = f"{module}/{app}"
+            process_values(base_url, token, project_id, branch,
+                           dp, f"{dp}/values.yaml", dp, results)
+
+    if not results:
+        print("Ничего не найдено.")
+        sys.exit(0)
+
+    # Вычисляем ширину колонок
+    col1 = max(len(r[0]) for r in results)
+    col2 = max((len(f"({r[1]})") for r in results if r[1]), default=0)
+    # Колонка image path / ошибки
+    col3 = max(len(r[2]) for r in results)
+    # Колонка tag
+    col4 = max((len(r[3]) for r in results if r[3]), default=0)
+
+    prev_display = None
+    for display_path, sub_name, image_path, tag, tpl_tag in results:
+        if display_path == prev_display:
+            col1_str = " " * col1
+        else:
+            col1_str = f"{display_path:<{col1}}"
+        prev_display = display_path
+
+        if sub_name:
+            label = f"({sub_name})"
+            col2_str = f"{label:<{col2}}"
+        else:
+            col2_str = " " * col2 if col2 else ""
+
+        spacer2 = "  " if col2 else ""
+
+        if tag:
+            line = f"{col1_str}{spacer2}{col2_str}  —  {image_path:<{col3}}  —  {tag:<{col4}}"
+        else:
+            line = f"{col1_str}{spacer2}{col2_str}  —  {image_path}"
+
+        if tpl_tag:
+            line = f"{line}  {tpl_tag}"
+
+        print(line)
+
+
+if __name__ == "__main__":
+    main()
