@@ -1,3 +1,4 @@
+python3 scan_values.py --url https://gitlab.example.com --project-id 123 --token glpat-xxx --branch main
 #!/usr/bin/env python3
 """
 Скрипт для извлечения image path и tag из values.yaml в GitLab-репозитории через API.
