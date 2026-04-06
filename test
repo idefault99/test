@@ -1,54 +1,14 @@
-Fetching changes with git depth set to 20...
-Reinitialized existing Git repository in /home/gitlab-runner/builds/ErYFhBS4S/0/test/repo/full/bg/bg/.git/
-Checking out 285d8e23 as detached HEAD (ref is devops-689)...
-warning: failed to remove artifacts/report.xml: Permission denied
-warning: failed to remove artifacts/coverage.xml: Permission denied
-Retrying in 5s
-Uploading artifacts for failed job
-00:02
-Uploading artifacts...
-Runtime platform                                    arch=amd64 os=linux pid=2220299 revision=5a021a1c version=18.3.1
-./artifacts/report.xml: found 1 matching artifact files and directories 
-./artifacts/coverage.xml: found 1 matching artifact files and directories 
-Uploading artifacts as "archive" to coordinator... 201 Created  correlation_id=01KNGPX26726M93S01R6D0ZWT3 id=1899352 responseStatus=201 Created token=ewf
-Uploading artifacts...
-Runtime platform                                    arch=amd64 os=linux pid=2220321 revision=5a021a1c version=18.3.1
-./artifacts/report.xml: found 1 matching artifact files and directories 
-Uploading artifacts as "junit" to coordinator... 201 Created  correlation_id=01KNGPX2ZN1M7ZKB7NQ493ER8X id=1899352 responseStatus=201 Created token=ewf
-Uploading artifacts...
-Runtime platform                                    arch=amd64 os=linux pid=2220343 revision=5a021a1c version=18.3.1
-./artifacts/coverage.xml: found 1 matching artifact files and directories 
-Uploading artifacts as "cobertura" to coordinator... 201 Created  correlation_id=01KNGPX3P9JJ1Q7XCZ2ERS88Z8 id=1899352 responseStatus=201 Created token=ewf
-
-.test:
-  extends: .docker_compose_test
-  script:
-    - rm -rf ./artifacts
-    - mkdir -p ./artifacts
-    - chmod 777 ./artifacts
-    - export TAG=$(eval $TAG_SCRIPT)
-    - TEST_EXIT_CODE=0
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test || TEST_EXIT_CODE=$?
-    - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
-    - sed -n '1,120p' ./artifacts/report.xml || true
-    - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
-    - exit $TEST_EXIT_CODE
-  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-  artifacts:
-    when: always
-    paths:
-      - ./artifacts/report.xml
-      - ./artifacts/coverage.xml
-    reports:
-      junit: ./artifacts/report.xml
-      coverage_report:
-        coverage_format: cobertura
-        path: ./artifacts/coverage.xml
-  after_script:
-    - >
-      if [ "$CI_JOB_STATUS" = "failed" ]; then
-        docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} logs
-      fi
-    - export TAG=$(eval $TAG_SCRIPT)
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} down
-    - docker volume prune -f
+script:
+  - rm -rf ./artifacts
+  - mkdir -p ./artifacts
+  - chmod 777 ./artifacts
+  - export TAG=$(eval $TAG_SCRIPT)
+  - TEST_EXIT_CODE=0
+  - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up \
+      --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test \
+      || TEST_EXIT_CODE=$?
+  - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
+  - chmod -R 777 ./artifacts || true   # <-- вот это
+  - sed -n '1,120p' ./artifacts/report.xml || true
+  - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
+  - exit $TEST_EXIT_CODE
