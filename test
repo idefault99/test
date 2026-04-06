@@ -1,85 +1,83 @@
-Running with gitlab-runner 18.3.1 (5a021a1c)
-  on gitlab-runner-1 ErYFhBS4S, system ID: s_fc15dd97ba46
-Preparing the "shell" executor
-00:00
-Using Shell (bash) executor...
-Preparing environment
-00:00
-Running on gitlab-runner-1...
-Getting source from Git repository
-00:02
-$ git config --global http.proxy $HTTP_PROXY; git config --global https.proxy $HTTPS_PROXY
-Gitaly correlation ID: 01KNGX4B6E3JQFB4W0N7X0AJCM
-Fetching changes with git depth set to 20...
-Reinitialized existing Git repository in /home/gitlab-runner/builds/ErYFhBS4S/0/test/dvr/frb/bg/bg/.git/
-Checking out 75299074 as detached HEAD (ref is devops-689)...
+# Фикс Permission Denied для артефактов в GitLab CI
+
+## Проблема
+
+При повторном запуске джобы GitLab Runner не может удалить артефакты предыдущего запуска:
+
+```
 warning: failed to remove artifacts/report.xml: Permission denied
 warning: failed to remove artifacts/coverage.xml: Permission denied
 Retrying in 5s
-Uploading artifacts for failed job
-00:01
-Uploading artifacts...
-Runtime platform                                    arch=amd64 os=linux pid=2253958 revision=5a021a1c version=18.3.1
-WARNING: ./report.xml: no matching files. Ensure that the artifact path is relative to the working directory (/home/gitlab-runner/builds/ErYFhBS4S/0/test/dvr/frb/bg/bg) 
-ERROR: No files to upload                          
-Uploading artifacts...
-Runtime platform                                    arch=amd64 os=linux pid=2253980 revision=5a021a1c version=18.3.1
-WARNING: ./coverage.xml: no matching files. Ensure that the artifact path is relative to the working directory (/home/gitlab-runner/builds/ErYFhBS4S/0/test/dvr/frb/bg/bg) 
-ERROR: No files to upload                          
-Cleaning up project directory and file based variables
-00:00
 ERROR: Job failed: exit status 1
+```
 
-include:
-  - project: 'dpm/iac/infra'
-    ref: develop
-    file: 'cicd/basic.gitlab-ci.yml'
+**Причина:** Docker контейнер пишет файлы от имени `root`, на хосте они тоже принадлежат `root`. GitLab Runner работает от непривилегированного пользователя и не может их удалить при следующем `git checkout`.
 
+-----
 
-variables:
-  RELEASE_NAME: telegram
-  REGISTRY_PATH: tg/telegram
+## Решение
 
+Запускать контейнер от того же uid, что и gitlab-runner. Тогда файлы создаются с правильным владельцем.
 
-build_bin:
-  extends: .buildkit_bin
-  variables:
-    TARGET: production
-    PACKAGE_GROUPS: main,dev,kafka
+### 1. `docker-compose.test.yml` — добавить `user` в сервис `test`
 
+```yaml
+test:
+  image: registry.example/project/image:${TAG}
+  user: "${RUNNER_UID}:${RUNNER_GID}"
+  working_dir: /code/app
+  command: >
+    bash -c "mkdir -p /tmp/pytest_home && HOME=/tmp/pytest_home
+    pytest --junitxml=/code/app/artifacts/report.xml -v
+    --cov --cov-report term
+    --cov-report xml:/code/app/artifacts/coverage.xml"
+  volumes:
+    - ./.env:/code/.env
+    - ./artifacts:/code/app/artifacts
+    # или если монтируются отдельные файлы:
+    # - ./report.xml:/code/app/artifacts/report.xml
+    # - ./coverage.xml:/code/app/artifacts/coverage.xml
+  ...
+```
 
-build_source:
-  extends: .buildkit_source
-  variables:
-    TARGET: source
-    PACKAGE_GROUPS: main,dev,kafka
+> `HOME=/tmp/pytest_home` нужен потому что у uid gitlab-runner может не быть homedir внутри контейнера — без этого pytest иногда падает при попытке записать кэш.
 
+-----
 
+### 2. Проектный `.gitlab-ci.yml` — переопределить `before_script`
+
+```yaml
 .test:
   extends: .docker_compose_test
+  before_script:
+    - export RUNNER_UID=$(id -u)
+    - export RUNNER_GID=$(id -g)
+    - echo $CI_JOB_TOKEN | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - export TAG=$(eval $TAG_SCRIPT)
+    - cat .env.example > .env
+    - docker compose -f docker-compose.test.yml pull
   script:
-    - touch ./report.xml
-    - touch ./coverage.xml
+    - mkdir -p ./artifacts
     - export TAG=$(eval $TAG_SCRIPT)
     - TEST_EXIT_CODE=0
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test || TEST_EXIT_CODE=$?
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up \
+        --remove-orphans --renew-anon-volumes --force-recreate \
+        --exit-code-from test test || TEST_EXIT_CODE=$?
     - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
-    - ls -lah ./ || true
-    - wc -c ./report.xml ./coverage.xml || true
-    - sed -n '1,120p' ./report.xml || true
-    - sed -i 's|" filename="|" filename="src/|g' ./coverage.xml || true
+    - sed -n '1,120p' ./artifacts/report.xml || true
+    - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
     - exit $TEST_EXIT_CODE
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
-    # paths:
-    #   - ./report.xml
-    #   - ./coverage.xml
+    paths:
+      - ./artifacts/report.xml
+      - ./artifacts/coverage.xml
     reports:
-      junit: ./report.xml
+      junit: ./artifacts/report.xml
       coverage_report:
         coverage_format: cobertura
-        path: ./coverage.xml
+        path: ./artifacts/coverage.xml
   after_script:
     - >
       if [ "$CI_JOB_STATUS" = "failed" ]; then
@@ -88,86 +86,25 @@ build_source:
     - export TAG=$(eval $TAG_SCRIPT)
     - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} down
     - docker volume prune -f
+```
 
-test:
-  extends: .test
+-----
 
-linter:
-  extends: .linter
+## Почему не трогаем
 
-version: '3.8'
+|Что                                 |Почему                                                     |
+|------------------------------------|-----------------------------------------------------------|
+|`basic.gitlab-ci.yml` (базовый пайп)|Общий для всех проектов, изменение затронет всех           |
+|GitLab Runner config (`config.toml`)|Инфраструктурное изменение, требует доступа к runner-хосту |
+|`sudoers` / cron на runner-хосте    |Тоже инфраструктура, плюс потенциальная дыра в безопасности|
 
-services:
-  backend:
-    image: registry.test/test/dvr/frb/bg/bg:${TAG}
-    working_dir: /code/app
-    command: bash -c "cd /code/app/ && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --reload"
-    volumes:
-      - ./src/:/code/app/
-      - ./poetry.lock:/code/poetry.lock
-      - ./pyproject.toml:/code/pyproject.toml
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - USE_SCHEDULE_FLIGHT_SERVICE=False
-    healthcheck:
-      test: wget --no-verbose -O /dev/null --tries=1 http://localhost:${APP_PORT}${BASE_API_PREFIX}/healthcheck || exit 1
-      interval: 10s
-      timeout: 5s
-      retries: 5
+-----
 
-  test:
-    image: registry.test/test/dvr/frb/bg/bg:${TAG}
-    working_dir: /code/app
-    command: >
-      bash -c "pytest --junitxml=/code/app/artifacts/report.xml -v --cov --cov-report term --cov-report xml:/code/app/artifacts/coverage.xml"
-    volumes:
-      - ./.env:/code/.env
-      - ./report.xml:/code/app/artifacts/report.xml
-      - ./coverage.xml:/code/app/artifacts/coverage.xml
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-    env_file:
-      - .env
-    links:
-      - backend
+## Применимость
 
-  ruff:
-    image: registry.test/test/dvr/frb/bg/bg:${TAG}
-    working_dir: /code
-    command: bash -c "ruff check . --output-format gitlab > code_quality.json"
-    volumes:
-      - ./code_quality.json:/code/code_quality.json
-      - ./ruff.toml:/code/ruff.toml
-    env_file:
-      - .env
+Решение работает для обоих вариантов монтирования артефактов:
 
-  db:
-    image: registry.test/dpm/iac/infra:postgres-16-alpine
-    environment:
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_DB=${DB_NAME}
-    healthcheck:
-      test: [ "CMD", "pg_isready", "-q", "-d", "${DB_NAME}", "-U", "${DB_USER}" ]
-      interval: 2s
-      timeout: 2s
-      retries: 20
+- **Директория:** `./artifacts:/code/app/artifacts`
+- **Отдельные файлы:** `./report.xml:/code/app/artifacts/report.xml`
 
-  redis:
-    image: registry.test/dpm/iac/infra:redis-7.0.11
-    healthcheck:
-      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+В обоих случаях файлы будут созданы от uid gitlab-runner и успешно удалены при следующем `git checkout`.
