@@ -1,20 +1,18 @@
-в репозитории есть папка testdata, но пайп падает
-test-1  | tests/parsing/test_parsers.py:89: 
-test-1  | _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-test-1  | tests/utils/fixtures/write_result.py:29: in _create
-test-1  |     with path_to_file.open('w') as csvfile:
-test-1  | _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-test-1  | 
-test-1  | self = PosixPath('/code/testdata/result_TelegramTypes.UWS.csv'), mode = 'w'
-test-1  | buffering = -1, encoding = 'locale', errors = None, newline = None
-test-1  | 
-test-1  |     def open(self, mode='r', buffering=-1, encoding=None,
-test-1  |              errors=None, newline=None):
-test-1  |         """
-test-1  |         Open the file pointed by this path and return a file object, as
-test-1  |         the built-in open() function does.
-test-1  |         """
-test-1  |         if "b" not in mode:
-test-1  |             encoding = io.text_encoding(encoding)
-test-1  | >       return io.open(self, mode, buffering, encoding, errors, newline)
-test-1  | E       PermissionError: [Errno 13] Permission denied: '/code/testdata/result_TelegramTypes.UWS.csv'
+Нужно чтобы тэги из этого вывода сравнивались с тэгами которые сейчас в k8s
+У каждого module есть свой ns в кубере, вот пример
+test-dfgr
+test-dfgr-approvals
+test-dfgr-audit
+test-dfgr-fids
+test-dfgr-mailservice
+test-dfgr-notification
+test-dfgr-rms
+test-dfgr-schedule
+test-dfgr-telegram
+test-dfgr-variation
+Проверять нужно только неймспейсы где есть название модуля, например test-dfgr-approvals соответствует модулю approvals
+Но проверйть неймспейс нужно только если в репозитории есть такой модуль
+Один раз сделать describe всех деплойментов в ns с grep image - чтобы получить образы и тэги и сравнивать с найденными app совпадает ли путь и тэг в кубере
+Например в image может быть registry.test/test/sys/test/fox:tag - а в найденном app путь /test/sys/test/fox - значит смотрим какой тэг в кубере и в найденном app
+В новом столбце писать вывод какой тэг в кубере если он не совпал с app
+Сделай это отдельный скриптом, на вход я буду подавать текущую таблицу из первого скрипта, вывод также в файл в текущую директорию
