@@ -1,30 +1,20 @@
-test:
-  image: registry.test/...
-  user: "${RUNNER_UID}:${RUNNER_GID}"
-  working_dir: /code/app
-  environment:
-    - COVERAGE_FILE=/code/app/artifacts/.coverage
-  command: >
-    bash -c "pytest --junitxml=/code/app/artifacts/report.xml -v
-    --cov --cov-report term
-    --cov-report xml:/code/app/artifacts/coverage.xml"
-  volumes:
-    - ./.env:/code/.env
-    - ./artifacts:/code/app/artifacts
-  ...
-
-test:
-  extends: .test
-  allow_failure: true
-  script:
-    - export RUNNER_UID=$(id -u)
-    - export RUNNER_GID=$(id -g)
-    - mkdir -p ./artifacts
-    - export TAG=$(eval $TAG_SCRIPT)
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up \
-        --remove-orphans --renew-anon-volumes --force-recreate \
-        --exit-code-from test test || true
-    - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
-
-sudo find /home/gitlab-runner/builds -name "report.xml" -o -name "coverage.xml" -o -name "artifacts" -type d | xargs sudo chmod -R 777 2>/dev/null || true
-
+в репозитории есть папка testdata, но пайп падает
+test-1  | tests/parsing/test_parsers.py:89: 
+test-1  | _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test-1  | tests/utils/fixtures/write_result.py:29: in _create
+test-1  |     with path_to_file.open('w') as csvfile:
+test-1  | _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test-1  | 
+test-1  | self = PosixPath('/code/testdata/result_TelegramTypes.UWS.csv'), mode = 'w'
+test-1  | buffering = -1, encoding = 'locale', errors = None, newline = None
+test-1  | 
+test-1  |     def open(self, mode='r', buffering=-1, encoding=None,
+test-1  |              errors=None, newline=None):
+test-1  |         """
+test-1  |         Open the file pointed by this path and return a file object, as
+test-1  |         the built-in open() function does.
+test-1  |         """
+test-1  |         if "b" not in mode:
+test-1  |             encoding = io.text_encoding(encoding)
+test-1  | >       return io.open(self, mode, buffering, encoding, errors, newline)
+test-1  | E       PermissionError: [Errno 13] Permission denied: '/code/testdata/result_TelegramTypes.UWS.csv'
