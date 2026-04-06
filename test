@@ -1,14 +1,141 @@
-script:
-  - rm -rf ./artifacts
-  - mkdir -p ./artifacts
-  - chmod 777 ./artifacts
-  - export TAG=$(eval $TAG_SCRIPT)
-  - TEST_EXIT_CODE=0
-  - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up \
-      --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test \
-      || TEST_EXIT_CODE=$?
-  - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
-  - chmod -R 777 ./artifacts || true   # <-- вот это
-  - sed -n '1,120p' ./artifacts/report.xml || true
-  - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
-  - exit $TEST_EXIT_CODE
+version: '3.8'
+
+services:
+  backend:
+    image: fegistry.test/vrm/test/full/bg/bg:${TAG}
+    working_dir: /code/app
+    command: bash -c "cd /code/app/ && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --reload"
+    volumes:
+      - ./src/:/code/app/
+      - ./poetry.lock:/code/poetry.lock
+      - ./pyproject.toml:/code/pyproject.toml
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - USE_SCHEDULE_FLIGHT_SERVICE=False
+    healthcheck:
+      test: wget --no-verbose -O /dev/null --tries=1 http://localhost:${APP_PORT}${BASE_API_PREFIX}/healthcheck || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  test:
+    image: fegistry.test/vrm/test/full/bg/bg:${TAG}
+    working_dir: /code/app
+    command: >
+      bash -c "pytest --junitxml=/code/app/artifacts/report.xml -v --cov --cov-report term --cov-report xml:/code/app/artifacts/coverage.xml"
+    volumes:
+      - ./.env:/code/.env
+      - ./artifacts:/code/app/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    env_file:
+      - .env
+    links:
+      - backend
+
+  ruff:
+    image: fegistry.test/vrm/test/full/bg/bg:${TAG}
+    working_dir: /code
+    command: bash -c "ruff check . --output-format gitlab > code_quality.json"
+    volumes:
+      - ./code_quality.json:/code/code_quality.json
+      - ./ruff.toml:/code/ruff.toml
+    env_file:
+      - .env
+
+  db:
+    image: registry.test/dpm/iac/infra:postgres-16-alpine
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "${DB_NAME}", "-U", "${DB_USER}" ]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  redis:
+    image: registry.test/dpm/iac/infra:redis-7.0.11
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+include:
+  - project: 'dpm/iac/infra'
+    ref: develop
+    file: 'cicd/basic.gitlab-ci.yml'
+
+
+variables:
+  RELEASE_NAME: telegram
+  REGISTRY_PATH: tg/telegram
+
+
+build_bin:
+  extends: .buildkit_bin
+  variables:
+    TARGET: production
+    PACKAGE_GROUPS: main,dev,kafka
+
+
+build_source:
+  extends: .buildkit_source
+  variables:
+    TARGET: source
+    PACKAGE_GROUPS: main,dev,kafka
+
+
+.test:
+  extends: .docker_compose_test
+  script:
+    - rm -rf ./artifacts
+    - mkdir -p ./artifacts
+    - chmod 777 ./artifacts
+    - export TAG=$(eval $TAG_SCRIPT)
+    - TEST_EXIT_CODE=0
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test || TEST_EXIT_CODE=$?
+    - echo "TEST_EXIT_CODE=$TEST_EXIT_CODE"
+    - chmod -R 777 ./artifacts || true
+    - sed -n '1,120p' ./artifacts/report.xml || true
+    - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
+    - exit $TEST_EXIT_CODE
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    paths:
+      - ./artifacts/report.xml
+      - ./artifacts/coverage.xml
+    reports:
+      junit: ./artifacts/report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: ./artifacts/coverage.xml
+  after_script:
+    - >
+      if [ "$CI_JOB_STATUS" = "failed" ]; then
+        docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} logs
+      fi
+    - export TAG=$(eval $TAG_SCRIPT)
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} down
+    - docker volume prune -f
+
+test:
+  extends: .test
+
+
+linter:
+  extends: .linter
