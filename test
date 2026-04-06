@@ -1,46 +1,44 @@
+# compare_tags.py
+
+Сравнение тэгов из `values.yaml` (вывод `scan_values.py`) с тэгами в Kubernetes.
+
+## Установка
+
+```bash
+cat << 'EOF' > compare_tags.py
 #!/usr/bin/env python3
 """
-Скрипт для сравнения тэгов из values.yaml (вывод первого скрипта) с тэгами в Kubernetes.
+Скрипт для сравнения тэгов из values.yaml (вывод scan_values.py) с тэгами в Kubernetes.
 
 Использование:
     python3 compare_tags.py --input output.txt --stand test-dfgr --kubectl-cmd k
-
-На вход: файл с выводом scan_values.py
-На выход: файл compare_result.txt в текущей директории
 """
 
 import argparse
 import subprocess
 import re
 import sys
-from collections import defaultdict
 
 
-def run_cmd(cmd: str) -> tuple[str, str, int]:
-    """Выполняет shell-команду, возвращает (stdout, stderr, returncode)."""
+def run_cmd(cmd):
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
     return result.stdout, result.stderr, result.returncode
 
 
-def get_namespaces(kubectl: str, stand: str) -> list[str]:
-    """Получает список неймспейсов, начинающихся с stand-."""
+def get_namespaces(kubectl, stand):
     stdout, stderr, rc = run_cmd(f"{kubectl} get ns -o name")
     if rc != 0:
         return []
     namespaces = []
     for line in stdout.strip().splitlines():
-        # формат: namespace/test-dfgr-approvals
         ns = line.strip().removeprefix("namespace/")
         if ns.startswith(f"{stand}-") or ns == stand:
             namespaces.append(ns)
     return namespaces
 
 
-def get_images_from_ns(kubectl: str, ns: str) -> list[tuple[str, str]]:
-    """Делает describe всех deployments и jobs в ns, извлекает image path и tag.
-    Возвращает список (image_path, tag) — path без registry."""
+def get_images_from_ns(kubectl, ns):
     images = []
-
     for resource in ["deployments", "jobs"]:
         stdout, stderr, rc = run_cmd(
             f"{kubectl} -n {ns} describe {resource} 2>/dev/null | grep -i 'image:'"
@@ -49,16 +47,13 @@ def get_images_from_ns(kubectl: str, ns: str) -> list[tuple[str, str]]:
             continue
         for line in stdout.strip().splitlines():
             line = line.strip()
-            # формат: Image: registry.test/path/to/app:tag
             match = re.search(r'[Ii]mage:\s*[^/\s]+(/\S+):(\S+)', line)
             if match:
                 images.append((match.group(1), match.group(2)))
     return images
 
 
-def parse_input_file(filepath: str) -> list[dict]:
-    """Парсит вывод первого скрипта.
-    Возвращает список записей с ключами: display_path, sub_name, image_path, tag, tpl_tag, is_error."""
+def parse_input_file(filepath):
     entries = []
     current_display = ""
 
@@ -67,16 +62,6 @@ def parse_input_file(filepath: str) -> list[dict]:
             line = line.rstrip("\n")
             if not line.strip():
                 continue
-
-            # Определяем display_path — если строка начинается с пробелов, берём предыдущий
-            if line[0] != " ":
-                # Новый display_path
-                parts = line.split("  —  ", 1)
-                left = parts[0] if parts else line
-                # left может содержать display_path + (sub_name)
-                left_stripped = left.rstrip()
-            else:
-                left_stripped = line.split("  —  ", 1)[0].rstrip() if "  —  " in line else ""
 
             entry = {
                 "raw": line,
@@ -88,13 +73,10 @@ def parse_input_file(filepath: str) -> list[dict]:
                 "is_error": False,
             }
 
-            # Разбиваем по "  —  "
             segments = line.split("  —  ")
 
-            # Первый сегмент — display_path + возможно (sub_name)
             first = segments[0]
             if first.strip():
-                # Проверяем есть ли (sub_name)
                 sub_match = re.search(r'\((\S+)\)\s*$', first.strip())
                 if sub_match:
                     entry["sub_name"] = sub_match.group(1)
@@ -104,30 +86,24 @@ def parse_input_file(filepath: str) -> list[dict]:
                 else:
                     current_display = first.strip()
             else:
-                # Строка с пробелами — продолжение предыдущего display_path
                 sub_match = re.search(r'\((\S+)\)', first)
                 if sub_match:
                     entry["sub_name"] = sub_match.group(1)
 
             entry["display_path"] = current_display
 
-            # Проверяем ошибки
+            if "не найден" in line:
+                entry["is_error"] = True
+
             if len(segments) >= 2:
-                second = segments[1].strip()
-                if "не найден" in second or "не найден" in line:
-                    entry["is_error"] = True
-                    entry["image_path"] = second
-                else:
-                    entry["image_path"] = second
+                entry["image_path"] = segments[1].strip()
 
             if len(segments) >= 3:
                 third = segments[2].strip()
-                # Может содержать tag + [tpl_tag]
                 tpl_match = re.search(r'\[(.*?)\]', third)
                 if tpl_match:
                     entry["tpl_tag"] = f"[{tpl_match.group(1)}]"
-                    tag_part = third[:third.rfind("[")].strip()
-                    entry["tag"] = tag_part
+                    entry["tag"] = third[:third.rfind("[")].strip()
                 else:
                     entry["tag"] = third
 
@@ -136,13 +112,10 @@ def parse_input_file(filepath: str) -> list[dict]:
     return entries
 
 
-def extract_module(display_path: str) -> str:
-    """Извлекает имя модуля из display_path.
-    module/app -> module
-    module (без app) -> module"""
+def extract_module(display_path):
     parts = display_path.split("/")
     if parts[0] == "main":
-        return ""  # fronts — не обрабатываем
+        return ""
     return parts[0]
 
 
@@ -151,12 +124,11 @@ def main():
     parser.add_argument("--input", required=True, help="Файл с выводом scan_values.py")
     parser.add_argument("--stand", required=True, help="Название стенда (префикс неймспейса)")
     parser.add_argument("--kubectl-cmd", default="k", help="Команда kubectl (по умолчанию: k)")
-    parser.add_argument("--output", default="compare_result.txt", help="Файл для вывода (по умолчанию: compare_result.txt)")
+    parser.add_argument("--output", default="compare_result.txt", help="Файл для вывода")
     args = parser.parse_args()
 
     errors = []
 
-    # Парсим входной файл
     try:
         entries = parse_input_file(args.input)
     except Exception as e:
@@ -167,33 +139,25 @@ def main():
         print("Входной файл пуст.")
         sys.exit(0)
 
-    # Получаем неймспейсы
     namespaces = get_namespaces(args.kubectl_cmd, args.stand)
     if not namespaces:
         errors.append(f"Не удалось получить неймспейсы с префиксом '{args.stand}'")
 
-    # Собираем уникальные модули из entries
     modules = set()
     for e in entries:
         m = extract_module(e["display_path"])
         if m:
             modules.add(m)
 
-    # Маппинг module -> namespace
     module_to_ns = {}
     for m in modules:
         expected_ns = f"{args.stand}-{m}"
         if expected_ns in namespaces:
             module_to_ns[m] = expected_ns
-        elif m == args.stand.split("-")[-1]:
-            # Крайний случай: модуль совпадает с частью стенда
-            if args.stand in namespaces:
-                module_to_ns[m] = args.stand
 
-    # Кэш: namespace -> список (image_path, tag) из k8s
-    ns_images_cache: dict[str, list[tuple[str, str]]] = {}
+    ns_images_cache = {}
 
-    def get_ns_images(ns: str) -> list[tuple[str, str]]:
+    def get_ns_images(ns):
         if ns not in ns_images_cache:
             try:
                 ns_images_cache[ns] = get_images_from_ns(args.kubectl_cmd, ns)
@@ -202,13 +166,11 @@ def main():
                 ns_images_cache[ns] = []
         return ns_images_cache[ns]
 
-    # Обрабатываем каждую запись
-    results = []  # (entry, k8s_status)
+    results = []
 
     for entry in entries:
         module = extract_module(entry["display_path"])
 
-        # Пропускаем main/fronts и ошибки
         if not module or entry["is_error"]:
             results.append((entry, ""))
             continue
@@ -216,8 +178,9 @@ def main():
         ns = module_to_ns.get(module)
         if not ns:
             results.append((entry, "ns не найден"))
-            if f"Неймспейс для модуля '{module}' не найден среди {args.stand}-*" not in [e for e in errors]:
-                errors.append(f"Неймспейс для модуля '{module}' не найден среди {args.stand}-*")
+            err_msg = f"Неймспейс для модуля '{module}' не найден среди {args.stand}-*"
+            if err_msg not in errors:
+                errors.append(err_msg)
             continue
 
         k8s_images = get_ns_images(ns)
@@ -228,13 +191,12 @@ def main():
             results.append((entry, ""))
             continue
 
-        # Ищем совпадение по image path
         found = False
         for k8s_path, k8s_tag in k8s_images:
             if k8s_path == image_path:
                 found = True
                 if k8s_tag == tag:
-                    results.append((entry, ""))  # Совпадает — ничего не пишем
+                    results.append((entry, ""))
                 else:
                     results.append((entry, f"k8s: {k8s_tag}"))
                 break
@@ -242,38 +204,33 @@ def main():
         if not found:
             results.append((entry, "не найден в k8s"))
 
-    # Формируем вывод
-    # Вычисляем ширину новой колонки
-    k8s_col = max((len(r[1]) for r in results if r[1]), default=0)
+    max_raw = max((len(r[0]["raw"]) for r in results), default=0)
 
     output_lines = []
     for entry, k8s_status in results:
         line = entry["raw"]
         if k8s_status:
-            # Выравниваем все строки по длине для новой колонки
-            padding = max(0, 100 - len(line))
+            padding = max(0, max_raw - len(line))
             line = f"{line}{' ' * padding}  —  {k8s_status}"
         output_lines.append(line)
 
-    # Записываем в файл
     try:
         with open(args.output, "w", encoding="utf-8") as f:
             for line in output_lines:
                 f.write(line + "\n")
 
-            # Ошибки в конце
             if errors:
                 f.write("\n" + "=" * 80 + "\n")
                 f.write("ОШИБКИ:\n")
                 f.write("=" * 80 + "\n")
                 for err in errors:
-                    f.write(f"  • {err}\n")
+                    f.write(f"  * {err}\n")
 
         print(f"Результат записан в {args.output}")
         if errors:
             print(f"\nОШИБКИ ({len(errors)}):")
             for err in errors:
-                print(f"  • {err}")
+                print(f"  * {err}")
     except Exception as e:
         print(f"Ошибка записи в файл: {e}", file=sys.stderr)
         sys.exit(1)
@@ -281,11 +238,19 @@ def main():
 
 if __name__ == "__main__":
     main()
+EOF
+chmod +x compare_tags.py
+```
 
+## Использование
 
----
-# Сначала сохраняем вывод первого скрипта
-python3 scan_values.py --url ... --project-id ... --token ... --branch main > scan_output.txt
-
-# Сравниваем с k8s
+```bash
 python3 compare_tags.py --input scan_output.txt --stand test-dfgr --kubectl-cmd k
+```
+
+|Параметр       |Описание                            |По умолчанию        |
+|---------------|------------------------------------|--------------------|
+|`--input`      |Файл с выводом `scan_values.py`     |—                   |
+|`--stand`      |Название стенда (префикс неймспейса)|—                   |
+|`--kubectl-cmd`|Команда kubectl                     |`k`                 |
+|`--output`     |Файл для вывода                     |`compare_result.txt`|
