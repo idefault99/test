@@ -1,22 +1,30 @@
 test:
-  image: registry.test/test/dvr/frb/bg/bg:${TAG}
+  image: registry.test/...
   user: "${RUNNER_UID}:${RUNNER_GID}"
   working_dir: /code/app
   environment:
     - COVERAGE_FILE=/code/app/artifacts/.coverage
   command: >
-    bash -c "pytest --junitxml=/code/app/artifacts/report.xml -v --cov --cov-report term --cov-report xml:/code/app/artifacts/coverage.xml"
+    bash -c "pytest --junitxml=/code/app/artifacts/report.xml -v
+    --cov --cov-report term
+    --cov-report xml:/code/app/artifacts/coverage.xml"
   volumes:
     - ./.env:/code/.env
     - ./artifacts:/code/app/artifacts
-  depends_on:
-    db:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-    backend:
-      condition: service_healthy
-  env_file:
-    - .env
-  links:
-    - backend
+  ...
+
+test:
+  extends: .test
+  allow_failure: true
+  script:
+    - export RUNNER_UID=$(id -u)
+    - export RUNNER_GID=$(id -g)
+    - mkdir -p ./artifacts
+    - export TAG=$(eval $TAG_SCRIPT)
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up \
+        --remove-orphans --renew-anon-volumes --force-recreate \
+        --exit-code-from test test || true
+    - sed -i 's|" filename="|" filename="src/|g' ./artifacts/coverage.xml || true
+
+sudo find /home/gitlab-runner/builds -name "report.xml" -o -name "coverage.xml" -o -name "artifacts" -type d | xargs sudo chmod -R 777 2>/dev/null || true
+
