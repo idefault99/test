@@ -1,3 +1,12 @@
+# Всё из конфига
+./deploy.sh
+
+# Принудительно — заполни в скрипте:
+FORCE_NAMESPACE="test-isua-load-audit"
+FORCE_REGISTRY_PATH="registry.example.com/audit/audit"
+FORCE_TAG="abc123"
+
+
 #!/bin/bash
 # =============================================================
 # deploy.sh — запускается на мастер ноде
