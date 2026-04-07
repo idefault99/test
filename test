@@ -1,21 +1,3 @@
-chmod +x deploy.sh
-
-# Все неймспейсы, тег из релиза
-./deploy.sh
-
-# Один неймспейс, тег из релиза
-./deploy.sh test-isua-load-audit
-
-# Все неймспейсы, свой тег
-./deploy.sh "" abc123
-
-# Один неймспейс, свой тег
-./deploy.sh test-isua-load-audit abc123
-
-# Все неймспейсы, полный override образов
-./deploy.sh "" "" "registry.example.com/audit/audit:abc123.bin" "registry.example.com/audit/audit:abc123.migrations"
-
-
 #!/bin/bash
 # =============================================================
 # deploy.sh — запускается на мастер ноде
@@ -45,24 +27,36 @@ PROJECTS=(
 # "project_id:registry_path"
 OVERRIDE_REGISTRY=(
   # "123:registry.example.com/my-custom/audit"
-  # "456:registry.example.com/my-custom/schedule"
 )
 
 # Глобальный тег для всех проектов (пусто = брать из релиза)
 OVERRIDE_TAG=""
 
 # Переопределить образы полностью для всех проектов
-# Если заданы — OVERRIDE_TAG и OVERRIDE_REGISTRY игнорируются
 OVERRIDE_IMAGE_MAIN=""
 OVERRIDE_IMAGE_MIGRATIONS=""
 
 # =============================================================
+# --- Принудительный деплой ---
+# Заполни нужные поля, остальные оставь пустыми
+# =============================================================
+
+# Деплоить ТОЛЬКО в этот неймспейс (пусто = все)
+FORCE_NAMESPACE=""
+
+# Принудительный registry path (пусто = из PROJECTS)
+FORCE_REGISTRY_PATH=""
+
+# Принудительный тег (пусто = из релиза)
+FORCE_TAG=""
+
+# =============================================================
 
 # --- Аргументы CLI (перезаписывают конфиг выше) ---
-# $1 — фильтр по неймспейсу (пусто = все)
-# $2 — переопределить тег
-# $3 — переопределить image main
-# $4 — переопределить image migrations
+# $1 — фильтр по неймспейсу
+# $2 — тег
+# $3 — image main
+# $4 — image migrations
 FILTER_NAMESPACE="${1:-}"
 [[ -n "${2:-}" ]] && OVERRIDE_TAG="$2"
 [[ -n "${3:-}" ]] && OVERRIDE_IMAGE_MAIN="$3"
@@ -94,16 +88,22 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m'
 
-# --- Инфо о переопределениях ---
+# --- Инфо о конфигурации ---
 echo ""
 echo "=== Конфигурация деплоя ==="
-echo "Фильтр namespace:   ${FILTER_NAMESPACE:-все}"
-echo "Override tag:       ${OVERRIDE_TAG:-из релиза}"
-echo "Override image main:        ${OVERRIDE_IMAGE_MAIN:-нет}"
-echo "Override image migrations:  ${OVERRIDE_IMAGE_MIGRATIONS:-нет}"
+echo "Фильтр namespace:          ${FILTER_NAMESPACE:-все}"
+echo "Override tag:              ${OVERRIDE_TAG:-из релиза}"
+echo "Override image main:       ${OVERRIDE_IMAGE_MAIN:-нет}"
+echo "Override image migrations: ${OVERRIDE_IMAGE_MIGRATIONS:-нет}"
+echo "--- Принудительный деплой ---"
+echo "Force namespace:           ${FORCE_NAMESPACE:-нет}"
+echo "Force registry path:       ${FORCE_REGISTRY_PATH:-нет}"
+echo "Force tag:                 ${FORCE_TAG:-нет}"
 echo "==========================="
+echo ""
 
 # --- Результаты ---
 DEPLOYED=()
@@ -264,8 +264,16 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
       continue
     fi
 
-    # --- Фильтр по неймспейсу ---
-    if [[ -n "$FILTER_NAMESPACE" && "$NAMESPACE" != "$FILTER_NAMESPACE" ]]; then
+    # --- Принудительный деплой — фильтр по FORCE_NAMESPACE ---
+    if [[ -n "$FORCE_NAMESPACE" ]]; then
+      if [[ "$NAMESPACE" != "$FORCE_NAMESPACE" ]]; then
+        echo -e "  ${YELLOW}Пропускаем: $NAMESPACE (не совпадает с FORCE_NAMESPACE)${NC}"
+        SKIPPED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Не совпадает с FORCE_NAMESPACE")
+        continue
+      fi
+      echo -e "  ${MAGENTA}ПРИНУДИТЕЛЬНЫЙ деплой → $FORCE_NAMESPACE${NC}"
+    # --- Обычный фильтр ---
+    elif [[ -n "$FILTER_NAMESPACE" && "$NAMESPACE" != "$FILTER_NAMESPACE" ]]; then
       echo -e "  ${YELLOW}Пропускаем namespace: $NAMESPACE${NC}"
       SKIPPED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Не входит в фильтр")
       continue
@@ -292,14 +300,18 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
     if [[ -z "$RELEASE_EXISTS" ]]; then
       echo -e "  ${YELLOW}Релиз не найден — устанавливаем новый (helm install)${NC}"
       HELM_CMD="install"
-      CURRENT_TAG="${OVERRIDE_TAG:-}"
+      CURRENT_TAG="${FORCE_TAG:-${OVERRIDE_TAG:-}}"
     else
       echo -e "  ${GREEN}Релиз найден — обновляем (helm upgrade)${NC}"
       HELM_CMD="upgrade"
 
-      if [[ -n "$OVERRIDE_TAG" ]]; then
+      # Приоритет тега: FORCE_TAG > OVERRIDE_TAG > из релиза
+      if [[ -n "$FORCE_TAG" ]]; then
+        CURRENT_TAG="$FORCE_TAG"
+        echo -e "    Тег принудительный: ${MAGENTA}${CURRENT_TAG}${NC}"
+      elif [[ -n "$OVERRIDE_TAG" ]]; then
         CURRENT_TAG="$OVERRIDE_TAG"
-        echo -e "    Тег переопределён: ${CURRENT_TAG}"
+        echo -e "    Тег переопределён: ${YELLOW}${CURRENT_TAG}${NC}"
       else
         CURRENT_TAG=$(get_current_tag "$RELEASE_NAME" "$NAMESPACE")
         if [[ -z "$CURRENT_TAG" ]]; then
@@ -309,6 +321,12 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
           echo -e "    Тег из релиза: ${CURRENT_TAG}"
         fi
       fi
+    fi
+
+    # --- Определяем эффективный registry ---
+    EFFECTIVE_REGISTRY="${FORCE_REGISTRY_PATH:-$REGISTRY_PATH}"
+    if [[ -n "$FORCE_REGISTRY_PATH" ]]; then
+      echo -e "    Registry принудительный: ${MAGENTA}${EFFECTIVE_REGISTRY}${NC}"
     fi
 
     # --- Формируем image flags ---
@@ -321,9 +339,8 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
       IMAGE_FLAGS="--set images.main=${IMAGE_MAIN} --set images.migrations=${IMAGE_MIGRATIONS}"
       DISPLAY_TAG="custom"
     elif [[ -n "$CURRENT_TAG" ]]; then
-      # Registry + тег
-      IMAGE_MAIN="${REGISTRY_PATH}:${CURRENT_TAG}.bin"
-      IMAGE_MIGRATIONS="${REGISTRY_PATH}:${CURRENT_TAG}.migrations"
+      IMAGE_MAIN="${EFFECTIVE_REGISTRY}:${CURRENT_TAG}.bin"
+      IMAGE_MIGRATIONS="${EFFECTIVE_REGISTRY}:${CURRENT_TAG}.migrations"
       echo -e "    Image main:       ${IMAGE_MAIN}"
       echo -e "    Image migrations: ${IMAGE_MIGRATIONS}"
       IMAGE_FLAGS="--set images.main=${IMAGE_MAIN} --set images.migrations=${IMAGE_MIGRATIONS}"
