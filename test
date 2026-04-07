@@ -1,151 +1,49 @@
-#!/bin/bash
-# =============================================================
-# Helm Release — Export & Redeploy
-# Совместим с MicroK8s
-# =============================================================
-set -euo pipefail
+include:
+  - project: 'dpm/iac/infra'
+    ref: develop
+    file: 'cicd/basic.gitlab-ci.yml'
 
-# --- Определяем команды для microk8s ---
-if command -v microk8s.helm3 &>/dev/null; then
-  HELM="microk8s.helm3"
-  KUBECTL="microk8s.kubectl"
-elif command -v microk8s &>/dev/null; then
-  helm() { microk8s helm "$@"; }
-  kubectl() { microk8s kubectl "$@"; }
-  export -f helm kubectl
-  HELM="helm"
-  KUBECTL="kubectl"
-elif command -v helm &>/dev/null; then
-  HELM="helm"
-  KUBECTL="kubectl"
-else
-  echo "ERROR: helm не найден"
-  exit 1
-fi
+variables:
+  RELEASE_NAME: audit
+  REGISTRY_PATH: audit/audit
+  KUBECONFIG: $KUBE_CONF_2
 
-echo "Используем: $HELM / $KUBECTL"
+build_bin:
+  extends: .buildkit_bin
+  variables:
+    TARGET: production
+    PACKAGE_GROUPS: main,dev,test
 
-# --- Параметры ---
-NAMESPACE="${1:-}"
-RELEASE="${2:-}"
-BACKUP_DIR="./helm-backup-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$BACKUP_DIR"
+build_source:
+  extends: .buildkit_source
+  variables:
+    TARGET: source
+    PACKAGE_GROUPS: main,dev,test
 
-# --- Найти namespace если не передан ---
-if [[ -z "$NAMESPACE" ]]; then
-  echo ""
-  echo "Доступные неймспейсы с helm релизами:"
-  $HELM list -A 2>/dev/null
-  echo ""
-  read -rp "Введи namespace: " NAMESPACE
-fi
+build_migrations:
+  extends: .buildkit_migrations
 
-# --- Найти релиз если не передан ---
-if [[ -z "$RELEASE" ]]; then
-  RELEASES=$($HELM list -n "$NAMESPACE" -q)
-  COUNT=$(echo "$RELEASES" | grep -c . || true)
+linter:
+  extends: .linter
 
-  if [[ "$COUNT" -eq 0 ]]; then
-    echo "ERROR: релизов в namespace '$NAMESPACE' не найдено"
-    exit 1
-  elif [[ "$COUNT" -eq 1 ]]; then
-    RELEASE="$RELEASES"
-    echo "Найден единственный релиз: $RELEASE"
-  else
-    echo "Релизы в namespace '$NAMESPACE':"
-    echo "$RELEASES"
-    read -rp "Введи имя релиза: " RELEASE
-  fi
-fi
+.test:
+  script:
+    - touch ./report.xml
+    - touch ./coverage.xml
+    - export TAG=$(eval $TAG_SCRIPT)
+    - |
+      docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up -d --renew-anon-volumes --force-recreate --remove-orphans \
+        redis \
+        db \
+        backend
+    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test
 
-echo ""
-echo "=== Экспорт релиза: $RELEASE / namespace: $NAMESPACE ==="
+test:
+  extends: .test
 
-# --- Получаем info через helm list -o json (без metadata) ---
-echo ">>> Info"
-RELEASE_JSON=$($HELM list -n "$NAMESPACE" -o json | jq '.[] | select(.name=="'"$RELEASE"'")')
-echo "$RELEASE_JSON" | tee "$BACKUP_DIR/info.json"
-
-CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
-CHART_NAME=$(echo "$CHART_FULL" | sed 's/-[0-9][0-9.]*$//')
-CHART_VERSION=$(echo "$CHART_FULL" | grep -oP '[0-9]+\.[0-9]+\.[0-9.]+[^"]*$')
-CURRENT_REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
-
-echo ""
-echo ">>> Values"
-$HELM get values "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/values.yaml"
-
-echo ""
-echo ">>> Manifest"
-$HELM get manifest "$RELEASE" -n "$NAMESPACE" > "$BACKUP_DIR/manifest.yaml"
-echo "Сохранён: $BACKUP_DIR/manifest.yaml"
-
-echo ""
-echo ">>> История"
-$HELM history "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/history.txt"
-
-echo ""
-echo "=== Итого ==="
-echo "Chart:    $CHART_NAME"
-echo "Version:  $CHART_VERSION"
-echo "Revision: $CURRENT_REVISION"
-echo "Backup:   $BACKUP_DIR/"
-
-# --- Репозиторий ---
-echo ""
-echo ">>> Доступные helm репозитории:"
-$HELM repo list 2>/dev/null || echo "Репозитории не добавлены"
-
-echo ""
-echo "=========================================="
-echo "Что делаем?"
-echo "  1) helm upgrade --reuse-values (быстро, те же values)"
-echo "  2) helm upgrade -f values.yaml  (из сохранённого файла)"
-echo "  3) helm rollback               (откат на предыдущую ревизию)"
-echo "  4) kubectl apply -f manifest   (без helm, аварийный вариант)"
-echo "  5) Выйти"
-echo "=========================================="
-read -rp "Выбор [1-5]: " ACTION
-
-case "$ACTION" in
-  1)
-    echo ">>> Upgrade --reuse-values"
-    $HELM upgrade "$RELEASE" "$CHART_NAME" \
-      -n "$NAMESPACE" \
-      --reuse-values \
-      --version "$CHART_VERSION"
-    ;;
-  2)
-    echo ">>> Upgrade -f values.yaml"
-    read -rp "Укажи путь к чарту или repo/chart [${CHART_NAME}]: " CHART_INPUT
-    CHART_INPUT="${CHART_INPUT:-$CHART_NAME}"
-    $HELM upgrade "$RELEASE" "$CHART_INPUT" \
-      -n "$NAMESPACE" \
-      -f "$BACKUP_DIR/values.yaml" \
-      --version "$CHART_VERSION"
-    ;;
-  3)
-    PREV_REVISION=$(( CURRENT_REVISION - 1 ))
-    echo ">>> Rollback"
-    read -rp "Ревизия для отката [$PREV_REVISION]: " REV_INPUT
-    REV_INPUT="${REV_INPUT:-$PREV_REVISION}"
-    $HELM rollback "$RELEASE" "$REV_INPUT" -n "$NAMESPACE"
-    ;;
-  4)
-    echo ">>> kubectl apply -f manifest.yaml"
-    $KUBECTL apply -f "$BACKUP_DIR/manifest.yaml" -n "$NAMESPACE"
-    ;;
-  5)
-    echo "Выход. Бэкап сохранён в $BACKUP_DIR/"
-    exit 0
-    ;;
-  *)
-    echo "Неверный выбор"
-    exit 1
-    ;;
-esac
-
-echo ""
-echo "=== Проверка после деплоя ==="
-$HELM status "$RELEASE" -n "$NAMESPACE"
-$KUBECTL get pods -n "$NAMESPACE"
+.deploy:
+  script:
+    - |
+      helm upgrade --kubeconfig $KUBECONFIG -i -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
+        --set "images.main=${CI_REGISTRY_IMAGE}:${TAG}.bin" \
+        --set "images.migrations=${CI_REGISTRY_IMAGE}:${TAG}.migrations"
