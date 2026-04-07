@@ -1,3 +1,21 @@
+chmod +x deploy.sh
+
+# Все неймспейсы, тег из релиза
+./deploy.sh
+
+# Один неймспейс, тег из релиза
+./deploy.sh test-isua-load-audit
+
+# Все неймспейсы, свой тег
+./deploy.sh "" abc123
+
+# Один неймспейс, свой тег
+./deploy.sh test-isua-load-audit abc123
+
+# Все неймспейсы, полный override образов
+./deploy.sh "" "" "registry.example.com/audit/audit:abc123.bin" "registry.example.com/audit/audit:abc123.migrations"
+
+
 #!/bin/bash
 # =============================================================
 # deploy.sh — запускается на мастер ноде
