@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================
 # Helm Release — Export & Redeploy
-# Совместим с MicroK8s (microk8s.helm3 / helm)
+# Совместим с MicroK8s
 # =============================================================
 set -euo pipefail
 
@@ -9,6 +9,12 @@ set -euo pipefail
 if command -v microk8s.helm3 &>/dev/null; then
   HELM="microk8s.helm3"
   KUBECTL="microk8s.kubectl"
+elif command -v microk8s &>/dev/null; then
+  helm() { microk8s helm "$@"; }
+  kubectl() { microk8s kubectl "$@"; }
+  export -f helm kubectl
+  HELM="helm"
+  KUBECTL="kubectl"
 elif command -v helm &>/dev/null; then
   HELM="helm"
   KUBECTL="kubectl"
@@ -29,7 +35,7 @@ mkdir -p "$BACKUP_DIR"
 if [[ -z "$NAMESPACE" ]]; then
   echo ""
   echo "Доступные неймспейсы с helm релизами:"
-  $HELM list -A --short 2>/dev/null || $HELM list -A
+  $HELM list -A 2>/dev/null
   echo ""
   read -rp "Введи namespace: " NAMESPACE
 fi
@@ -55,12 +61,15 @@ fi
 echo ""
 echo "=== Экспорт релиза: $RELEASE / namespace: $NAMESPACE ==="
 
-# --- Собираем всю информацию ---
-echo ">>> Metadata"
-$HELM get metadata "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/metadata.txt"
+# --- Получаем info через helm list -o json (без metadata) ---
+echo ">>> Info"
+RELEASE_JSON=$($HELM list -n "$NAMESPACE" -o json | jq '.[] | select(.name=="'"$RELEASE"'")')
+echo "$RELEASE_JSON" | tee "$BACKUP_DIR/info.json"
 
-CHART_NAME=$(grep "^CHART:" "$BACKUP_DIR/metadata.txt" | awk '{print $2}' | sed 's/-[0-9].*//')
-CHART_VERSION=$(grep "^CHART:" "$BACKUP_DIR/metadata.txt" | awk '{print $2}' | grep -oP '[0-9]+\.[0-9]+\.[0-9]+.*')
+CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
+CHART_NAME=$(echo "$CHART_FULL" | sed 's/-[0-9][0-9.]*$//')
+CHART_VERSION=$(echo "$CHART_FULL" | grep -oP '[0-9]+\.[0-9]+\.[0-9.]+[^"]*$')
+CURRENT_REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
 
 echo ""
 echo ">>> Values"
@@ -74,8 +83,6 @@ echo "Сохранён: $BACKUP_DIR/manifest.yaml"
 echo ""
 echo ">>> История"
 $HELM history "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/history.txt"
-
-CURRENT_REVISION=$(grep -m1 "deployed" "$BACKUP_DIR/history.txt" | awk '{print $1}')
 
 echo ""
 echo "=== Итого ==="
@@ -119,7 +126,7 @@ case "$ACTION" in
     ;;
   3)
     PREV_REVISION=$(( CURRENT_REVISION - 1 ))
-    echo ">>> Rollback на ревизию $PREV_REVISION"
+    echo ">>> Rollback"
     read -rp "Ревизия для отката [$PREV_REVISION]: " REV_INPUT
     REV_INPUT="${REV_INPUT:-$PREV_REVISION}"
     $HELM rollback "$RELEASE" "$REV_INPUT" -n "$NAMESPACE"
@@ -142,13 +149,3 @@ echo ""
 echo "=== Проверка после деплоя ==="
 $HELM status "$RELEASE" -n "$NAMESPACE"
 $KUBECTL get pods -n "$NAMESPACE"
-
-
----
-chmod +x helm-redeploy.sh
-
-# Интерактивно (спросит namespace и релиз)
-./helm-redeploy.sh
-
-# Или сразу с параметрами
-./helm-redeploy.sh my-namespace my-release
