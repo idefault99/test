@@ -12,15 +12,43 @@ WORK_DIR="/opt/helm-deploy"
 DEPLOY_PAUSE=30
 ROLLOUT_TIMEOUT=60
 
-# "project_id:ref:release_name"
+# "project_id:ref:release_name:registry_path"
 PROJECTS=(
-  "123:develop:audit"
-  "456:main:schedule"
-  "789:develop:payments"
+  "123:develop:audit:registry.example.com/audit/audit"
+  "456:main:schedule:registry.example.com/schedule/schedule"
+  "789:develop:payments:registry.example.com/payments/payments"
 )
 
-# --- Фильтр по неймспейсу (опционально) ---
+# =============================================================
+# --- Переопределение образов (опционально) ---
+# =============================================================
+
+# Переопределить registry path для конкретного project_id
+# "project_id:registry_path"
+OVERRIDE_REGISTRY=(
+  # "123:registry.example.com/my-custom/audit"
+  # "456:registry.example.com/my-custom/schedule"
+)
+
+# Глобальный тег для всех проектов (пусто = брать из релиза)
+OVERRIDE_TAG=""
+
+# Переопределить образы полностью для всех проектов
+# Если заданы — OVERRIDE_TAG и OVERRIDE_REGISTRY игнорируются
+OVERRIDE_IMAGE_MAIN=""
+OVERRIDE_IMAGE_MIGRATIONS=""
+
+# =============================================================
+
+# --- Аргументы CLI (перезаписывают конфиг выше) ---
+# $1 — фильтр по неймспейсу (пусто = все)
+# $2 — переопределить тег
+# $3 — переопределить image main
+# $4 — переопределить image migrations
 FILTER_NAMESPACE="${1:-}"
+[[ -n "${2:-}" ]] && OVERRIDE_TAG="$2"
+[[ -n "${3:-}" ]] && OVERRIDE_IMAGE_MAIN="$3"
+[[ -n "${4:-}" ]] && OVERRIDE_IMAGE_MIGRATIONS="$4"
 
 # --- Определяем команды для microk8s ---
 if command -v microk8s.helm3 &>/dev/null; then
@@ -50,9 +78,14 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-if [[ -n "$FILTER_NAMESPACE" ]]; then
-  echo -e "${YELLOW}Фильтр: деплоим только в namespace '$FILTER_NAMESPACE'${NC}"
-fi
+# --- Инфо о переопределениях ---
+echo ""
+echo "=== Конфигурация деплоя ==="
+echo "Фильтр namespace:   ${FILTER_NAMESPACE:-все}"
+echo "Override tag:       ${OVERRIDE_TAG:-из релиза}"
+echo "Override image main:        ${OVERRIDE_IMAGE_MAIN:-нет}"
+echo "Override image migrations:  ${OVERRIDE_IMAGE_MIGRATIONS:-нет}"
+echo "==========================="
 
 # --- Результаты ---
 DEPLOYED=()
@@ -87,6 +120,22 @@ download_chart() {
   mkdir -p "$dest/chart"
   tar -xzf "$dest/chart.tar.gz" -C "$dest/chart" --strip-components=2
   rm -f "$dest/chart.tar.gz"
+}
+
+# --- Функция: получить тег из helm values ---
+get_current_tag() {
+  local release=$1
+  local namespace=$2
+
+  local image
+  image=$($HELM get values "$release" -n "$namespace" 2>/dev/null | \
+    grep -E 'main:' | head -1 | awk '{print $2}' || true)
+
+  if [[ -n "$image" ]]; then
+    echo "$image" | grep -oP ':[^:]+$' | sed 's/^://' | sed 's/\.[^.]*$//'
+  else
+    echo ""
+  fi
 }
 
 # --- Функция: ждать rollout ---
@@ -132,15 +181,26 @@ show_memory() {
 
 # --- Основной цикл по проектам ---
 for PROJECT_ENTRY in "${PROJECTS[@]}"; do
-  IFS=':' read -r PROJECT_ID REF RELEASE_NAME <<< "$PROJECT_ENTRY"
+  IFS=':' read -r PROJECT_ID REF RELEASE_NAME REGISTRY_PATH <<< "$PROJECT_ENTRY"
 
   echo ""
   echo -e "${BLUE}=========================================="
   echo "  Проект: $PROJECT_ID | ref: $REF | release: $RELEASE_NAME"
+  echo "  Registry: $REGISTRY_PATH"
   echo -e "==========================================${NC}"
 
   PROJECT_DIR="$RUN_DIR/project-$PROJECT_ID"
   mkdir -p "$PROJECT_DIR"
+
+  # --- Переопределение registry для этого проекта ---
+  for OVERRIDE_ENTRY in "${OVERRIDE_REGISTRY[@]:-}"; do
+    [[ -z "$OVERRIDE_ENTRY" ]] && continue
+    IFS=':' read -r OVR_ID OVR_REG <<< "$OVERRIDE_ENTRY"
+    if [[ "$OVR_ID" == "$PROJECT_ID" ]]; then
+      echo -e "  ${YELLOW}Registry переопределён: $OVR_REG${NC}"
+      REGISTRY_PATH="$OVR_REG"
+    fi
+  done
 
   # --- Получаем переменные ---
   echo ">>> Получаем переменные из GitLab API..."
@@ -214,9 +274,46 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
     if [[ -z "$RELEASE_EXISTS" ]]; then
       echo -e "  ${YELLOW}Релиз не найден — устанавливаем новый (helm install)${NC}"
       HELM_CMD="install"
+      CURRENT_TAG="${OVERRIDE_TAG:-}"
     else
       echo -e "  ${GREEN}Релиз найден — обновляем (helm upgrade)${NC}"
       HELM_CMD="upgrade"
+
+      if [[ -n "$OVERRIDE_TAG" ]]; then
+        CURRENT_TAG="$OVERRIDE_TAG"
+        echo -e "    Тег переопределён: ${CURRENT_TAG}"
+      else
+        CURRENT_TAG=$(get_current_tag "$RELEASE_NAME" "$NAMESPACE")
+        if [[ -z "$CURRENT_TAG" ]]; then
+          echo -e "  ${YELLOW}Тег не найден в релизе — images не переопределяем${NC}"
+          CURRENT_TAG=""
+        else
+          echo -e "    Тег из релиза: ${CURRENT_TAG}"
+        fi
+      fi
+    fi
+
+    # --- Формируем image flags ---
+    if [[ -n "$OVERRIDE_IMAGE_MAIN" ]]; then
+      # Полное переопределение образов
+      IMAGE_MAIN="$OVERRIDE_IMAGE_MAIN"
+      IMAGE_MIGRATIONS="${OVERRIDE_IMAGE_MIGRATIONS:-$OVERRIDE_IMAGE_MAIN}"
+      echo -e "    Image main:       ${IMAGE_MAIN} ${YELLOW}(переопределён)${NC}"
+      echo -e "    Image migrations: ${IMAGE_MIGRATIONS} ${YELLOW}(переопределён)${NC}"
+      IMAGE_FLAGS="--set images.main=${IMAGE_MAIN} --set images.migrations=${IMAGE_MIGRATIONS}"
+      DISPLAY_TAG="custom"
+    elif [[ -n "$CURRENT_TAG" ]]; then
+      # Registry + тег
+      IMAGE_MAIN="${REGISTRY_PATH}:${CURRENT_TAG}.bin"
+      IMAGE_MIGRATIONS="${REGISTRY_PATH}:${CURRENT_TAG}.migrations"
+      echo -e "    Image main:       ${IMAGE_MAIN}"
+      echo -e "    Image migrations: ${IMAGE_MIGRATIONS}"
+      IMAGE_FLAGS="--set images.main=${IMAGE_MAIN} --set images.migrations=${IMAGE_MIGRATIONS}"
+      DISPLAY_TAG="$CURRENT_TAG"
+    else
+      echo -e "  ${YELLOW}Images не переопределяем${NC}"
+      IMAGE_FLAGS=""
+      DISPLAY_TAG="no-tag"
     fi
 
     # --- Память до деплоя ---
@@ -230,12 +327,14 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
         -n "$NAMESPACE" \
         --create-namespace \
         $VALUES_FLAG \
+        $IMAGE_FLAGS \
         > "$DEPLOY_LOG" 2>&1 && echo "ok" || echo "fail")
     else
       HELM_OK=$($HELM upgrade "$RELEASE_NAME" "$PROJECT_DIR/chart" \
         -n "$NAMESPACE" \
         --reuse-values \
         $VALUES_FLAG \
+        $IMAGE_FLAGS \
         > "$DEPLOY_LOG" 2>&1 && echo "ok" || echo "fail")
     fi
 
@@ -243,9 +342,9 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
       echo -e "  ${GREEN}Helm $HELM_CMD OK${NC}"
 
       if wait_rollout "$NAMESPACE"; then
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|OK")
+        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG|OK")
       else
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|ROLLOUT_TIMEOUT")
+        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG|ROLLOUT_TIMEOUT")
         ERRORS+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Rollout не завершился за ${ROLLOUT_TIMEOUT}s")
       fi
 
@@ -270,23 +369,23 @@ echo ""
 echo "=========================================="
 echo "  ЗАДЕПЛОЕНО"
 echo "=========================================="
-printf "%-15s %-20s %-30s %-20s %-10s %-15s\n" \
-  "PROJECT" "SCOPE" "NAMESPACE" "RELEASE" "ACTION" "СТАТУС"
-printf "%-15s %-20s %-30s %-20s %-10s %-15s\n" \
-  "---------------" "--------------------" "------------------------------" \
-  "--------------------" "----------" "---------------"
+printf "%-15s %-20s %-25s %-15s %-10s %-20s %-15s\n" \
+  "PROJECT" "SCOPE" "NAMESPACE" "RELEASE" "ACTION" "ТЕГ" "СТАТУС"
+printf "%-15s %-20s %-25s %-15s %-10s %-20s %-15s\n" \
+  "---------------" "--------------------" "-------------------------" \
+  "---------------" "----------" "--------------------" "---------------"
 
 if [[ ${#DEPLOYED[@]} -eq 0 ]]; then
   echo "  Нет успешных деплоев"
 else
   for ROW in "${DEPLOYED[@]}"; do
-    IFS='|' read -r PROJ SCOPE NS REL ACTION STATUS <<< "$ROW"
+    IFS='|' read -r PROJ SCOPE NS REL ACTION TAG STATUS <<< "$ROW"
     if [[ "$STATUS" == "OK" ]]; then
-      printf "%-15s %-20s %-30s %-20s %-10s ${GREEN}%-15s${NC}\n" \
-        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$STATUS"
+      printf "%-15s %-20s %-25s %-15s %-10s %-20s ${GREEN}%-15s${NC}\n" \
+        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG" "$STATUS"
     else
-      printf "%-15s %-20s %-30s %-20s %-10s ${YELLOW}%-15s${NC}\n" \
-        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$STATUS"
+      printf "%-15s %-20s %-25s %-15s %-10s %-20s ${YELLOW}%-15s${NC}\n" \
+        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG" "$STATUS"
     fi
   done
 fi
@@ -298,10 +397,10 @@ echo ""
 echo "=========================================="
 echo "  ПРОПУЩЕНО"
 echo "=========================================="
-printf "%-15s %-20s %-30s %-30s\n" \
+printf "%-15s %-20s %-25s %-30s\n" \
   "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
-printf "%-15s %-20s %-30s %-30s\n" \
-  "---------------" "--------------------" "------------------------------" \
+printf "%-15s %-20s %-25s %-30s\n" \
+  "---------------" "--------------------" "-------------------------" \
   "------------------------------"
 
 if [[ ${#SKIPPED[@]} -eq 0 ]]; then
@@ -309,7 +408,7 @@ if [[ ${#SKIPPED[@]} -eq 0 ]]; then
 else
   for ROW in "${SKIPPED[@]}"; do
     IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
-    printf "%-15s %-20s %-30s ${YELLOW}%-30s${NC}\n" \
+    printf "%-15s %-20s %-25s ${YELLOW}%-30s${NC}\n" \
       "$PROJ" "$SCOPE" "$NS" "$REASON"
   done
 fi
@@ -321,10 +420,10 @@ echo ""
 echo "=========================================="
 echo "  ОШИБКИ"
 echo "=========================================="
-printf "%-15s %-20s %-30s %-40s\n" \
+printf "%-15s %-20s %-25s %-40s\n" \
   "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
-printf "%-15s %-20s %-30s %-40s\n" \
-  "---------------" "--------------------" "------------------------------" \
+printf "%-15s %-20s %-25s %-40s\n" \
+  "---------------" "--------------------" "-------------------------" \
   "----------------------------------------"
 
 if [[ ${#ERRORS[@]} -eq 0 ]]; then
@@ -332,7 +431,7 @@ if [[ ${#ERRORS[@]} -eq 0 ]]; then
 else
   for ROW in "${ERRORS[@]}"; do
     IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
-    printf "%-15s %-20s %-30s ${RED}%-40s${NC}\n" \
+    printf "%-15s %-20s %-25s ${RED}%-40s${NC}\n" \
       "$PROJ" "$SCOPE" "$NS" "$REASON"
   done
 fi
