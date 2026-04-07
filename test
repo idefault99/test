@@ -1,12 +1,3 @@
-# Всё из конфига
-./deploy.sh
-
-# Принудительно — заполни в скрипте:
-FORCE_NAMESPACE="test-isua-load-audit"
-FORCE_REGISTRY_PATH="registry.example.com/audit/audit"
-FORCE_TAG="abc123"
-
-
 #!/bin/bash
 # =============================================================
 # deploy.sh — запускается на мастер ноде
@@ -38,8 +29,9 @@ OVERRIDE_REGISTRY=(
   # "123:registry.example.com/my-custom/audit"
 )
 
-# Глобальный тег для всех проектов (пусто = брать из релиза)
-OVERRIDE_TAG=""
+# Глобальные теги для всех проектов (пусто = брать из релиза)
+OVERRIDE_TAG_MAIN=""
+OVERRIDE_TAG_MIGRATIONS=""
 
 # Переопределить образы полностью для всех проектов
 OVERRIDE_IMAGE_MAIN=""
@@ -56,20 +48,23 @@ FORCE_NAMESPACE=""
 # Принудительный registry path (пусто = из PROJECTS)
 FORCE_REGISTRY_PATH=""
 
-# Принудительный тег (пусто = из релиза)
-FORCE_TAG=""
+# Принудительные теги (пусто = из релиза)
+FORCE_TAG_MAIN=""
+FORCE_TAG_MIGRATIONS=""
 
 # =============================================================
 
 # --- Аргументы CLI (перезаписывают конфиг выше) ---
 # $1 — фильтр по неймспейсу
-# $2 — тег
-# $3 — image main
-# $4 — image migrations
+# $2 — тег main
+# $3 — тег migrations
+# $4 — image main (полный)
+# $5 — image migrations (полный)
 FILTER_NAMESPACE="${1:-}"
-[[ -n "${2:-}" ]] && OVERRIDE_TAG="$2"
-[[ -n "${3:-}" ]] && OVERRIDE_IMAGE_MAIN="$3"
-[[ -n "${4:-}" ]] && OVERRIDE_IMAGE_MIGRATIONS="$4"
+[[ -n "${2:-}" ]] && OVERRIDE_TAG_MAIN="$2"
+[[ -n "${3:-}" ]] && OVERRIDE_TAG_MIGRATIONS="$3"
+[[ -n "${4:-}" ]] && OVERRIDE_IMAGE_MAIN="$4"
+[[ -n "${5:-}" ]] && OVERRIDE_IMAGE_MIGRATIONS="$5"
 
 # --- Определяем команды для microk8s ---
 if command -v microk8s.helm3 &>/dev/null; then
@@ -104,13 +99,15 @@ NC='\033[0m'
 echo ""
 echo "=== Конфигурация деплоя ==="
 echo "Фильтр namespace:          ${FILTER_NAMESPACE:-все}"
-echo "Override tag:              ${OVERRIDE_TAG:-из релиза}"
+echo "Override tag main:         ${OVERRIDE_TAG_MAIN:-из релиза}"
+echo "Override tag migrations:   ${OVERRIDE_TAG_MIGRATIONS:-из релиза}"
 echo "Override image main:       ${OVERRIDE_IMAGE_MAIN:-нет}"
 echo "Override image migrations: ${OVERRIDE_IMAGE_MIGRATIONS:-нет}"
 echo "--- Принудительный деплой ---"
 echo "Force namespace:           ${FORCE_NAMESPACE:-нет}"
 echo "Force registry path:       ${FORCE_REGISTRY_PATH:-нет}"
-echo "Force tag:                 ${FORCE_TAG:-нет}"
+echo "Force tag main:            ${FORCE_TAG_MAIN:-нет}"
+echo "Force tag migrations:      ${FORCE_TAG_MIGRATIONS:-нет}"
 echo "==========================="
 echo ""
 
@@ -149,17 +146,29 @@ download_chart() {
   rm -f "$dest/chart.tar.gz"
 }
 
-# --- Функция: получить тег из helm values ---
-get_current_tag() {
+# --- Функция: получить тег main из helm values ---
+get_tag_main() {
   local release=$1
   local namespace=$2
-
   local image
   image=$($HELM get values "$release" -n "$namespace" 2>/dev/null | \
     grep -E 'main:' | head -1 | awk '{print $2}' || true)
-
   if [[ -n "$image" ]]; then
-    echo "$image" | grep -oP ':[^:]+$' | sed 's/^://' | sed 's/\.[^.]*$//'
+    echo "$image" | grep -oP ':[^:]+$' | sed 's/^://'
+  else
+    echo ""
+  fi
+}
+
+# --- Функция: получить тег migrations из helm values ---
+get_tag_migrations() {
+  local release=$1
+  local namespace=$2
+  local image
+  image=$($HELM get values "$release" -n "$namespace" 2>/dev/null | \
+    grep -E 'migrations:' | head -1 | awk '{print $2}' || true)
+  if [[ -n "$image" ]]; then
+    echo "$image" | grep -oP ':[^:]+$' | sed 's/^://'
   else
     echo ""
   fi
@@ -309,26 +318,34 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
     if [[ -z "$RELEASE_EXISTS" ]]; then
       echo -e "  ${YELLOW}Релиз не найден — устанавливаем новый (helm install)${NC}"
       HELM_CMD="install"
-      CURRENT_TAG="${FORCE_TAG:-${OVERRIDE_TAG:-}}"
+      TAG_MAIN="${FORCE_TAG_MAIN:-${OVERRIDE_TAG_MAIN:-}}"
+      TAG_MIGRATIONS="${FORCE_TAG_MIGRATIONS:-${OVERRIDE_TAG_MIGRATIONS:-}}"
     else
       echo -e "  ${GREEN}Релиз найден — обновляем (helm upgrade)${NC}"
       HELM_CMD="upgrade"
 
-      # Приоритет тега: FORCE_TAG > OVERRIDE_TAG > из релиза
-      if [[ -n "$FORCE_TAG" ]]; then
-        CURRENT_TAG="$FORCE_TAG"
-        echo -e "    Тег принудительный: ${MAGENTA}${CURRENT_TAG}${NC}"
-      elif [[ -n "$OVERRIDE_TAG" ]]; then
-        CURRENT_TAG="$OVERRIDE_TAG"
-        echo -e "    Тег переопределён: ${YELLOW}${CURRENT_TAG}${NC}"
+      # --- Тег main: FORCE > OVERRIDE > из релиза ---
+      if [[ -n "$FORCE_TAG_MAIN" ]]; then
+        TAG_MAIN="$FORCE_TAG_MAIN"
+        echo -e "    Тег main принудительный:       ${MAGENTA}${TAG_MAIN}${NC}"
+      elif [[ -n "$OVERRIDE_TAG_MAIN" ]]; then
+        TAG_MAIN="$OVERRIDE_TAG_MAIN"
+        echo -e "    Тег main переопределён:        ${YELLOW}${TAG_MAIN}${NC}"
       else
-        CURRENT_TAG=$(get_current_tag "$RELEASE_NAME" "$NAMESPACE")
-        if [[ -z "$CURRENT_TAG" ]]; then
-          echo -e "  ${YELLOW}Тег не найден в релизе — images не переопределяем${NC}"
-          CURRENT_TAG=""
-        else
-          echo -e "    Тег из релиза: ${CURRENT_TAG}"
-        fi
+        TAG_MAIN=$(get_tag_main "$RELEASE_NAME" "$NAMESPACE")
+        echo -e "    Тег main из релиза:            ${TAG_MAIN:-не найден}"
+      fi
+
+      # --- Тег migrations: FORCE > OVERRIDE > из релиза ---
+      if [[ -n "$FORCE_TAG_MIGRATIONS" ]]; then
+        TAG_MIGRATIONS="$FORCE_TAG_MIGRATIONS"
+        echo -e "    Тег migrations принудительный: ${MAGENTA}${TAG_MIGRATIONS}${NC}"
+      elif [[ -n "$OVERRIDE_TAG_MIGRATIONS" ]]; then
+        TAG_MIGRATIONS="$OVERRIDE_TAG_MIGRATIONS"
+        echo -e "    Тег migrations переопределён:  ${YELLOW}${TAG_MIGRATIONS}${NC}"
+      else
+        TAG_MIGRATIONS=$(get_tag_migrations "$RELEASE_NAME" "$NAMESPACE")
+        echo -e "    Тег migrations из релиза:      ${TAG_MIGRATIONS:-не найден}"
       fi
     fi
 
@@ -346,18 +363,30 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
       echo -e "    Image main:       ${IMAGE_MAIN} ${YELLOW}(переопределён)${NC}"
       echo -e "    Image migrations: ${IMAGE_MIGRATIONS} ${YELLOW}(переопределён)${NC}"
       IMAGE_FLAGS="--set images.main=${IMAGE_MAIN} --set images.migrations=${IMAGE_MIGRATIONS}"
-      DISPLAY_TAG="custom"
-    elif [[ -n "$CURRENT_TAG" ]]; then
-      IMAGE_MAIN="${EFFECTIVE_REGISTRY}:${CURRENT_TAG}.bin"
-      IMAGE_MIGRATIONS="${EFFECTIVE_REGISTRY}:${CURRENT_TAG}.migrations"
-      echo -e "    Image main:       ${IMAGE_MAIN}"
-      echo -e "    Image migrations: ${IMAGE_MIGRATIONS}"
-      IMAGE_FLAGS="--set images.main=${IMAGE_MAIN} --set images.migrations=${IMAGE_MIGRATIONS}"
-      DISPLAY_TAG="$CURRENT_TAG"
+      DISPLAY_TAG_MAIN="custom"
+      DISPLAY_TAG_MIGRATIONS="custom"
     else
-      echo -e "  ${YELLOW}Images не переопределяем${NC}"
       IMAGE_FLAGS=""
-      DISPLAY_TAG="no-tag"
+
+      if [[ -n "$TAG_MAIN" ]]; then
+        IMAGE_MAIN="${EFFECTIVE_REGISTRY}:${TAG_MAIN}"
+        echo -e "    Image main:       ${IMAGE_MAIN}"
+        IMAGE_FLAGS+=" --set images.main=${IMAGE_MAIN}"
+        DISPLAY_TAG_MAIN="$TAG_MAIN"
+      else
+        echo -e "  ${YELLOW}Image main не задан — пропускаем --set images.main${NC}"
+        DISPLAY_TAG_MAIN="no-tag"
+      fi
+
+      if [[ -n "$TAG_MIGRATIONS" ]]; then
+        IMAGE_MIGRATIONS="${EFFECTIVE_REGISTRY}:${TAG_MIGRATIONS}"
+        echo -e "    Image migrations: ${IMAGE_MIGRATIONS}"
+        IMAGE_FLAGS+=" --set images.migrations=${IMAGE_MIGRATIONS}"
+        DISPLAY_TAG_MIGRATIONS="$TAG_MIGRATIONS"
+      else
+        echo -e "  ${YELLOW}Image migrations не задан — пропускаем --set images.migrations${NC}"
+        DISPLAY_TAG_MIGRATIONS="no-tag"
+      fi
     fi
 
     # --- Память до деплоя ---
@@ -386,9 +415,9 @@ for PROJECT_ENTRY in "${PROJECTS[@]}"; do
       echo -e "  ${GREEN}Helm $HELM_CMD OK${NC}"
 
       if wait_rollout "$NAMESPACE"; then
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG|OK")
+        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG_MAIN|$DISPLAY_TAG_MIGRATIONS|OK")
       else
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG|ROLLOUT_TIMEOUT")
+        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG_MAIN|$DISPLAY_TAG_MIGRATIONS|ROLLOUT_TIMEOUT")
         ERRORS+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Rollout не завершился за ${ROLLOUT_TIMEOUT}s")
       fi
 
@@ -413,23 +442,23 @@ echo ""
 echo "=========================================="
 echo "  ЗАДЕПЛОЕНО"
 echo "=========================================="
-printf "%-15s %-20s %-25s %-15s %-10s %-20s %-15s\n" \
-  "PROJECT" "SCOPE" "NAMESPACE" "RELEASE" "ACTION" "ТЕГ" "СТАТУС"
-printf "%-15s %-20s %-25s %-15s %-10s %-20s %-15s\n" \
-  "---------------" "--------------------" "-------------------------" \
-  "---------------" "----------" "--------------------" "---------------"
+printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s %-15s\n" \
+  "PROJECT" "SCOPE" "NAMESPACE" "RELEASE" "ACTION" "ТЕГ MAIN" "ТЕГ MIGRATIONS" "СТАТУС"
+printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s %-15s\n" \
+  "---------------" "------------------" "-------------------------" \
+  "------------" "----------" "-------------------------" "-------------------------" "---------------"
 
 if [[ ${#DEPLOYED[@]} -eq 0 ]]; then
   echo "  Нет успешных деплоев"
 else
   for ROW in "${DEPLOYED[@]}"; do
-    IFS='|' read -r PROJ SCOPE NS REL ACTION TAG STATUS <<< "$ROW"
+    IFS='|' read -r PROJ SCOPE NS REL ACTION TAG_M TAG_MIG STATUS <<< "$ROW"
     if [[ "$STATUS" == "OK" ]]; then
-      printf "%-15s %-20s %-25s %-15s %-10s %-20s ${GREEN}%-15s${NC}\n" \
-        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG" "$STATUS"
+      printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s ${GREEN}%-15s${NC}\n" \
+        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG_M" "$TAG_MIG" "$STATUS"
     else
-      printf "%-15s %-20s %-25s %-15s %-10s %-20s ${YELLOW}%-15s${NC}\n" \
-        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG" "$STATUS"
+      printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s ${YELLOW}%-15s${NC}\n" \
+        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG_M" "$TAG_MIG" "$STATUS"
     fi
   done
 fi
@@ -441,10 +470,10 @@ echo ""
 echo "=========================================="
 echo "  ПРОПУЩЕНО"
 echo "=========================================="
-printf "%-15s %-20s %-25s %-30s\n" \
+printf "%-15s %-18s %-25s %-30s\n" \
   "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
-printf "%-15s %-20s %-25s %-30s\n" \
-  "---------------" "--------------------" "-------------------------" \
+printf "%-15s %-18s %-25s %-30s\n" \
+  "---------------" "------------------" "-------------------------" \
   "------------------------------"
 
 if [[ ${#SKIPPED[@]} -eq 0 ]]; then
@@ -452,7 +481,7 @@ if [[ ${#SKIPPED[@]} -eq 0 ]]; then
 else
   for ROW in "${SKIPPED[@]}"; do
     IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
-    printf "%-15s %-20s %-25s ${YELLOW}%-30s${NC}\n" \
+    printf "%-15s %-18s %-25s ${YELLOW}%-30s${NC}\n" \
       "$PROJ" "$SCOPE" "$NS" "$REASON"
   done
 fi
@@ -464,10 +493,10 @@ echo ""
 echo "=========================================="
 echo "  ОШИБКИ"
 echo "=========================================="
-printf "%-15s %-20s %-25s %-40s\n" \
+printf "%-15s %-18s %-25s %-40s\n" \
   "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
-printf "%-15s %-20s %-25s %-40s\n" \
-  "---------------" "--------------------" "-------------------------" \
+printf "%-15s %-18s %-25s %-40s\n" \
+  "---------------" "------------------" "-------------------------" \
   "----------------------------------------"
 
 if [[ ${#ERRORS[@]} -eq 0 ]]; then
@@ -475,7 +504,7 @@ if [[ ${#ERRORS[@]} -eq 0 ]]; then
 else
   for ROW in "${ERRORS[@]}"; do
     IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
-    printf "%-15s %-20s %-25s ${RED}%-40s${NC}\n" \
+    printf "%-15s %-18s %-25s ${RED}%-40s${NC}\n" \
       "$PROJ" "$SCOPE" "$NS" "$REASON"
   done
 fi
@@ -483,3 +512,19 @@ fi
 echo ""
 echo "Всего деплоев: $DEPLOY_COUNT"
 echo "Логи: $RUN_DIR/"
+
+
+---
+# Всё из конфига в скрипте
+./deploy.sh
+
+# Один неймспейс, теги из релиза
+./deploy.sh test-isua-load-audit
+
+# Один неймспейс, свои теги
+./deploy.sh test-isua-load-audit "abc123.bin" "abc123.migrations"
+
+# Принудительно — заполни в скрипте:
+FORCE_NAMESPACE="test-isua-load-audit"
+FORCE_TAG_MAIN="abc123.bin"
+FORCE_TAG_MIGRATIONS="abc123.migrations"
