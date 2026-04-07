@@ -1,49 +1,11 @@
-include:
-  - project: 'dpm/iac/infra'
-    ref: develop
-    file: 'cicd/basic.gitlab-ci.yml'
-
 variables:
   RELEASE_NAME: audit
   REGISTRY_PATH: audit/audit
-  KUBECONFIG: $KUBE_CONF_2
-
-build_bin:
-  extends: .buildkit_bin
-  variables:
-    TARGET: production
-    PACKAGE_GROUPS: main,dev,test
-
-build_source:
-  extends: .buildkit_source
-  variables:
-    TARGET: source
-    PACKAGE_GROUPS: main,dev,test
-
-build_migrations:
-  extends: .buildkit_migrations
-
-linter:
-  extends: .linter
-
-.test:
-  script:
-    - touch ./report.xml
-    - touch ./coverage.xml
-    - export TAG=$(eval $TAG_SCRIPT)
-    - |
-      docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up -d --renew-anon-volumes --force-recreate --remove-orphans \
-        redis \
-        db \
-        backend
-    - docker compose -f docker-compose.test.yml --project-name ${CI_JOB_ID} up --remove-orphans --renew-anon-volumes --force-recreate --exit-code-from test test
-
-test:
-  extends: .test
+  # убираем KUBECONFIG: $KUBE_CONF_2
 
 .deploy:
   script:
     - |
-      helm upgrade --kubeconfig $KUBECONFIG -i -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
+      helm upgrade --kubeconfig $KUBE_CONF_2 -i -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
         --set "images.main=${CI_REGISTRY_IMAGE}:${TAG}.bin" \
         --set "images.migrations=${CI_REGISTRY_IMAGE}:${TAG}.migrations"
