@@ -1,14 +1,23 @@
 #!/bin/bash
 # =============================================================
-# Helm Release — Export & Redeploy - Восстановление из последнего задеплоенного чарта 
+# Helm Release — Export & Redeploy
+# Восстановление релизов из неймспейса
 # Совместим с MicroK8s
-# # Интерактивно (спросит namespace и релиз)
-# ./helm-redeploy.sh
-
-# # Или сразу с параметрами
-# ./deploy.sh schedule-dev link-table
+#
+# Использование:
+#   ./helm-redeploy.sh                        # интерактивно
+#   ./helm-redeploy.sh schedule-dev           # все релизы в неймспейсе
+#   ./helm-redeploy.sh schedule-dev link-table # конкретный релиз
 # =============================================================
 set -euo pipefail
+
+# --- Цвета ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
 
 # --- Определяем команды для microk8s ---
 if command -v microk8s.helm3 &>/dev/null; then
@@ -32,9 +41,14 @@ echo "Используем: $HELM / $KUBECTL"
 
 # --- Параметры ---
 NAMESPACE="${1:-}"
-RELEASE="${2:-}"
+FILTER_RELEASE="${2:-}"
 BACKUP_DIR="./helm-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
+
+# --- Результаты ---
+RESTORED=()
+SKIPPED=()
+ERRORS=()
 
 # --- Найти namespace если не передан ---
 if [[ -z "$NAMESPACE" ]]; then
@@ -45,112 +59,285 @@ if [[ -z "$NAMESPACE" ]]; then
   read -rp "Введи namespace: " NAMESPACE
 fi
 
-# --- Найти релиз если не передан ---
-if [[ -z "$RELEASE" ]]; then
-  RELEASES=$($HELM list -n "$NAMESPACE" -q)
-  COUNT=$(echo "$RELEASES" | grep -c . || true)
+# --- Получаем список релизов ---
+RELEASES=$($HELM list -n "$NAMESPACE" -q 2>/dev/null || true)
+COUNT=$(echo "$RELEASES" | grep -c . || true)
 
-  if [[ "$COUNT" -eq 0 ]]; then
-    echo "ERROR: релизов в namespace '$NAMESPACE' не найдено"
-    exit 1
-  elif [[ "$COUNT" -eq 1 ]]; then
-    RELEASE="$RELEASES"
-    echo "Найден единственный релиз: $RELEASE"
-  else
-    echo "Релизы в namespace '$NAMESPACE':"
+if [[ "$COUNT" -eq 0 ]]; then
+  echo -e "${RED}ERROR: релизов в namespace '$NAMESPACE' не найдено${NC}"
+  exit 1
+fi
+
+# --- Если передан конкретный релиз — проверяем что он существует ---
+if [[ -n "$FILTER_RELEASE" ]]; then
+  if ! echo "$RELEASES" | grep -qx "$FILTER_RELEASE"; then
+    echo -e "${RED}ERROR: релиз '$FILTER_RELEASE' не найден в namespace '$NAMESPACE'${NC}"
+    echo "Доступные релизы:"
     echo "$RELEASES"
-    read -rp "Введи имя релиза: " RELEASE
+    exit 1
   fi
+  RELEASES="$FILTER_RELEASE"
+  COUNT=1
 fi
 
 echo ""
-echo "=== Экспорт релиза: $RELEASE / namespace: $NAMESPACE ==="
+echo -e "${BLUE}=== Найдено релизов в '$NAMESPACE': $COUNT ===${NC}"
+echo "$RELEASES"
 
-# --- Получаем info через helm list -o json (без metadata) ---
-echo ">>> Info"
-RELEASE_JSON=$($HELM list -n "$NAMESPACE" -o json | jq '.[] | select(.name=="'"$RELEASE"'")')
-echo "$RELEASE_JSON" | tee "$BACKUP_DIR/info.json"
+# --- Если несколько релизов — спросить что делать ---
+if [[ "$COUNT" -gt 1 && -z "$FILTER_RELEASE" ]]; then
+  echo ""
+  echo "Восстановить:"
+  echo "  1) Все релизы в неймспейсе"
+  echo "  2) Выбрать конкретный"
+  read -rp "Выбор [1-2]: " NS_ACTION
+  if [[ "$NS_ACTION" == "2" ]]; then
+    read -rp "Введи имя релиза: " FILTER_RELEASE
+    if ! echo "$RELEASES" | grep -qx "$FILTER_RELEASE"; then
+      echo -e "${RED}ERROR: релиз '$FILTER_RELEASE' не найден${NC}"
+      exit 1
+    fi
+    RELEASES="$FILTER_RELEASE"
+    COUNT=1
+  fi
+fi
 
-CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
-CHART_NAME=$(echo "$CHART_FULL" | sed 's/-[0-9][0-9.]*$//')
-CHART_VERSION=$(echo "$CHART_FULL" | grep -oP '[0-9]+\.[0-9]+\.[0-9.]+[^"]*$')
-CURRENT_REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
-
-echo ""
-echo ">>> Values"
-$HELM get values "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/values.yaml"
-
-echo ""
-echo ">>> Manifest"
-$HELM get manifest "$RELEASE" -n "$NAMESPACE" > "$BACKUP_DIR/manifest.yaml"
-echo "Сохранён: $BACKUP_DIR/manifest.yaml"
-
-echo ""
-echo ">>> История"
-$HELM history "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/history.txt"
-
-echo ""
-echo "=== Итого ==="
-echo "Chart:    $CHART_NAME"
-echo "Version:  $CHART_VERSION"
-echo "Revision: $CURRENT_REVISION"
-echo "Backup:   $BACKUP_DIR/"
-
-# --- Репозиторий ---
-echo ""
-echo ">>> Доступные helm репозитории:"
-$HELM repo list 2>/dev/null || echo "Репозитории не добавлены"
-
+# --- Выбор действия (один раз для всех релизов) ---
 echo ""
 echo "=========================================="
-echo "Что делаем?"
-echo "  1) helm upgrade --reuse-values (быстро, те же values)"
-echo "  2) helm upgrade -f values.yaml  (из сохранённого файла)"
+echo "Что делаем со всеми релизами?"
+echo "  1) helm upgrade --reuse-values (те же values)"
+echo "  2) helm upgrade -f values.yaml (из сохранённого файла)"
 echo "  3) helm rollback               (откат на предыдущую ревизию)"
-echo "  4) kubectl apply -f manifest   (без helm, аварийный вариант)"
+echo "  4) kubectl apply -f manifest   (аварийный вариант)"
 echo "  5) Выйти"
 echo "=========================================="
 read -rp "Выбор [1-5]: " ACTION
 
-case "$ACTION" in
-  1)
-    echo ">>> Upgrade --reuse-values"
-    $HELM upgrade "$RELEASE" "$CHART_NAME" \
-      -n "$NAMESPACE" \
-      --reuse-values \
-      --version "$CHART_VERSION"
-    ;;
-  2)
-    echo ">>> Upgrade -f values.yaml"
-    read -rp "Укажи путь к чарту или repo/chart [${CHART_NAME}]: " CHART_INPUT
-    CHART_INPUT="${CHART_INPUT:-$CHART_NAME}"
-    $HELM upgrade "$RELEASE" "$CHART_INPUT" \
-      -n "$NAMESPACE" \
-      -f "$BACKUP_DIR/values.yaml" \
-      --version "$CHART_VERSION"
-    ;;
-  3)
-    PREV_REVISION=$(( CURRENT_REVISION - 1 ))
-    echo ">>> Rollback"
-    read -rp "Ревизия для отката [$PREV_REVISION]: " REV_INPUT
-    REV_INPUT="${REV_INPUT:-$PREV_REVISION}"
-    $HELM rollback "$RELEASE" "$REV_INPUT" -n "$NAMESPACE"
-    ;;
-  4)
-    echo ">>> kubectl apply -f manifest.yaml"
-    $KUBECTL apply -f "$BACKUP_DIR/manifest.yaml" -n "$NAMESPACE"
-    ;;
-  5)
-    echo "Выход. Бэкап сохранён в $BACKUP_DIR/"
-    exit 0
-    ;;
-  *)
-    echo "Неверный выбор"
-    exit 1
-    ;;
-esac
+if [[ "$ACTION" == "5" ]]; then
+  echo "Выход."
+  exit 0
+fi
+
+# --- Путь к чарту для варианта 2 ---
+CHART_INPUT_GLOBAL=""
+if [[ "$ACTION" == "2" ]]; then
+  read -rp "Путь к чарту или repo/chart (можно оставить пустым — спросит для каждого): " CHART_INPUT_GLOBAL
+fi
+
+# --- Ревизия для варианта 3 ---
+ROLLBACK_REVISION_GLOBAL=""
+if [[ "$ACTION" == "3" ]]; then
+  read -rp "Ревизия для отката (пусто = предыдущая для каждого): " ROLLBACK_REVISION_GLOBAL
+fi
+
+# =============================================================
+# --- Цикл по релизам ---
+# =============================================================
+while IFS= read -r RELEASE; do
+  [[ -z "$RELEASE" ]] && continue
+
+  echo ""
+  echo -e "${BLUE}=========================================="
+  echo "  Релиз: $RELEASE | namespace: $NAMESPACE"
+  echo -e "==========================================${NC}"
+
+  RELEASE_BACKUP="$BACKUP_DIR/$RELEASE"
+  mkdir -p "$RELEASE_BACKUP"
+
+  # --- Получаем info ---
+  RELEASE_JSON=$($HELM list -n "$NAMESPACE" -o json 2>/dev/null | \
+    jq '.[] | select(.name=="'"$RELEASE"'")' || true)
+
+  if [[ -z "$RELEASE_JSON" ]]; then
+    echo -e "  ${RED}Не удалось получить info релиза — пропускаем${NC}"
+    ERRORS+=("$NAMESPACE|$RELEASE|Не удалось получить helm list -o json")
+    continue
+  fi
+
+  CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
+  CHART_NAME=$(echo "$CHART_FULL" | sed 's/-[0-9][0-9.]*$//')
+  CHART_VERSION=$(echo "$CHART_FULL" | grep -oP '[0-9]+\.[0-9]+\.[0-9.]+[^"]*$' || true)
+  CURRENT_REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
+  STATUS=$(echo "$RELEASE_JSON" | jq -r '.status')
+
+  echo "    Chart:    $CHART_FULL"
+  echo "    Revision: $CURRENT_REVISION"
+  echo "    Status:   $STATUS"
+
+  # --- Пропускаем если уже deployed и не принудительно ---
+  if [[ "$STATUS" == "deployed" && "$ACTION" != "3" ]]; then
+    echo -e "  ${YELLOW}Статус: deployed — всё равно восстанавливаем${NC}"
+  fi
+
+  # --- Сохраняем values ---
+  echo "  Сохраняем values..."
+  $HELM get values "$RELEASE" -n "$NAMESPACE" > "$RELEASE_BACKUP/values.yaml" 2>/dev/null || true
+
+  # --- Сохраняем manifest ---
+  echo "  Сохраняем manifest..."
+  $HELM get manifest "$RELEASE" -n "$NAMESPACE" > "$RELEASE_BACKUP/manifest.yaml" 2>/dev/null || true
+
+  # --- Сохраняем историю ---
+  $HELM history "$RELEASE" -n "$NAMESPACE" > "$RELEASE_BACKUP/history.txt" 2>/dev/null || true
+
+  echo -e "  ${CYAN}Бэкап: $RELEASE_BACKUP/${NC}"
+
+  # --- Выполняем действие ---
+  case "$ACTION" in
+    1)
+      echo -e "  ${CYAN}>>> helm upgrade --reuse-values${NC}"
+      if $HELM upgrade "$RELEASE" "$CHART_NAME" \
+        -n "$NAMESPACE" \
+        --reuse-values \
+        --version "$CHART_VERSION" \
+        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
+        echo -e "  ${GREEN}OK${NC}"
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade --reuse-values|OK")
+      else
+        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
+        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
+        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
+      fi
+      ;;
+
+    2)
+      if [[ -n "$CHART_INPUT_GLOBAL" ]]; then
+        CHART_INPUT="$CHART_INPUT_GLOBAL"
+      else
+        read -rp "  Путь к чарту для '$RELEASE' [${CHART_NAME}]: " CHART_INPUT
+        CHART_INPUT="${CHART_INPUT:-$CHART_NAME}"
+      fi
+      echo -e "  ${CYAN}>>> helm upgrade -f values.yaml (чарт: $CHART_INPUT)${NC}"
+      if $HELM upgrade "$RELEASE" "$CHART_INPUT" \
+        -n "$NAMESPACE" \
+        -f "$RELEASE_BACKUP/values.yaml" \
+        --version "$CHART_VERSION" \
+        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
+        echo -e "  ${GREEN}OK${NC}"
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade -f values.yaml|OK")
+      else
+        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
+        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
+        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
+      fi
+      ;;
+
+    3)
+      if [[ -n "$ROLLBACK_REVISION_GLOBAL" ]]; then
+        REV_INPUT="$ROLLBACK_REVISION_GLOBAL"
+      else
+        PREV_REVISION=$(( CURRENT_REVISION - 1 ))
+        read -rp "  Ревизия для отката '$RELEASE' [$PREV_REVISION]: " REV_INPUT
+        REV_INPUT="${REV_INPUT:-$PREV_REVISION}"
+      fi
+      echo -e "  ${CYAN}>>> helm rollback → ревизия $REV_INPUT${NC}"
+      if $HELM rollback "$RELEASE" "$REV_INPUT" \
+        -n "$NAMESPACE" \
+        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
+        echo -e "  ${GREEN}OK${NC}"
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|rollback r$REV_INPUT|OK")
+      else
+        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
+        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
+        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
+      fi
+      ;;
+
+    4)
+      echo -e "  ${CYAN}>>> kubectl apply -f manifest.yaml${NC}"
+      if $KUBECTL apply -f "$RELEASE_BACKUP/manifest.yaml" \
+        -n "$NAMESPACE" \
+        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
+        echo -e "  ${GREEN}OK${NC}"
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|kubectl apply|OK")
+      else
+        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
+        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
+        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
+      fi
+      ;;
+  esac
+
+done <<< "$RELEASES"
+
+# =============================================================
+# Таблица 1: Восстановлено
+# =============================================================
+echo ""
+echo "=========================================="
+echo "  ВОССТАНОВЛЕНО"
+echo "=========================================="
+printf "%-25s %-20s %-25s %-25s %-10s\n" \
+  "NAMESPACE" "RELEASE" "CHART" "МЕТОД" "СТАТУС"
+printf "%-25s %-20s %-25s %-25s %-10s\n" \
+  "-------------------------" "--------------------" \
+  "-------------------------" "-------------------------" "----------"
+
+if [[ ${#RESTORED[@]} -eq 0 ]]; then
+  echo "  Нет восстановленных релизов"
+else
+  for ROW in "${RESTORED[@]}"; do
+    IFS='|' read -r NS REL CHART METHOD STATUS <<< "$ROW"
+    printf "%-25s %-20s %-25s %-25s ${GREEN}%-10s${NC}\n" \
+      "$NS" "$REL" "$CHART" "$METHOD" "$STATUS"
+  done
+fi
+
+# =============================================================
+# Таблица 2: Пропущено
+# =============================================================
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+  echo ""
+  echo "=========================================="
+  echo "  ПРОПУЩЕНО"
+  echo "=========================================="
+  printf "%-25s %-20s %-30s\n" "NAMESPACE" "RELEASE" "ПРИЧИНА"
+  printf "%-25s %-20s %-30s\n" \
+    "-------------------------" "--------------------" "------------------------------"
+  for ROW in "${SKIPPED[@]}"; do
+    IFS='|' read -r NS REL REASON <<< "$ROW"
+    printf "%-25s %-20s ${YELLOW}%-30s${NC}\n" "$NS" "$REL" "$REASON"
+  done
+fi
+
+# =============================================================
+# Таблица 3: Ошибки
+# =============================================================
+echo ""
+echo "=========================================="
+echo "  ОШИБКИ"
+echo "=========================================="
+printf "%-25s %-20s %-40s\n" "NAMESPACE" "RELEASE" "ПРИЧИНА"
+printf "%-25s %-20s %-40s\n" \
+  "-------------------------" "--------------------" "----------------------------------------"
+
+if [[ ${#ERRORS[@]} -eq 0 ]]; then
+  echo "  Ошибок нет"
+else
+  for ROW in "${ERRORS[@]}"; do
+    IFS='|' read -r NS REL REASON <<< "$ROW"
+    printf "%-25s %-20s ${RED}%-40s${NC}\n" "$NS" "$REL" "$REASON"
+  done
+fi
 
 echo ""
-echo "=== Проверка после деплоя ==="
-$HELM status "$RELEASE" -n "$NAMESPACE"
+echo "Бэкапы: $BACKUP_DIR/"
+
+# --- Финальный статус подов ---
+echo ""
+echo "=== Поды в namespace: $NAMESPACE ==="
 $KUBECTL get pods -n "$NAMESPACE"
+
+
+---
+chmod +x helm-redeploy.sh
+
+# Интерактивно
+./helm-redeploy.sh
+
+# Все релизы в неймспейсе
+./helm-redeploy.sh schedule-dev
+
+# Конкретный релиз
+./helm-redeploy.sh schedule-dev link-table
