@@ -1,70 +1,14 @@
 #!/bin/bash
 # =============================================================
-# deploy.sh — запускается на мастер ноде
-# Скачивает чарты/values из GitLab и деплоит helm релизы
+# Helm Release — Export & Redeploy - Восстановление из последнего задеплоенного чарта 
+# Совместим с MicroK8s
+# # Интерактивно (спросит namespace и релиз)
+# ./helm-redeploy.sh
+
+# # Или сразу с параметрами
+# ./deploy.sh schedule-dev link-table
 # =============================================================
 set -euo pipefail
-
-# --- Конфиг ---
-GITLAB_URL="https://gitlab.example.com"
-GITLAB_TOKEN="glpat-xxxx"
-WORK_DIR="/opt/helm-deploy"
-DEPLOY_PAUSE=30
-ROLLOUT_TIMEOUT=60
-
-# "project_id:ref:release_name:registry_path"
-PROJECTS=(
-  "123:develop:audit:registry.example.com/audit/audit"
-  "456:main:schedule:registry.example.com/schedule/schedule"
-  "789:develop:payments:registry.example.com/payments/payments"
-)
-
-# =============================================================
-# --- Переопределение образов (опционально) ---
-# =============================================================
-
-# Переопределить registry path для конкретного project_id
-# "project_id:registry_path"
-OVERRIDE_REGISTRY=(
-  # "123:registry.example.com/my-custom/audit"
-)
-
-# Глобальные теги для всех проектов (пусто = брать из релиза)
-OVERRIDE_TAG_MAIN=""
-OVERRIDE_TAG_MIGRATIONS=""
-
-# Переопределить образы полностью для всех проектов
-OVERRIDE_IMAGE_MAIN=""
-OVERRIDE_IMAGE_MIGRATIONS=""
-
-# =============================================================
-# --- Принудительный деплой ---
-# Заполни нужные поля, остальные оставь пустыми
-# =============================================================
-
-# Деплоить ТОЛЬКО в этот неймспейс (пусто = все)
-FORCE_NAMESPACE=""
-
-# Принудительный registry path (пусто = из PROJECTS)
-FORCE_REGISTRY_PATH=""
-
-# Принудительные теги (пусто = из релиза)
-FORCE_TAG_MAIN=""
-FORCE_TAG_MIGRATIONS=""
-
-# =============================================================
-
-# --- Аргументы CLI (перезаписывают конфиг выше) ---
-# $1 — фильтр по неймспейсу
-# $2 — тег main
-# $3 — тег migrations
-# $4 — image main (полный)
-# $5 — image migrations (полный)
-FILTER_NAMESPACE="${1:-}"
-[[ -n "${2:-}" ]] && OVERRIDE_TAG_MAIN="$2"
-[[ -n "${3:-}" ]] && OVERRIDE_TAG_MIGRATIONS="$3"
-[[ -n "${4:-}" ]] && OVERRIDE_IMAGE_MAIN="$4"
-[[ -n "${5:-}" ]] && OVERRIDE_IMAGE_MIGRATIONS="$5"
 
 # --- Определяем команды для microk8s ---
 if command -v microk8s.helm3 &>/dev/null; then
@@ -86,445 +30,127 @@ fi
 
 echo "Используем: $HELM / $KUBECTL"
 
-# --- Цвета ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-NC='\033[0m'
+# --- Параметры ---
+NAMESPACE="${1:-}"
+RELEASE="${2:-}"
+BACKUP_DIR="./helm-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
 
-# --- Инфо о конфигурации ---
-echo ""
-echo "=== Конфигурация деплоя ==="
-echo "Фильтр namespace:          ${FILTER_NAMESPACE:-все}"
-echo "Override tag main:         ${OVERRIDE_TAG_MAIN:-из релиза}"
-echo "Override tag migrations:   ${OVERRIDE_TAG_MIGRATIONS:-из релиза}"
-echo "Override image main:       ${OVERRIDE_IMAGE_MAIN:-нет}"
-echo "Override image migrations: ${OVERRIDE_IMAGE_MIGRATIONS:-нет}"
-echo "--- Принудительный деплой ---"
-echo "Force namespace:           ${FORCE_NAMESPACE:-нет}"
-echo "Force registry path:       ${FORCE_REGISTRY_PATH:-нет}"
-echo "Force tag main:            ${FORCE_TAG_MAIN:-нет}"
-echo "Force tag migrations:      ${FORCE_TAG_MIGRATIONS:-нет}"
-echo "==========================="
-echo ""
-
-# --- Результаты ---
-DEPLOYED=()
-SKIPPED=()
-ERRORS=()
-DEPLOY_COUNT=0
-
-RUN_DIR="$WORK_DIR/run-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$RUN_DIR"
-
-echo "Рабочая директория: $RUN_DIR"
-
-# --- Функция: получить переменные проекта ---
-get_variables() {
-  local project_id=$1
-  curl -sf \
-    --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-    "$GITLAB_URL/api/v4/projects/$project_id/variables?per_page=100"
-}
-
-# --- Функция: скачать Helm чарт ---
-download_chart() {
-  local project_id=$1
-  local ref=$2
-  local dest=$3
-
-  curl -sf \
-    --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-    "$GITLAB_URL/api/v4/projects/$project_id/repository/archive.tar.gz?path=Helm&ref=$ref" \
-    -o "$dest/chart.tar.gz"
-
-  mkdir -p "$dest/chart"
-  tar -xzf "$dest/chart.tar.gz" -C "$dest/chart" --strip-components=2
-  rm -f "$dest/chart.tar.gz"
-}
-
-# --- Функция: получить тег main из helm values ---
-get_tag_main() {
-  local release=$1
-  local namespace=$2
-  local image
-  image=$($HELM get values "$release" -n "$namespace" 2>/dev/null | \
-    grep -E 'main:' | head -1 | awk '{print $2}' || true)
-  if [[ -n "$image" ]]; then
-    echo "$image" | grep -oP ':[^:]+$' | sed 's/^://'
-  else
-    echo ""
-  fi
-}
-
-# --- Функция: получить тег migrations из helm values ---
-get_tag_migrations() {
-  local release=$1
-  local namespace=$2
-  local image
-  image=$($HELM get values "$release" -n "$namespace" 2>/dev/null | \
-    grep -E 'migrations:' | head -1 | awk '{print $2}' || true)
-  if [[ -n "$image" ]]; then
-    echo "$image" | grep -oP ':[^:]+$' | sed 's/^://'
-  else
-    echo ""
-  fi
-}
-
-# --- Функция: ждать rollout ---
-wait_rollout() {
-  local namespace=$1
-  echo -e "  ${CYAN}Ожидаем rollout: $namespace (timeout: ${ROLLOUT_TIMEOUT}s)${NC}"
-
-  local all_ok=true
-
-  for KIND in deployment statefulset daemonset; do
-    RESOURCES=$($KUBECTL get "${KIND}s" -n "$namespace" \
-      -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-    if [[ -z "$RESOURCES" ]]; then
-      echo "    ${KIND}s: не найдены"
-      continue
-    fi
-
-    for RES in $RESOURCES; do
-      echo -e "    ${KIND}: $RES"
-      if ! $KUBECTL rollout status "${KIND}/${RES}" \
-        -n "$namespace" \
-        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
-        echo -e "  ${RED}Rollout не завершился: ${KIND}/${RES}${NC}"
-        all_ok=false
-      fi
-    done
-  done
-
-  if $all_ok; then
-    echo -e "  ${GREEN}Rollout OK${NC}"
-    return 0
-  else
-    return 1
-  fi
-}
-
-# --- Функция: показать память ---
-show_memory() {
-  echo -e "  ${CYAN}Память:${NC}"
-  $KUBECTL top nodes 2>/dev/null || true
-}
-
-# --- Основной цикл по проектам ---
-for PROJECT_ENTRY in "${PROJECTS[@]}"; do
-  IFS=':' read -r PROJECT_ID REF RELEASE_NAME REGISTRY_PATH <<< "$PROJECT_ENTRY"
-
+# --- Найти namespace если не передан ---
+if [[ -z "$NAMESPACE" ]]; then
   echo ""
-  echo -e "${BLUE}=========================================="
-  echo "  Проект: $PROJECT_ID | ref: $REF | release: $RELEASE_NAME"
-  echo "  Registry: $REGISTRY_PATH"
-  echo -e "==========================================${NC}"
+  echo "Доступные неймспейсы с helm релизами:"
+  $HELM list -A 2>/dev/null
+  echo ""
+  read -rp "Введи namespace: " NAMESPACE
+fi
 
-  PROJECT_DIR="$RUN_DIR/project-$PROJECT_ID"
-  mkdir -p "$PROJECT_DIR"
+# --- Найти релиз если не передан ---
+if [[ -z "$RELEASE" ]]; then
+  RELEASES=$($HELM list -n "$NAMESPACE" -q)
+  COUNT=$(echo "$RELEASES" | grep -c . || true)
 
-  # --- Переопределение registry для этого проекта ---
-  for OVERRIDE_ENTRY in "${OVERRIDE_REGISTRY[@]:-}"; do
-    [[ -z "$OVERRIDE_ENTRY" ]] && continue
-    IFS=':' read -r OVR_ID OVR_REG <<< "$OVERRIDE_ENTRY"
-    if [[ "$OVR_ID" == "$PROJECT_ID" ]]; then
-      echo -e "  ${YELLOW}Registry переопределён: $OVR_REG${NC}"
-      REGISTRY_PATH="$OVR_REG"
-    fi
-  done
-
-  # --- Получаем переменные ---
-  echo ">>> Получаем переменные из GitLab API..."
-  VARIABLES=$(get_variables "$PROJECT_ID") || {
-    echo -e "${RED}ERROR: Не удалось получить переменные проекта $PROJECT_ID${NC}"
-    ERRORS+=("project-$PROJECT_ID|—|—|Не удалось получить переменные из API")
-    continue
-  }
-
-  # --- Получаем все уникальные scope ---
-  SCOPES=$(echo "$VARIABLES" | jq -r '.[].environment_scope' | sort -u | grep -v '^\*$' || true)
-
-  if [[ -z "$SCOPES" ]]; then
-    echo -e "${YELLOW}Нет environment scope в проекте $PROJECT_ID${NC}"
-    ERRORS+=("project-$PROJECT_ID|—|—|Нет environment scope")
-    continue
+  if [[ "$COUNT" -eq 0 ]]; then
+    echo "ERROR: релизов в namespace '$NAMESPACE' не найдено"
+    exit 1
+  elif [[ "$COUNT" -eq 1 ]]; then
+    RELEASE="$RELEASES"
+    echo "Найден единственный релиз: $RELEASE"
+  else
+    echo "Релизы в namespace '$NAMESPACE':"
+    echo "$RELEASES"
+    read -rp "Введи имя релиза: " RELEASE
   fi
-
-  # --- Скачиваем чарт один раз на проект ---
-  echo ">>> Скачиваем Helm чарт (ref: $REF)..."
-  if ! download_chart "$PROJECT_ID" "$REF" "$PROJECT_DIR"; then
-    echo -e "${RED}ERROR: Не удалось скачать чарт проекта $PROJECT_ID${NC}"
-    ERRORS+=("project-$PROJECT_ID|—|—|Не удалось скачать Helm чарт")
-    continue
-  fi
-  echo "    Чарт скачан: $PROJECT_DIR/chart/"
-
-  # --- Цикл по scope ---
-  while IFS= read -r SCOPE; do
-    echo ""
-    echo -e "  ${YELLOW}>>> scope: $SCOPE${NC}"
-
-    SCOPE_DIR="$PROJECT_DIR/scopes/$SCOPE"
-    mkdir -p "$SCOPE_DIR"
-
-    # NAMESPACE
-    NAMESPACE=$(echo "$VARIABLES" | jq -r \
-      '.[] | select(.key == "NAMESPACE" and .environment_scope == "'"$SCOPE"'") | .value')
-
-    if [[ -z "$NAMESPACE" ]]; then
-      echo -e "  ${RED}NAMESPACE не найден для scope: $SCOPE${NC}"
-      ERRORS+=("project-$PROJECT_ID|$SCOPE|—|NAMESPACE не найден")
-      continue
-    fi
-
-    # --- Принудительный деплой — фильтр по FORCE_NAMESPACE ---
-    if [[ -n "$FORCE_NAMESPACE" ]]; then
-      if [[ "$NAMESPACE" != "$FORCE_NAMESPACE" ]]; then
-        echo -e "  ${YELLOW}Пропускаем: $NAMESPACE (не совпадает с FORCE_NAMESPACE)${NC}"
-        SKIPPED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Не совпадает с FORCE_NAMESPACE")
-        continue
-      fi
-      echo -e "  ${MAGENTA}ПРИНУДИТЕЛЬНЫЙ деплой → $FORCE_NAMESPACE${NC}"
-    # --- Обычный фильтр ---
-    elif [[ -n "$FILTER_NAMESPACE" && "$NAMESPACE" != "$FILTER_NAMESPACE" ]]; then
-      echo -e "  ${YELLOW}Пропускаем namespace: $NAMESPACE${NC}"
-      SKIPPED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Не входит в фильтр")
-      continue
-    fi
-
-    # VALUES
-    VALUES_CONTENT=$(echo "$VARIABLES" | jq -r \
-      '.[] | select(.key == "VALUES" and .environment_scope == "'"$SCOPE"'") | .value')
-
-    if [[ -n "$VALUES_CONTENT" ]]; then
-      echo "$VALUES_CONTENT" > "$SCOPE_DIR/values.yaml"
-      VALUES_FLAG="-f $SCOPE_DIR/values.yaml"
-    else
-      echo -e "  ${YELLOW}VALUES не найден — деплоим без values файла${NC}"
-      VALUES_FLAG=""
-    fi
-
-    echo "    Namespace: $NAMESPACE"
-    echo "    Release:   $RELEASE_NAME"
-
-    # --- Проверяем существует ли релиз ---
-    RELEASE_EXISTS=$($HELM list -n "$NAMESPACE" -q 2>/dev/null | grep -x "$RELEASE_NAME" || true)
-
-    if [[ -z "$RELEASE_EXISTS" ]]; then
-      echo -e "  ${YELLOW}Релиз не найден — устанавливаем новый (helm install)${NC}"
-      HELM_CMD="install"
-      TAG_MAIN="${FORCE_TAG_MAIN:-${OVERRIDE_TAG_MAIN:-}}"
-      TAG_MIGRATIONS="${FORCE_TAG_MIGRATIONS:-${OVERRIDE_TAG_MIGRATIONS:-}}"
-    else
-      echo -e "  ${GREEN}Релиз найден — обновляем (helm upgrade)${NC}"
-      HELM_CMD="upgrade"
-
-      # --- Тег main: FORCE > OVERRIDE > из релиза ---
-      if [[ -n "$FORCE_TAG_MAIN" ]]; then
-        TAG_MAIN="$FORCE_TAG_MAIN"
-        echo -e "    Тег main принудительный:       ${MAGENTA}${TAG_MAIN}${NC}"
-      elif [[ -n "$OVERRIDE_TAG_MAIN" ]]; then
-        TAG_MAIN="$OVERRIDE_TAG_MAIN"
-        echo -e "    Тег main переопределён:        ${YELLOW}${TAG_MAIN}${NC}"
-      else
-        TAG_MAIN=$(get_tag_main "$RELEASE_NAME" "$NAMESPACE")
-        echo -e "    Тег main из релиза:            ${TAG_MAIN:-не найден}"
-      fi
-
-      # --- Тег migrations: FORCE > OVERRIDE > из релиза ---
-      if [[ -n "$FORCE_TAG_MIGRATIONS" ]]; then
-        TAG_MIGRATIONS="$FORCE_TAG_MIGRATIONS"
-        echo -e "    Тег migrations принудительный: ${MAGENTA}${TAG_MIGRATIONS}${NC}"
-      elif [[ -n "$OVERRIDE_TAG_MIGRATIONS" ]]; then
-        TAG_MIGRATIONS="$OVERRIDE_TAG_MIGRATIONS"
-        echo -e "    Тег migrations переопределён:  ${YELLOW}${TAG_MIGRATIONS}${NC}"
-      else
-        TAG_MIGRATIONS=$(get_tag_migrations "$RELEASE_NAME" "$NAMESPACE")
-        echo -e "    Тег migrations из релиза:      ${TAG_MIGRATIONS:-не найден}"
-      fi
-    fi
-
-    # --- Определяем эффективный registry ---
-    EFFECTIVE_REGISTRY="${FORCE_REGISTRY_PATH:-$REGISTRY_PATH}"
-    if [[ -n "$FORCE_REGISTRY_PATH" ]]; then
-      echo -e "    Registry принудительный: ${MAGENTA}${EFFECTIVE_REGISTRY}${NC}"
-    fi
-
-    # --- Формируем image flags ---
-    if [[ -n "$OVERRIDE_IMAGE_MAIN" ]]; then
-      # Полное переопределение образов
-      IMAGE_MAIN="$OVERRIDE_IMAGE_MAIN"
-      IMAGE_MIGRATIONS="${OVERRIDE_IMAGE_MIGRATIONS:-$OVERRIDE_IMAGE_MAIN}"
-      echo -e "    Image main:       ${IMAGE_MAIN} ${YELLOW}(переопределён)${NC}"
-      echo -e "    Image migrations: ${IMAGE_MIGRATIONS} ${YELLOW}(переопределён)${NC}"
-      IMAGE_FLAGS="--set images.main=${IMAGE_MAIN} --set images.migrations=${IMAGE_MIGRATIONS}"
-      DISPLAY_TAG_MAIN="custom"
-      DISPLAY_TAG_MIGRATIONS="custom"
-    else
-      IMAGE_FLAGS=""
-
-      if [[ -n "$TAG_MAIN" ]]; then
-        IMAGE_MAIN="${EFFECTIVE_REGISTRY}:${TAG_MAIN}"
-        echo -e "    Image main:       ${IMAGE_MAIN}"
-        IMAGE_FLAGS+=" --set images.main=${IMAGE_MAIN}"
-        DISPLAY_TAG_MAIN="$TAG_MAIN"
-      else
-        echo -e "  ${YELLOW}Image main не задан — пропускаем --set images.main${NC}"
-        DISPLAY_TAG_MAIN="no-tag"
-      fi
-
-      if [[ -n "$TAG_MIGRATIONS" ]]; then
-        IMAGE_MIGRATIONS="${EFFECTIVE_REGISTRY}:${TAG_MIGRATIONS}"
-        echo -e "    Image migrations: ${IMAGE_MIGRATIONS}"
-        IMAGE_FLAGS+=" --set images.migrations=${IMAGE_MIGRATIONS}"
-        DISPLAY_TAG_MIGRATIONS="$TAG_MIGRATIONS"
-      else
-        echo -e "  ${YELLOW}Image migrations не задан — пропускаем --set images.migrations${NC}"
-        DISPLAY_TAG_MIGRATIONS="no-tag"
-      fi
-    fi
-
-    # --- Память до деплоя ---
-    show_memory
-
-    # --- Деплой ---
-    DEPLOY_LOG="$SCOPE_DIR/deploy.log"
-
-    if [[ "$HELM_CMD" == "install" ]]; then
-      HELM_OK=$($HELM install "$RELEASE_NAME" "$PROJECT_DIR/chart" \
-        -n "$NAMESPACE" \
-        --create-namespace \
-        $VALUES_FLAG \
-        $IMAGE_FLAGS \
-        > "$DEPLOY_LOG" 2>&1 && echo "ok" || echo "fail")
-    else
-      HELM_OK=$($HELM upgrade "$RELEASE_NAME" "$PROJECT_DIR/chart" \
-        -n "$NAMESPACE" \
-        --reuse-values \
-        $VALUES_FLAG \
-        $IMAGE_FLAGS \
-        > "$DEPLOY_LOG" 2>&1 && echo "ok" || echo "fail")
-    fi
-
-    if [[ "$HELM_OK" == "ok" ]]; then
-      echo -e "  ${GREEN}Helm $HELM_CMD OK${NC}"
-
-      if wait_rollout "$NAMESPACE"; then
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG_MAIN|$DISPLAY_TAG_MIGRATIONS|OK")
-      else
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|$DISPLAY_TAG_MAIN|$DISPLAY_TAG_MIGRATIONS|ROLLOUT_TIMEOUT")
-        ERRORS+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Rollout не завершился за ${ROLLOUT_TIMEOUT}s")
-      fi
-
-    else
-      ERROR_MSG=$(tail -3 "$DEPLOY_LOG" | tr '\n' ' ')
-      echo -e "  ${RED}ОШИБКА: $ERROR_MSG${NC}"
-      ERRORS+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$ERROR_MSG")
-    fi
-
-    DEPLOY_COUNT=$((DEPLOY_COUNT + 1))
-    echo -e "  ${CYAN}Пауза ${DEPLOY_PAUSE}s...${NC}"
-    sleep "$DEPLOY_PAUSE"
-
-  done <<< "$SCOPES"
-
-done
-
-# =============================================================
-# Таблица 1: Задеплоено
-# =============================================================
-echo ""
-echo "=========================================="
-echo "  ЗАДЕПЛОЕНО"
-echo "=========================================="
-printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s %-15s\n" \
-  "PROJECT" "SCOPE" "NAMESPACE" "RELEASE" "ACTION" "ТЕГ MAIN" "ТЕГ MIGRATIONS" "СТАТУС"
-printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s %-15s\n" \
-  "---------------" "------------------" "-------------------------" \
-  "------------" "----------" "-------------------------" "-------------------------" "---------------"
-
-if [[ ${#DEPLOYED[@]} -eq 0 ]]; then
-  echo "  Нет успешных деплоев"
-else
-  for ROW in "${DEPLOYED[@]}"; do
-    IFS='|' read -r PROJ SCOPE NS REL ACTION TAG_M TAG_MIG STATUS <<< "$ROW"
-    if [[ "$STATUS" == "OK" ]]; then
-      printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s ${GREEN}%-15s${NC}\n" \
-        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG_M" "$TAG_MIG" "$STATUS"
-    else
-      printf "%-15s %-18s %-25s %-12s %-10s %-25s %-25s ${YELLOW}%-15s${NC}\n" \
-        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$TAG_M" "$TAG_MIG" "$STATUS"
-    fi
-  done
-fi
-
-# =============================================================
-# Таблица 2: Пропущено
-# =============================================================
-echo ""
-echo "=========================================="
-echo "  ПРОПУЩЕНО"
-echo "=========================================="
-printf "%-15s %-18s %-25s %-30s\n" \
-  "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
-printf "%-15s %-18s %-25s %-30s\n" \
-  "---------------" "------------------" "-------------------------" \
-  "------------------------------"
-
-if [[ ${#SKIPPED[@]} -eq 0 ]]; then
-  echo "  Пропущенных нет"
-else
-  for ROW in "${SKIPPED[@]}"; do
-    IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
-    printf "%-15s %-18s %-25s ${YELLOW}%-30s${NC}\n" \
-      "$PROJ" "$SCOPE" "$NS" "$REASON"
-  done
-fi
-
-# =============================================================
-# Таблица 3: Ошибки
-# =============================================================
-echo ""
-echo "=========================================="
-echo "  ОШИБКИ"
-echo "=========================================="
-printf "%-15s %-18s %-25s %-40s\n" \
-  "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
-printf "%-15s %-18s %-25s %-40s\n" \
-  "---------------" "------------------" "-------------------------" \
-  "----------------------------------------"
-
-if [[ ${#ERRORS[@]} -eq 0 ]]; then
-  echo "  Ошибок нет"
-else
-  for ROW in "${ERRORS[@]}"; do
-    IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
-    printf "%-15s %-18s %-25s ${RED}%-40s${NC}\n" \
-      "$PROJ" "$SCOPE" "$NS" "$REASON"
-  done
 fi
 
 echo ""
-echo "Всего деплоев: $DEPLOY_COUNT"
-echo "Логи: $RUN_DIR/"
+echo "=== Экспорт релиза: $RELEASE / namespace: $NAMESPACE ==="
 
+# --- Получаем info через helm list -o json (без metadata) ---
+echo ">>> Info"
+RELEASE_JSON=$($HELM list -n "$NAMESPACE" -o json | jq '.[] | select(.name=="'"$RELEASE"'")')
+echo "$RELEASE_JSON" | tee "$BACKUP_DIR/info.json"
 
----
-# Всё из конфига в скрипте
-./deploy.sh
+CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
+CHART_NAME=$(echo "$CHART_FULL" | sed 's/-[0-9][0-9.]*$//')
+CHART_VERSION=$(echo "$CHART_FULL" | grep -oP '[0-9]+\.[0-9]+\.[0-9.]+[^"]*$')
+CURRENT_REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
 
-# Один неймспейс, теги из релиза
-./deploy.sh test-isua-load-audit
+echo ""
+echo ">>> Values"
+$HELM get values "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/values.yaml"
 
-# Один неймспейс, свои теги
-./deploy.sh test-isua-load-audit "abc123.bin" "abc123.migrations"
+echo ""
+echo ">>> Manifest"
+$HELM get manifest "$RELEASE" -n "$NAMESPACE" > "$BACKUP_DIR/manifest.yaml"
+echo "Сохранён: $BACKUP_DIR/manifest.yaml"
 
-# Принудительно — заполни в скрипте:
-FORCE_NAMESPACE="test-isua-load-audit"
-FORCE_TAG_MAIN="abc123.bin"
-FORCE_TAG_MIGRATIONS="abc123.migrations"
+echo ""
+echo ">>> История"
+$HELM history "$RELEASE" -n "$NAMESPACE" | tee "$BACKUP_DIR/history.txt"
+
+echo ""
+echo "=== Итого ==="
+echo "Chart:    $CHART_NAME"
+echo "Version:  $CHART_VERSION"
+echo "Revision: $CURRENT_REVISION"
+echo "Backup:   $BACKUP_DIR/"
+
+# --- Репозиторий ---
+echo ""
+echo ">>> Доступные helm репозитории:"
+$HELM repo list 2>/dev/null || echo "Репозитории не добавлены"
+
+echo ""
+echo "=========================================="
+echo "Что делаем?"
+echo "  1) helm upgrade --reuse-values (быстро, те же values)"
+echo "  2) helm upgrade -f values.yaml  (из сохранённого файла)"
+echo "  3) helm rollback               (откат на предыдущую ревизию)"
+echo "  4) kubectl apply -f manifest   (без helm, аварийный вариант)"
+echo "  5) Выйти"
+echo "=========================================="
+read -rp "Выбор [1-5]: " ACTION
+
+case "$ACTION" in
+  1)
+    echo ">>> Upgrade --reuse-values"
+    $HELM upgrade "$RELEASE" "$CHART_NAME" \
+      -n "$NAMESPACE" \
+      --reuse-values \
+      --version "$CHART_VERSION"
+    ;;
+  2)
+    echo ">>> Upgrade -f values.yaml"
+    read -rp "Укажи путь к чарту или repo/chart [${CHART_NAME}]: " CHART_INPUT
+    CHART_INPUT="${CHART_INPUT:-$CHART_NAME}"
+    $HELM upgrade "$RELEASE" "$CHART_INPUT" \
+      -n "$NAMESPACE" \
+      -f "$BACKUP_DIR/values.yaml" \
+      --version "$CHART_VERSION"
+    ;;
+  3)
+    PREV_REVISION=$(( CURRENT_REVISION - 1 ))
+    echo ">>> Rollback"
+    read -rp "Ревизия для отката [$PREV_REVISION]: " REV_INPUT
+    REV_INPUT="${REV_INPUT:-$PREV_REVISION}"
+    $HELM rollback "$RELEASE" "$REV_INPUT" -n "$NAMESPACE"
+    ;;
+  4)
+    echo ">>> kubectl apply -f manifest.yaml"
+    $KUBECTL apply -f "$BACKUP_DIR/manifest.yaml" -n "$NAMESPACE"
+    ;;
+  5)
+    echo "Выход. Бэкап сохранён в $BACKUP_DIR/"
+    exit 0
+    ;;
+  *)
+    echo "Неверный выбор"
+    exit 1
+    ;;
+esac
+
+echo ""
+echo "=== Проверка после деплоя ==="
+$HELM status "$RELEASE" -n "$NAMESPACE"
+$KUBECTL get pods -n "$NAMESPACE"
