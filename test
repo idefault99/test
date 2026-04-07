@@ -1,2 +1,8 @@
-key: NAMESPACE Environments: aos_test_isua_load Value: test-isua-load-audit
-key: VALUES Environments: aos_test_isua_load Value: yaml file
+# Список всех переменных проекта
+curl -s --header "PRIVATE-TOKEN: <your_token>" \
+  "https://gitlab.example.com/api/v4/projects/<project_id>/variables" | jq '.'
+
+# Только NAMESPACE переменные
+curl -s --header "PRIVATE-TOKEN: <your_token>" \
+  "https://gitlab.example.com/api/v4/projects/<project_id>/variables" | \
+  jq '.[] | select(.key == "NAMESPACE")'
