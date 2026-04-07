@@ -1,406 +1,426 @@
-#!/bin/bash
-# =============================================================
-# Helm Release — Export & Redeploy
-# Восстановление релизов из неймспейса с поддержкой тега образа
-# Совместим с MicroK8s
-#
-# Использование:
-#   ./helm-redeploy.sh                              # интерактивно
-#   ./helm-redeploy.sh schedule-dev                 # все релизы в неймспейсе
-#   ./helm-redeploy.sh schedule-dev link-table      # конкретный релиз
-#   ./helm-redeploy.sh schedule-dev "" abc123       # все релизы с тегом
-#   ./helm-redeploy.sh schedule-dev link-table abc123 # конкретный релиз с тегом
-# =============================================================
-set -euo pipefail
+# compare_tags.py v2
 
-# --- Цвета ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-NC='\033[0m'
+Сравнение тэгов из `values.yaml` с тэгами в Kubernetes. Вывод двумя таблицами: расхождения и совпадения.
 
-# --- Определяем команды для microk8s ---
-if command -v microk8s.helm3 &>/dev/null; then
-  HELM="microk8s.helm3"
-  KUBECTL="microk8s.kubectl"
-elif command -v microk8s &>/dev/null; then
-  helm() { microk8s helm "$@"; }
-  kubectl() { microk8s kubectl "$@"; }
-  export -f helm kubectl
-  HELM="helm"
-  KUBECTL="kubectl"
-elif command -v helm &>/dev/null; then
-  HELM="helm"
-  KUBECTL="kubectl"
-else
-  echo "ERROR: helm не найден"
-  exit 1
-fi
+## Установка
 
-echo "Используем: $HELM / $KUBECTL"
+```bash
+cat << 'EOF' > compare_tags.py
+#!/usr/bin/env python3
+"""
+Сравнение тэгов из values.yaml (вывод scan_values.py) с тэгами в Kubernetes.
 
-# --- Параметры ---
-NAMESPACE="${1:-}"
-FILTER_RELEASE="${2:-}"
-OVERRIDE_TAG="${3:-}"   # тег образа (опционально)
+Использование:
+    python3 compare_tags.py --input output.txt --stand test-dfgr --kubectl-cmd k
+    python3 compare_tags.py --input output.txt --stand test-dfgr --quiet
+"""
 
-BACKUP_DIR="./helm-backup-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$BACKUP_DIR"
+import argparse
+import subprocess
+import re
+import sys
+import os
+import json as json_mod
 
-# --- Результаты ---
-RESTORED=()
-SKIPPED=()
-ERRORS=()
 
-# --- Найти namespace если не передан ---
-if [[ -z "$NAMESPACE" ]]; then
-  echo ""
-  echo "Доступные неймспейсы с helm релизами:"
-  $HELM list -A 2>/dev/null
-  echo ""
-  read -rp "Введи namespace: " NAMESPACE
-fi
+# Цвета для терминала
+class Colors:
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    CYAN = "\033[96m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
 
-# --- Получаем список релизов ---
-RELEASES=$($HELM list -n "$NAMESPACE" -q 2>/dev/null || true)
-COUNT=$(echo "$RELEASES" | grep -c . || true)
 
-if [[ "$COUNT" -eq 0 ]]; then
-  echo -e "${RED}ERROR: релизов в namespace '$NAMESPACE' не найдено${NC}"
-  exit 1
-fi
+NO_COLORS = Colors()
+for attr in ["RED", "GREEN", "YELLOW", "CYAN", "BOLD", "DIM", "RESET"]:
+    setattr(NO_COLORS, attr, "")
 
-# --- Если передан конкретный релиз — проверяем что он существует ---
-if [[ -n "$FILTER_RELEASE" ]]; then
-  if ! echo "$RELEASES" | grep -qx "$FILTER_RELEASE"; then
-    echo -e "${RED}ERROR: релиз '$FILTER_RELEASE' не найден в namespace '$NAMESPACE'${NC}"
-    echo "Доступные релизы:"
-    echo "$RELEASES"
-    exit 1
-  fi
-  RELEASES="$FILTER_RELEASE"
-  COUNT=1
-fi
 
-echo ""
-echo -e "${BLUE}=== Найдено релизов в '$NAMESPACE': $COUNT ===${NC}"
-echo "$RELEASES"
+def run_cmd(cmd):
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+    return result.stdout, result.stderr, result.returncode
 
-# --- Если несколько релизов — спросить что делать ---
-if [[ "$COUNT" -gt 1 && -z "$FILTER_RELEASE" ]]; then
-  echo ""
-  echo "Восстановить:"
-  echo "  1) Все релизы в неймспейсе"
-  echo "  2) Выбрать конкретный"
-  read -rp "Выбор [1-2]: " NS_ACTION
-  if [[ "$NS_ACTION" == "2" ]]; then
-    read -rp "Введи имя релиза: " FILTER_RELEASE
-    if ! echo "$RELEASES" | grep -qx "$FILTER_RELEASE"; then
-      echo -e "${RED}ERROR: релиз '$FILTER_RELEASE' не найден${NC}"
-      exit 1
-    fi
-    RELEASES="$FILTER_RELEASE"
-    COUNT=1
-  fi
-fi
 
-# --- Спросить тег если не передан ---
-if [[ -z "$OVERRIDE_TAG" ]]; then
-  echo ""
-  read -rp "Тег образа (пусто = использовать текущий из релиза): " OVERRIDE_TAG
-fi
+def get_namespaces(kubectl, stand):
+    stdout, stderr, rc = run_cmd(f"{kubectl} get ns -o name")
+    if rc != 0:
+        return [], f"kubectl get ns failed: {stderr.strip()}"
+    namespaces = []
+    for line in stdout.strip().splitlines():
+        ns = line.strip().removeprefix("namespace/")
+        if ns.startswith(f"{stand}-") or ns == stand:
+            namespaces.append(ns)
+    return namespaces, ""
 
-if [[ -n "$OVERRIDE_TAG" ]]; then
-  echo -e "${MAGENTA}Тег образа: $OVERRIDE_TAG${NC}"
-else
-  echo -e "${CYAN}Тег образа: из текущего релиза${NC}"
-fi
 
-# --- Выбор действия ---
-echo ""
-echo "=========================================="
-echo "Что делаем со всеми релизами?"
-echo "  1) helm upgrade --reuse-values (те же values)"
-echo "  2) helm upgrade -f values.yaml (из сохранённого файла)"
-echo "  3) helm rollback               (откат на предыдущую ревизию)"
-echo "  4) kubectl apply -f manifest   (аварийный вариант)"
-echo "  5) Выйти"
-echo "=========================================="
-read -rp "Выбор [1-5]: " ACTION
+def get_images_from_ns(kubectl, ns):
+    """Получает образы из deployments и jobs через jsonpath.
+    Возвращает список (resource_kind, resource_name, image_path, tag)."""
+    images = []
+    seen = set()
 
-if [[ "$ACTION" == "5" ]]; then
-  echo "Выход."
-  exit 0
-fi
+    for kind, short in [("deployments", "deploy"), ("jobs", "job")]:
+        # jsonpath: для каждого ресурса выводим name и все images через разделитель
+        tpl = (
+            '{range .items[*]}'
+            '{.metadata.name}{"\\t"}'
+            '{range .spec.template.spec.containers[*]}'
+            '{.image}{"\\n"}'
+            '{end}'
+            '{range .spec.template.spec.initContainers[*]}'
+            '{.image}{"\\n"}'
+            '{end}'
+            '{"---\\n"}'
+            '{end}'
+        )
+        stdout, stderr, rc = run_cmd(
+            f"{kubectl} -n {ns} get {kind} -o jsonpath='{tpl}' 2>/dev/null"
+        )
+        if rc != 0 or not stdout.strip():
+            continue
 
-# --- Путь к чарту для варианта 2 ---
-CHART_INPUT_GLOBAL=""
-if [[ "$ACTION" == "2" ]]; then
-  read -rp "Путь к чарту или repo/chart (пусто — спросит для каждого): " CHART_INPUT_GLOBAL
-fi
+        current_name = ""
+        for line in stdout.strip().split("\n"):
+            line = line.strip()
+            if line == "---":
+                current_name = ""
+                continue
+            if "\t" in line:
+                parts = line.split("\t", 1)
+                current_name = parts[0]
+                img_str = parts[1].strip() if len(parts) > 1 else ""
+            else:
+                img_str = line
 
-# --- Ревизия для варианта 3 ---
-ROLLBACK_REVISION_GLOBAL=""
-if [[ "$ACTION" == "3" ]]; then
-  read -rp "Ревизия для отката (пусто = предыдущая для каждого): " ROLLBACK_REVISION_GLOBAL
-fi
+            if not img_str or not current_name:
+                continue
 
-# --- Функция: получить image из helm values по ключу ---
-get_image() {
-  local release=$1
-  local namespace=$2
-  local key=$3
-  $HELM get values "$release" -n "$namespace" 2>/dev/null | \
-    grep -E "^  ${key}:|^${key}:" | head -1 | awk '{print $2}' || true
-}
+            match = re.search(r'[^/\s]+(/\S+):(\S+)', img_str)
+            if match:
+                key = (short, current_name, match.group(1), match.group(2))
+                if key not in seen:
+                    seen.add(key)
+                    images.append(key)
 
-# --- Функция: получить registry path без тега ---
-get_registry_path() {
-  local image=$1
-  echo "$image" | sed 's/:[^:]*$//'
-}
+    return images
 
-# --- Функция: собрать --set флаги для образов ---
-build_image_flags() {
-  local release=$1
-  local namespace=$2
-  local tag=$3
 
-  local flags=""
+def parse_input_file(filepath):
+    entries = []
+    current_display = ""
 
-  local image_main
-  image_main=$(get_image "$release" "$namespace" "main")
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
 
-  local image_migrations
-  image_migrations=$(get_image "$release" "$namespace" "migrations")
+            entry = {
+                "raw": line,
+                "display_path": "",
+                "sub_name": "",
+                "image_path": "",
+                "tag": "",
+                "tpl_tag": "",
+                "is_error": False,
+            }
 
-  if [[ -n "$image_main" ]]; then
-    local registry_main
-    registry_main=$(get_registry_path "$image_main")
-    local new_main="${registry_main}:${tag}"
-    echo -e "    Image main:       ${CYAN}${image_main}${NC} → ${MAGENTA}${new_main}${NC}" >&2
-    flags+=" --set images.main=${new_main}"
-  else
-    echo -e "    ${YELLOW}images.main не найден в values — пропускаем${NC}" >&2
-  fi
+            segments = line.split("  —  ")
 
-  if [[ -n "$image_migrations" ]]; then
-    local registry_migrations
-    registry_migrations=$(get_registry_path "$image_migrations")
-    local new_migrations="${registry_migrations}:${tag}"
-    echo -e "    Image migrations: ${CYAN}${image_migrations}${NC} → ${MAGENTA}${new_migrations}${NC}" >&2
-    flags+=" --set images.migrations=${new_migrations}"
-  else
-    echo -e "    ${YELLOW}images.migrations не найден в values — пропускаем${NC}" >&2
-  fi
+            first = segments[0]
+            if first.strip():
+                sub_match = re.search(r'\((\S+)\)\s*$', first.strip())
+                if sub_match:
+                    entry["sub_name"] = sub_match.group(1)
+                    path_part = first[:first.rfind("(")].strip()
+                    if path_part:
+                        current_display = path_part
+                else:
+                    current_display = first.strip()
+            else:
+                sub_match = re.search(r'\((\S+)\)', first)
+                if sub_match:
+                    entry["sub_name"] = sub_match.group(1)
 
-  echo "$flags"
-}
+            entry["display_path"] = current_display
 
-# =============================================================
-# --- Цикл по релизам ---
-# =============================================================
-while IFS= read -r RELEASE; do
-  [[ -z "$RELEASE" ]] && continue
+            if "не найден" in line:
+                entry["is_error"] = True
 
-  echo ""
-  echo -e "${BLUE}=========================================="
-  echo "  Релиз: $RELEASE | namespace: $NAMESPACE"
-  echo -e "==========================================${NC}"
+            if len(segments) >= 2:
+                entry["image_path"] = segments[1].strip()
 
-  RELEASE_BACKUP="$BACKUP_DIR/$RELEASE"
-  mkdir -p "$RELEASE_BACKUP"
+            if len(segments) >= 3:
+                third = segments[2].strip()
+                tpl_match = re.search(r'\[(.*?)\]', third)
+                if tpl_match:
+                    entry["tpl_tag"] = f"[{tpl_match.group(1)}]"
+                    entry["tag"] = third[:third.rfind("[")].strip()
+                else:
+                    entry["tag"] = third
 
-  # --- Получаем info ---
-  RELEASE_JSON=$($HELM list -n "$NAMESPACE" -o json 2>/dev/null | \
-    jq '.[] | select(.name=="'"$RELEASE"'")' || true)
+            entries.append(entry)
 
-  if [[ -z "$RELEASE_JSON" ]]; then
-    echo -e "  ${RED}Не удалось получить info релиза — пропускаем${NC}"
-    ERRORS+=("$NAMESPACE|$RELEASE|Не удалось получить helm list -o json")
-    continue
-  fi
+    return entries
 
-  CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
-  CHART_NAME=$(echo "$CHART_FULL" | sed 's/-[0-9][0-9.]*$//')
-  CHART_VERSION=$(echo "$CHART_FULL" | grep -oP '[0-9]+\.[0-9]+\.[0-9.]+[^"]*$' || true)
-  CURRENT_REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
-  STATUS=$(echo "$RELEASE_JSON" | jq -r '.status')
 
-  echo "    Chart:    $CHART_FULL"
-  echo "    Revision: $CURRENT_REVISION"
-  echo "    Status:   $STATUS"
+def extract_module(display_path):
+    parts = display_path.split("/")
+    if parts[0] == "main":
+        return ""
+    return parts[0]
 
-  # --- Сохраняем values ---
-  echo "  Сохраняем values..."
-  $HELM get values "$RELEASE" -n "$NAMESPACE" > "$RELEASE_BACKUP/values.yaml" 2>/dev/null || true
 
-  # --- Сохраняем manifest ---
-  echo "  Сохраняем manifest..."
-  $HELM get manifest "$RELEASE" -n "$NAMESPACE" > "$RELEASE_BACKUP/manifest.yaml" 2>/dev/null || true
+def format_table(rows, c):
+    """Форматирует таблицу с выравниванием по колонкам.
+    rows: список кортежей (display_path, sub_name, image_path, repo_tag, tpl_tag, k8s_info)"""
+    if not rows:
+        return []
 
-  # --- Сохраняем историю ---
-  $HELM history "$RELEASE" -n "$NAMESPACE" > "$RELEASE_BACKUP/history.txt" 2>/dev/null || true
+    col1 = max(len(r[0]) for r in rows)
+    col2 = max((len(f"({r[1]})") for r in rows if r[1]), default=0)
+    col3 = max(len(r[2]) for r in rows)
+    col4 = max(len(r[3]) for r in rows)
+    col5 = max((len(r[4]) for r in rows if r[4]), default=0)
+    col6 = max((len(r[5]) for r in rows if r[5]), default=0)
 
-  echo -e "  ${CYAN}Бэкап: $RELEASE_BACKUP/${NC}"
+    lines = []
+    prev_display = None
+    for display_path, sub_name, image_path, repo_tag, tpl_tag, k8s_info in rows:
+        if display_path == prev_display:
+            col1_str = " " * col1
+        else:
+            col1_str = f"{display_path:<{col1}}"
+        prev_display = display_path
 
-  # --- Формируем image flags если задан тег ---
-  IMAGE_FLAGS=""
-  DISPLAY_TAG="из релиза"
+        if sub_name:
+            col2_str = f"({sub_name})"
+            col2_str = f"{col2_str:<{col2}}"
+        else:
+            col2_str = " " * col2 if col2 else ""
 
-  if [[ -n "$OVERRIDE_TAG" ]]; then
-    echo "  Определяем образы из текущего релиза..."
-    IMAGE_FLAGS=$(build_image_flags "$RELEASE" "$NAMESPACE" "$OVERRIDE_TAG")
-    DISPLAY_TAG="$OVERRIDE_TAG"
-  fi
+        spacer2 = "  " if col2 else ""
 
-  # --- Выполняем действие ---
-  case "$ACTION" in
-    1)
-      echo -e "  ${CYAN}>>> helm upgrade --reuse-values${NC}"
-      if $HELM upgrade "$RELEASE" "$CHART_NAME" \
-        -n "$NAMESPACE" \
-        --reuse-values \
-        --version "$CHART_VERSION" \
-        $IMAGE_FLAGS \
-        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
-        echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade --reuse-values|$DISPLAY_TAG|OK")
-      else
-        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
-        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
-        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
-      fi
-      ;;
+        line = f"{col1_str}{spacer2}{col2_str}  —  {image_path:<{col3}}  —  {repo_tag:<{col4}}"
 
-    2)
-      if [[ -n "$CHART_INPUT_GLOBAL" ]]; then
-        CHART_INPUT="$CHART_INPUT_GLOBAL"
-      else
-        read -rp "  Путь к чарту для '$RELEASE' [${CHART_NAME}]: " CHART_INPUT
-        CHART_INPUT="${CHART_INPUT:-$CHART_NAME}"
-      fi
-      echo -e "  ${CYAN}>>> helm upgrade -f values.yaml (чарт: $CHART_INPUT)${NC}"
-      if $HELM upgrade "$RELEASE" "$CHART_INPUT" \
-        -n "$NAMESPACE" \
-        -f "$RELEASE_BACKUP/values.yaml" \
-        --version "$CHART_VERSION" \
-        $IMAGE_FLAGS \
-        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
-        echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade -f values.yaml|$DISPLAY_TAG|OK")
-      else
-        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
-        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
-        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
-      fi
-      ;;
+        if tpl_tag:
+            line = f"{line}  {tpl_tag:<{col5}}"
+        elif col5:
+            line = f"{line}  {' ' * col5}"
 
-    3)
-      if [[ -n "$ROLLBACK_REVISION_GLOBAL" ]]; then
-        REV_INPUT="$ROLLBACK_REVISION_GLOBAL"
-      else
-        PREV_REVISION=$(( CURRENT_REVISION - 1 ))
-        read -rp "  Ревизия для отката '$RELEASE' [$PREV_REVISION]: " REV_INPUT
-        REV_INPUT="${REV_INPUT:-$PREV_REVISION}"
-      fi
-      echo -e "  ${CYAN}>>> helm rollback → ревизия $REV_INPUT${NC}"
-      if $HELM rollback "$RELEASE" "$REV_INPUT" \
-        -n "$NAMESPACE" \
-        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
-        echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|rollback r$REV_INPUT|$DISPLAY_TAG|OK")
-      else
-        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
-        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
-        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
-      fi
-      ;;
+        if k8s_info:
+            line = f"{line}  —  {k8s_info}"
 
-    4)
-      echo -e "  ${CYAN}>>> kubectl apply -f manifest.yaml${NC}"
-      if $KUBECTL apply -f "$RELEASE_BACKUP/manifest.yaml" \
-        -n "$NAMESPACE" \
-        > "$RELEASE_BACKUP/deploy.log" 2>&1; then
-        echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|kubectl apply|$DISPLAY_TAG|OK")
-      else
-        ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
-        echo -e "  ${RED}ОШИБКА: $ERR${NC}"
-        ERRORS+=("$NAMESPACE|$RELEASE|$ERR")
-      fi
-      ;;
-  esac
+        lines.append(line)
 
-done <<< "$RELEASES"
+    return lines
 
-# =============================================================
-# Таблица 1: Восстановлено
-# =============================================================
-echo ""
-echo "=========================================="
-echo "  ВОССТАНОВЛЕНО"
-echo "=========================================="
-printf "%-25s %-20s %-25s %-25s %-15s %-10s\n" \
-  "NAMESPACE" "RELEASE" "CHART" "МЕТОД" "ТЕГ" "СТАТУС"
-printf "%-25s %-20s %-25s %-25s %-15s %-10s\n" \
-  "-------------------------" "--------------------" \
-  "-------------------------" "-------------------------" \
-  "---------------" "----------"
 
-if [[ ${#RESTORED[@]} -eq 0 ]]; then
-  echo "  Нет восстановленных релизов"
-else
-  for ROW in "${RESTORED[@]}"; do
-    IFS='|' read -r NS REL CHART METHOD TAG STATUS <<< "$ROW"
-    printf "%-25s %-20s %-25s %-25s %-15s ${GREEN}%-10s${NC}\n" \
-      "$NS" "$REL" "$CHART" "$METHOD" "$TAG" "$STATUS"
-  done
-fi
+def main():
+    parser = argparse.ArgumentParser(description="Сравнение тэгов values.yaml с Kubernetes")
+    parser.add_argument("--input", required=True, help="Файл с выводом scan_values.py")
+    parser.add_argument("--stand", required=True, help="Название стенда (префикс неймспейса)")
+    parser.add_argument("--kubectl-cmd", default="k", help="Команда kubectl (по умолчанию: k)")
+    parser.add_argument("--output", default="compare_result.txt", help="Файл для вывода")
+    parser.add_argument("--quiet", action="store_true", help="Выводить только расхождения")
+    args = parser.parse_args()
 
-# =============================================================
-# Таблица 2: Пропущено
-# =============================================================
-if [[ ${#SKIPPED[@]} -gt 0 ]]; then
-  echo ""
-  echo "=========================================="
-  echo "  ПРОПУЩЕНО"
-  echo "=========================================="
-  printf "%-25s %-20s %-30s\n" "NAMESPACE" "RELEASE" "ПРИЧИНА"
-  printf "%-25s %-20s %-30s\n" \
-    "-------------------------" "--------------------" "------------------------------"
-  for ROW in "${SKIPPED[@]}"; do
-    IFS='|' read -r NS REL REASON <<< "$ROW"
-    printf "%-25s %-20s ${YELLOW}%-30s${NC}\n" "$NS" "$REL" "$REASON"
-  done
-fi
+    use_color = sys.stdout.isatty()
+    c = Colors() if use_color else NO_COLORS
+    errors = []
 
-# =============================================================
-# Таблица 3: Ошибки
-# =============================================================
-echo ""
-echo "=========================================="
-echo "  ОШИБКИ"
-echo "=========================================="
-printf "%-25s %-20s %-40s\n" "NAMESPACE" "RELEASE" "ПРИЧИНА"
-printf "%-25s %-20s %-40s\n" \
-  "-------------------------" "--------------------" "----------------------------------------"
+    # Парсим входной файл
+    try:
+        entries = parse_input_file(args.input)
+    except Exception as e:
+        print(f"Ошибка чтения входного файла: {e}", file=sys.stderr)
+        sys.exit(1)
 
-if [[ ${#ERRORS[@]} -eq 0 ]]; then
-  echo "  Ошибок нет"
-else
-  for ROW in "${ERRORS[@]}"; do
-    IFS='|' read -r NS REL REASON <<< "$ROW"
-    printf "%-25s %-20s ${RED}%-40s${NC}\n" "$NS" "$REL" "$REASON"
-  done
-fi
+    if not entries:
+        print("Входной файл пуст.")
+        sys.exit(0)
 
-echo ""
-echo "Бэкапы: $BACKUP_DIR/"
+    # Неймспейсы
+    namespaces, ns_err = get_namespaces(args.kubectl_cmd, args.stand)
+    if ns_err:
+        errors.append(ns_err)
 
-echo ""
-echo "=== Поды в namespace: $NAMESPACE ==="
-$KUBECTL get pods -n "$NAMESPACE"
+    # Модули
+    modules = set()
+    for e in entries:
+        m = extract_module(e["display_path"])
+        if m:
+            modules.add(m)
+
+    module_to_ns = {}
+    for m in modules:
+        expected_ns = f"{args.stand}-{m}"
+        if expected_ns in namespaces:
+            module_to_ns[m] = expected_ns
+
+    # Кэш образов из k8s
+    ns_images_cache = {}
+
+    def get_ns_images(ns):
+        if ns not in ns_images_cache:
+            try:
+                ns_images_cache[ns] = get_images_from_ns(args.kubectl_cmd, ns)
+            except Exception as e:
+                errors.append(f"Ошибка получения образов из ns '{ns}': {e}")
+                ns_images_cache[ns] = []
+        return ns_images_cache[ns]
+
+    # Сравнение
+    diff_rows = []   # расхождения
+    ok_rows = []     # совпадения
+    error_rows = []  # ошибки парсинга (нет values.yaml и т.д.)
+
+    for entry in entries:
+        module = extract_module(entry["display_path"])
+
+        if not module or entry["is_error"]:
+            error_rows.append((
+                entry["display_path"], entry["sub_name"],
+                entry["image_path"], entry["tag"],
+                entry["tpl_tag"], ""
+            ))
+            continue
+
+        ns = module_to_ns.get(module)
+        if not ns:
+            diff_rows.append((
+                entry["display_path"], entry["sub_name"],
+                entry["image_path"], entry["tag"],
+                entry["tpl_tag"], "ns не найден"
+            ))
+            err_msg = f"Неймспейс для модуля '{module}' не найден среди {args.stand}-*"
+            if err_msg not in errors:
+                errors.append(err_msg)
+            continue
+
+        k8s_images = get_ns_images(ns)
+        image_path = entry["image_path"].strip()
+        tag = entry["tag"].strip()
+
+        if not image_path or not tag:
+            error_rows.append((
+                entry["display_path"], entry["sub_name"],
+                entry["image_path"], entry["tag"],
+                entry["tpl_tag"], ""
+            ))
+            continue
+
+        # Ищем ВСЕ совпадения по image path (может быть в нескольких deploy/job)
+        matches = [
+            (kind, name, k8s_tag)
+            for kind, name, k8s_path, k8s_tag in k8s_images
+            if k8s_path == image_path
+        ]
+
+        if not matches:
+            diff_rows.append((
+                entry["display_path"], entry["sub_name"],
+                image_path, tag,
+                entry["tpl_tag"], "не найден в k8s"
+            ))
+            continue
+
+        for kind, name, k8s_tag in matches:
+            resource_label = f"{kind}/{name}"
+            if k8s_tag == tag:
+                ok_rows.append((
+                    entry["display_path"], entry["sub_name"],
+                    image_path, tag,
+                    entry["tpl_tag"], resource_label
+                ))
+            else:
+                diff_rows.append((
+                    entry["display_path"], entry["sub_name"],
+                    image_path, tag,
+                    entry["tpl_tag"], f"k8s: {k8s_tag} ({resource_label})"
+                ))
+
+    # Вывод
+    output_lines = []
+
+    if diff_rows or error_rows:
+        output_lines.append(f"{c.BOLD}{c.RED}=== РАСХОЖДЕНИЯ ==={c.RESET}")
+        output_lines.append("")
+        all_diff = diff_rows + error_rows
+        for line in format_table(all_diff, c):
+            output_lines.append(line)
+    else:
+        output_lines.append(f"{c.BOLD}{c.GREEN}Расхождений нет.{c.RESET}")
+
+    if ok_rows and not args.quiet:
+        output_lines.append("")
+        output_lines.append(f"{c.BOLD}{c.GREEN}=== СОВПАДЕНИЯ ==={c.RESET}")
+        output_lines.append("")
+        for line in format_table(ok_rows, c):
+            output_lines.append(line)
+
+    # Вывод в stdout
+    for line in output_lines:
+        print(line)
+
+    # Запись в файл (без цветов)
+    try:
+        # Убираем ANSI-коды для файла
+        ansi_escape = re.compile(r'\033\[[0-9;]*m')
+        with open(args.output, "w", encoding="utf-8") as f:
+            for line in output_lines:
+                f.write(ansi_escape.sub("", line) + "\n")
+
+            if errors:
+                f.write("\n" + "=" * 80 + "\n")
+                f.write("ОШИБКИ:\n")
+                f.write("=" * 80 + "\n")
+                for err in errors:
+                    f.write(f"  * {err}\n")
+
+        print(f"\n{c.DIM}Результат записан в {args.output}{c.RESET}")
+    except Exception as e:
+        print(f"Ошибка записи в файл: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if errors:
+        print(f"\n{c.YELLOW}ОШИБКИ ({len(errors)}):{c.RESET}")
+        for err in errors:
+            print(f"  {c.YELLOW}*{c.RESET} {err}")
+
+
+if __name__ == "__main__":
+    main()
+EOF
+chmod +x compare_tags.py
+```
+
+## Использование
+
+```bash
+# Полный вывод (расхождения + совпадения)
+python3 compare_tags.py --input scan_output.txt --stand test-dfgr --kubectl-cmd k
+
+# Только расхождения
+python3 compare_tags.py --input scan_output.txt --stand test-dfgr --quiet
+```
+
+|Параметр       |Описание                            |По умолчанию        |
+|---------------|------------------------------------|--------------------|
+|`--input`      |Файл с выводом `scan_values.py`     |—                   |
+|`--stand`      |Название стенда (префикс неймспейса)|—                   |
+|`--kubectl-cmd`|Команда kubectl                     |`k`                 |
+|`--output`     |Файл для вывода                     |`compare_result.txt`|
+|`--quiet`      |Только расхождения                  |`false`             |
+
+## Что изменилось в v2
+
+- **jsonpath вместо describe+grep** — один вызов на ресурс, точный парсинг, включая initContainers
+- **Дедупликация** — один и тот же образ в нескольких deployments обрабатывается корректно, каждое совпадение выводится отдельно
+- **Имя ресурса** — в выводе видно `deploy/app-name` или `job/migrate-job`
+- **Две таблицы** — расхождения сверху, совпадения снизу
+- **Цветной вывод** — в терминале красный/зелёный, в файл без цветов
+- **`--quiet`** — показать только проблемы
