@@ -1,8 +1,22 @@
-# Список всех переменных проекта
-curl -s --header "PRIVATE-TOKEN: <your_token>" \
-  "https://gitlab.example.com/api/v4/projects/<project_id>/variables" | jq '.'
-
-# Только NAMESPACE переменные
-curl -s --header "PRIVATE-TOKEN: <your_token>" \
-  "https://gitlab.example.com/api/v4/projects/<project_id>/variables" | \
-  jq '.[] | select(.key == "NAMESPACE")'
+  {
+    "variable_type": "env_var",
+    "key": "NAMESPACE",
+    "value": "schedule-dev-audit",
+    "hidden": false,
+    "protected": false,
+    "masked": false,
+    "raw": false,
+    "environment_scope": "aos_schedule_dev",
+    "description": null
+  },
+  {
+    "variable_type": "file",
+    "key": "VALUES",
+    "value": "imagePullSecret: regcred-3\nbaseNs: schedule-dev\nenableBatchRead: false\nconfigmap:\n   replicas: 20",
+    "hidden": false,
+    "protected": false,
+    "masked": false,
+    "raw": false,
+    "environment_scope": "aos_schedule_dev",
+    "description": null
+  }
