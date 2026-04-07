@@ -1,13 +1,15 @@
 #!/bin/bash
 # =============================================================
 # Helm Release — Export & Redeploy
-# Восстановление релизов из неймспейса
+# Восстановление релизов из неймспейса с поддержкой тега образа
 # Совместим с MicroK8s
 #
 # Использование:
-#   ./helm-redeploy.sh                        # интерактивно
-#   ./helm-redeploy.sh schedule-dev           # все релизы в неймспейсе
-#   ./helm-redeploy.sh schedule-dev link-table # конкретный релиз
+#   ./helm-redeploy.sh                              # интерактивно
+#   ./helm-redeploy.sh schedule-dev                 # все релизы в неймспейсе
+#   ./helm-redeploy.sh schedule-dev link-table      # конкретный релиз
+#   ./helm-redeploy.sh schedule-dev "" abc123       # все релизы с тегом
+#   ./helm-redeploy.sh schedule-dev link-table abc123 # конкретный релиз с тегом
 # =============================================================
 set -euo pipefail
 
@@ -17,6 +19,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # --- Определяем команды для microk8s ---
@@ -42,6 +45,8 @@ echo "Используем: $HELM / $KUBECTL"
 # --- Параметры ---
 NAMESPACE="${1:-}"
 FILTER_RELEASE="${2:-}"
+OVERRIDE_TAG="${3:-}"   # тег образа (опционально)
+
 BACKUP_DIR="./helm-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
@@ -102,7 +107,19 @@ if [[ "$COUNT" -gt 1 && -z "$FILTER_RELEASE" ]]; then
   fi
 fi
 
-# --- Выбор действия (один раз для всех релизов) ---
+# --- Спросить тег если не передан ---
+if [[ -z "$OVERRIDE_TAG" ]]; then
+  echo ""
+  read -rp "Тег образа (пусто = использовать текущий из релиза): " OVERRIDE_TAG
+fi
+
+if [[ -n "$OVERRIDE_TAG" ]]; then
+  echo -e "${MAGENTA}Тег образа: $OVERRIDE_TAG${NC}"
+else
+  echo -e "${CYAN}Тег образа: из текущего релиза${NC}"
+fi
+
+# --- Выбор действия ---
 echo ""
 echo "=========================================="
 echo "Что делаем со всеми релизами?"
@@ -122,7 +139,7 @@ fi
 # --- Путь к чарту для варианта 2 ---
 CHART_INPUT_GLOBAL=""
 if [[ "$ACTION" == "2" ]]; then
-  read -rp "Путь к чарту или repo/chart (можно оставить пустым — спросит для каждого): " CHART_INPUT_GLOBAL
+  read -rp "Путь к чарту или repo/chart (пусто — спросит для каждого): " CHART_INPUT_GLOBAL
 fi
 
 # --- Ревизия для варианта 3 ---
@@ -130,6 +147,58 @@ ROLLBACK_REVISION_GLOBAL=""
 if [[ "$ACTION" == "3" ]]; then
   read -rp "Ревизия для отката (пусто = предыдущая для каждого): " ROLLBACK_REVISION_GLOBAL
 fi
+
+# --- Функция: получить image из helm values по ключу ---
+get_image() {
+  local release=$1
+  local namespace=$2
+  local key=$3
+  $HELM get values "$release" -n "$namespace" 2>/dev/null | \
+    grep -E "^  ${key}:|^${key}:" | head -1 | awk '{print $2}' || true
+}
+
+# --- Функция: получить registry path без тега ---
+get_registry_path() {
+  local image=$1
+  echo "$image" | sed 's/:[^:]*$//'
+}
+
+# --- Функция: собрать --set флаги для образов ---
+build_image_flags() {
+  local release=$1
+  local namespace=$2
+  local tag=$3
+
+  local flags=""
+
+  local image_main
+  image_main=$(get_image "$release" "$namespace" "main")
+
+  local image_migrations
+  image_migrations=$(get_image "$release" "$namespace" "migrations")
+
+  if [[ -n "$image_main" ]]; then
+    local registry_main
+    registry_main=$(get_registry_path "$image_main")
+    local new_main="${registry_main}:${tag}"
+    echo -e "    Image main:       ${CYAN}${image_main}${NC} → ${MAGENTA}${new_main}${NC}" >&2
+    flags+=" --set images.main=${new_main}"
+  else
+    echo -e "    ${YELLOW}images.main не найден в values — пропускаем${NC}" >&2
+  fi
+
+  if [[ -n "$image_migrations" ]]; then
+    local registry_migrations
+    registry_migrations=$(get_registry_path "$image_migrations")
+    local new_migrations="${registry_migrations}:${tag}"
+    echo -e "    Image migrations: ${CYAN}${image_migrations}${NC} → ${MAGENTA}${new_migrations}${NC}" >&2
+    flags+=" --set images.migrations=${new_migrations}"
+  else
+    echo -e "    ${YELLOW}images.migrations не найден в values — пропускаем${NC}" >&2
+  fi
+
+  echo "$flags"
+}
 
 # =============================================================
 # --- Цикл по релизам ---
@@ -165,11 +234,6 @@ while IFS= read -r RELEASE; do
   echo "    Revision: $CURRENT_REVISION"
   echo "    Status:   $STATUS"
 
-  # --- Пропускаем если уже deployed и не принудительно ---
-  if [[ "$STATUS" == "deployed" && "$ACTION" != "3" ]]; then
-    echo -e "  ${YELLOW}Статус: deployed — всё равно восстанавливаем${NC}"
-  fi
-
   # --- Сохраняем values ---
   echo "  Сохраняем values..."
   $HELM get values "$RELEASE" -n "$NAMESPACE" > "$RELEASE_BACKUP/values.yaml" 2>/dev/null || true
@@ -183,6 +247,16 @@ while IFS= read -r RELEASE; do
 
   echo -e "  ${CYAN}Бэкап: $RELEASE_BACKUP/${NC}"
 
+  # --- Формируем image flags если задан тег ---
+  IMAGE_FLAGS=""
+  DISPLAY_TAG="из релиза"
+
+  if [[ -n "$OVERRIDE_TAG" ]]; then
+    echo "  Определяем образы из текущего релиза..."
+    IMAGE_FLAGS=$(build_image_flags "$RELEASE" "$NAMESPACE" "$OVERRIDE_TAG")
+    DISPLAY_TAG="$OVERRIDE_TAG"
+  fi
+
   # --- Выполняем действие ---
   case "$ACTION" in
     1)
@@ -191,9 +265,10 @@ while IFS= read -r RELEASE; do
         -n "$NAMESPACE" \
         --reuse-values \
         --version "$CHART_VERSION" \
+        $IMAGE_FLAGS \
         > "$RELEASE_BACKUP/deploy.log" 2>&1; then
         echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade --reuse-values|OK")
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade --reuse-values|$DISPLAY_TAG|OK")
       else
         ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
         echo -e "  ${RED}ОШИБКА: $ERR${NC}"
@@ -213,9 +288,10 @@ while IFS= read -r RELEASE; do
         -n "$NAMESPACE" \
         -f "$RELEASE_BACKUP/values.yaml" \
         --version "$CHART_VERSION" \
+        $IMAGE_FLAGS \
         > "$RELEASE_BACKUP/deploy.log" 2>&1; then
         echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade -f values.yaml|OK")
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|upgrade -f values.yaml|$DISPLAY_TAG|OK")
       else
         ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
         echo -e "  ${RED}ОШИБКА: $ERR${NC}"
@@ -236,7 +312,7 @@ while IFS= read -r RELEASE; do
         -n "$NAMESPACE" \
         > "$RELEASE_BACKUP/deploy.log" 2>&1; then
         echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|rollback r$REV_INPUT|OK")
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|rollback r$REV_INPUT|$DISPLAY_TAG|OK")
       else
         ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
         echo -e "  ${RED}ОШИБКА: $ERR${NC}"
@@ -250,7 +326,7 @@ while IFS= read -r RELEASE; do
         -n "$NAMESPACE" \
         > "$RELEASE_BACKUP/deploy.log" 2>&1; then
         echo -e "  ${GREEN}OK${NC}"
-        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|kubectl apply|OK")
+        RESTORED+=("$NAMESPACE|$RELEASE|$CHART_FULL|kubectl apply|$DISPLAY_TAG|OK")
       else
         ERR=$(tail -3 "$RELEASE_BACKUP/deploy.log" | tr '\n' ' ')
         echo -e "  ${RED}ОШИБКА: $ERR${NC}"
@@ -268,19 +344,20 @@ echo ""
 echo "=========================================="
 echo "  ВОССТАНОВЛЕНО"
 echo "=========================================="
-printf "%-25s %-20s %-25s %-25s %-10s\n" \
-  "NAMESPACE" "RELEASE" "CHART" "МЕТОД" "СТАТУС"
-printf "%-25s %-20s %-25s %-25s %-10s\n" \
+printf "%-25s %-20s %-25s %-25s %-15s %-10s\n" \
+  "NAMESPACE" "RELEASE" "CHART" "МЕТОД" "ТЕГ" "СТАТУС"
+printf "%-25s %-20s %-25s %-25s %-15s %-10s\n" \
   "-------------------------" "--------------------" \
-  "-------------------------" "-------------------------" "----------"
+  "-------------------------" "-------------------------" \
+  "---------------" "----------"
 
 if [[ ${#RESTORED[@]} -eq 0 ]]; then
   echo "  Нет восстановленных релизов"
 else
   for ROW in "${RESTORED[@]}"; do
-    IFS='|' read -r NS REL CHART METHOD STATUS <<< "$ROW"
-    printf "%-25s %-20s %-25s %-25s ${GREEN}%-10s${NC}\n" \
-      "$NS" "$REL" "$CHART" "$METHOD" "$STATUS"
+    IFS='|' read -r NS REL CHART METHOD TAG STATUS <<< "$ROW"
+    printf "%-25s %-20s %-25s %-25s %-15s ${GREEN}%-10s${NC}\n" \
+      "$NS" "$REL" "$CHART" "$METHOD" "$TAG" "$STATUS"
   done
 fi
 
@@ -324,20 +401,6 @@ fi
 echo ""
 echo "Бэкапы: $BACKUP_DIR/"
 
-# --- Финальный статус подов ---
 echo ""
 echo "=== Поды в namespace: $NAMESPACE ==="
 $KUBECTL get pods -n "$NAMESPACE"
-
-
----
-chmod +x helm-redeploy.sh
-
-# Интерактивно
-./helm-redeploy.sh
-
-# Все релизы в неймспейсе
-./helm-redeploy.sh schedule-dev
-
-# Конкретный релиз
-./helm-redeploy.sh schedule-dev link-table
