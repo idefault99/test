@@ -1,20 +1,10 @@
-#!/bin/bash
-# =============================================================
-# Helm — Redeploy all environments from GitLab projects
-# с rate limiting между деплоями
-# =============================================================
-set -euo pipefail
-
-# --- Конфиг ---
+# config.sh
 GITLAB_URL="https://gitlab.example.com"
 GITLAB_TOKEN="glpat-xxxx"
-
-# Пауза между деплоями (секунды)
+MASTER_HOST="user@master-node-ip"
+MASTER_WORK_DIR="/opt/helm-deploy"
 DEPLOY_PAUSE=30
-# Таймаут ожидания rollout (секунды)
-ROLLOUT_TIMEOUT=120
-# Максимум параллельных деплоев (1 = строго последовательно)
-MAX_PARALLEL=1
+ROLLOUT_TIMEOUT=60
 
 # "project_id:ref:release_name"
 PROJECTS=(
@@ -22,6 +12,139 @@ PROJECTS=(
   "456:main:schedule"
   "789:develop:payments"
 )
+---
+#!/bin/bash
+# =============================================================
+# fetch.sh — запускается локально
+# Скачивает чарты и values из GitLab, пушит на мастер по SCP
+# =============================================================
+set -euo pipefail
+
+source "$(dirname "$0")/config.sh"
+
+WORK_DIR="./helm-fetch-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$WORK_DIR"
+
+echo "=== Fetch started: $WORK_DIR ==="
+
+# --- Функция: получить переменные проекта ---
+get_variables() {
+  local project_id=$1
+  curl -sf \
+    --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+    "$GITLAB_URL/api/v4/projects/$project_id/variables?per_page=100"
+}
+
+# --- Функция: скачать Helm чарт ---
+download_chart() {
+  local project_id=$1
+  local ref=$2
+  local dest=$3
+
+  curl -sf \
+    --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+    "$GITLAB_URL/api/v4/projects/$project_id/repository/archive.tar.gz?path=Helm&ref=$ref" \
+    -o "$dest/chart.tar.gz"
+
+  mkdir -p "$dest/chart"
+  tar -xzf "$dest/chart.tar.gz" -C "$dest/chart" --strip-components=2
+  rm -f "$dest/chart.tar.gz"
+}
+
+# --- Цикл по проектам ---
+for PROJECT_ENTRY in "${PROJECTS[@]}"; do
+  IFS=':' read -r PROJECT_ID REF RELEASE_NAME <<< "$PROJECT_ENTRY"
+
+  echo ""
+  echo "--- Проект: $PROJECT_ID | ref: $REF | release: $RELEASE_NAME ---"
+
+  PROJECT_DIR="$WORK_DIR/project-$PROJECT_ID"
+  mkdir -p "$PROJECT_DIR"
+
+  # Сохраняем мета для deploy.sh
+  echo "$RELEASE_NAME" > "$PROJECT_DIR/release_name"
+  echo "$REF"          > "$PROJECT_DIR/ref"
+
+  # --- Скачиваем переменные ---
+  echo "  Получаем переменные..."
+  VARIABLES=$(get_variables "$PROJECT_ID") || {
+    echo "  ERROR: Не удалось получить переменные проекта $PROJECT_ID"
+    continue
+  }
+
+  # --- Получаем все scope ---
+  SCOPES=$(echo "$VARIABLES" | jq -r '.[].environment_scope' | sort -u | grep -v '^\*$' || true)
+
+  if [[ -z "$SCOPES" ]]; then
+    echo "  WARN: Нет environment scope"
+    continue
+  fi
+
+  # --- Для каждого scope сохраняем NAMESPACE и VALUES ---
+  while IFS= read -r SCOPE; do
+    SCOPE_DIR="$PROJECT_DIR/scopes/$SCOPE"
+    mkdir -p "$SCOPE_DIR"
+
+    NAMESPACE=$(echo "$VARIABLES" | jq -r \
+      '.[] | select(.key == "NAMESPACE" and .environment_scope == "'"$SCOPE"'") | .value')
+
+    VALUES_CONTENT=$(echo "$VARIABLES" | jq -r \
+      '.[] | select(.key == "VALUES" and .environment_scope == "'"$SCOPE"'") | .value')
+
+    if [[ -z "$NAMESPACE" ]]; then
+      echo "  WARN: NAMESPACE не найден для scope $SCOPE"
+      continue
+    fi
+
+    echo "$NAMESPACE" > "$SCOPE_DIR/namespace"
+
+    if [[ -n "$VALUES_CONTENT" ]]; then
+      echo "$VALUES_CONTENT" > "$SCOPE_DIR/values.yaml"
+    fi
+
+    echo "  scope: $SCOPE → namespace: $NAMESPACE"
+
+  done <<< "$SCOPES"
+
+  # --- Скачиваем чарт ---
+  echo "  Скачиваем Helm чарт (ref: $REF)..."
+  if ! download_chart "$PROJECT_ID" "$REF" "$PROJECT_DIR"; then
+    echo "  ERROR: Не удалось скачать чарт"
+    continue
+  fi
+  echo "  Чарт скачан"
+
+done
+
+# --- Пушим на мастер по SCP ---
+echo ""
+echo "=== Отправляем на мастер: $MASTER_HOST:$MASTER_WORK_DIR ==="
+ssh "$MASTER_HOST" "mkdir -p $MASTER_WORK_DIR"
+scp -r "$WORK_DIR/." "$MASTER_HOST:$MASTER_WORK_DIR/payload"
+scp "$(dirname "$0")/config.sh" "$MASTER_HOST:$MASTER_WORK_DIR/config.sh"
+scp "$(dirname "$0")/deploy.sh" "$MASTER_HOST:$MASTER_WORK_DIR/deploy.sh"
+ssh "$MASTER_HOST" "chmod +x $MASTER_WORK_DIR/deploy.sh"
+
+echo ""
+echo "=== Готово. Запускаем deploy.sh на мастере ==="
+ssh "$MASTER_HOST" "bash $MASTER_WORK_DIR/deploy.sh $MASTER_WORK_DIR/payload"
+
+---
+#!/bin/bash
+# =============================================================
+# deploy.sh — запускается на мастер ноде
+# Деплоит helm релизы из переданных чартов
+# =============================================================
+set -euo pipefail
+
+source "$(dirname "$0")/config.sh"
+
+PAYLOAD_DIR="${1:-./payload}"
+
+if [[ ! -d "$PAYLOAD_DIR" ]]; then
+  echo "ERROR: payload директория не найдена: $PAYLOAD_DIR"
+  exit 1
+fi
 
 # --- Определяем команды для microk8s ---
 if command -v microk8s.helm3 &>/dev/null; then
@@ -51,295 +174,224 @@ NC='\033[0m'
 
 # --- Результаты ---
 DEPLOYED=()
+SKIPPED=()
 ERRORS=()
 DEPLOY_COUNT=0
 
-WORK_DIR="./helm-redeploy-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$WORK_DIR"
-
-# --- Функция: получить переменные проекта ---
-get_variables() {
-  local project_id=$1
-  curl -sf \
-    --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-    "$GITLAB_URL/api/v4/projects/$project_id/variables?per_page=100"
-}
-
-# --- Функция: скачать Helm чарт ---
-download_chart() {
-  local project_id=$1
-  local ref=$2
-  local dest=$3
-
-  curl -sf \
-    --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-    "$GITLAB_URL/api/v4/projects/$project_id/repository/archive.tar.gz?path=Helm&ref=$ref" \
-    -o "$dest/chart.tar.gz"
-
-  mkdir -p "$dest/chart"
-  tar -xzf "$dest/chart.tar.gz" -C "$dest/chart" --strip-components=2
-}
-
-# --- Функция: ждать rollout всех деплойментов в неймспейсе ---
+# --- Функция: ждать rollout ---
 wait_rollout() {
   local namespace=$1
-  echo -e "  ${CYAN}Ожидаем rollout в namespace: $namespace (timeout: ${ROLLOUT_TIMEOUT}s)${NC}"
-
-  # Получаем все deployments в неймспейсе
-  DEPLOYMENTS=$($KUBECTL get deployments -n "$namespace" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-  if [[ -z "$DEPLOYMENTS" ]]; then
-    echo "    Deployments не найдены, пропускаем ожидание"
-    return 0
-  fi
+  echo -e "  ${CYAN}Ожидаем rollout: $namespace (timeout: ${ROLLOUT_TIMEOUT}s)${NC}"
 
   local all_ok=true
-  for DEPLOY in $DEPLOYMENTS; do
-    echo -e "    Ожидаем: $DEPLOY"
-    if ! $KUBECTL rollout status deployment/"$DEPLOY" \
-      -n "$namespace" \
-      --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
-      echo -e "  ${RED}Rollout не завершился: $DEPLOY${NC}"
-      all_ok=false
+
+  for KIND in deployment statefulset daemonset; do
+    RESOURCES=$($KUBECTL get "${KIND}s" -n "$namespace" \
+      -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+    if [[ -z "$RESOURCES" ]]; then
+      echo "    ${KIND}s: не найдены"
+      continue
     fi
+
+    for RES in $RESOURCES; do
+      echo -e "    ${KIND}: $RES"
+      if ! $KUBECTL rollout status "${KIND}/${RES}" \
+        -n "$namespace" \
+        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
+        echo -e "  ${RED}Rollout не завершился: ${KIND}/${RES}${NC}"
+        all_ok=false
+      fi
+    done
   done
 
   if $all_ok; then
-    echo -e "  ${GREEN}Rollout завершён успешно${NC}"
+    echo -e "  ${GREEN}Rollout OK${NC}"
     return 0
   else
     return 1
   fi
 }
 
-# --- Функция: показать текущее потребление памяти ---
+# --- Функция: показать память ---
 show_memory() {
-  echo -e "  ${CYAN}Память на нодах:${NC}"
-  $KUBECTL top nodes 2>/dev/null || echo "    kubectl top недоступен"
+  echo -e "  ${CYAN}Память:${NC}"
+  $KUBECTL top nodes 2>/dev/null || true
 }
 
-# --- Основной цикл по проектам ---
-for PROJECT_ENTRY in "${PROJECTS[@]}"; do
-  IFS=':' read -r PROJECT_ID REF RELEASE_NAME <<< "$PROJECT_ENTRY"
+# --- Цикл по проектам в payload ---
+for PROJECT_DIR in "$PAYLOAD_DIR"/project-*; do
+  [[ -d "$PROJECT_DIR" ]] || continue
+
+  PROJECT_ID=$(basename "$PROJECT_DIR" | sed 's/project-//')
+  RELEASE_NAME=$(cat "$PROJECT_DIR/release_name" 2>/dev/null || echo "")
+  CHART_DIR="$PROJECT_DIR/chart"
+
+  if [[ -z "$RELEASE_NAME" ]]; then
+    echo "ERROR: release_name не найден в $PROJECT_DIR"
+    ERRORS+=("project-$PROJECT_ID|—|—|release_name не найден")
+    continue
+  fi
+
+  if [[ ! -d "$CHART_DIR" ]]; then
+    echo "ERROR: чарт не найден: $CHART_DIR"
+    ERRORS+=("project-$PROJECT_ID|—|—|Чарт не найден")
+    continue
+  fi
 
   echo ""
   echo -e "${BLUE}=========================================="
-  echo "  Проект: $PROJECT_ID | ref: $REF | release: $RELEASE_NAME"
+  echo "  Проект: $PROJECT_ID | release: $RELEASE_NAME"
   echo -e "==========================================${NC}"
 
-  PROJECT_DIR="$WORK_DIR/project-$PROJECT_ID"
-  mkdir -p "$PROJECT_DIR"
+  # --- Цикл по scope ---
+  for SCOPE_DIR in "$PROJECT_DIR/scopes"/*/; do
+    [[ -d "$SCOPE_DIR" ]] || continue
 
-  # --- Получаем переменные ---
-  echo ">>> Получаем переменные из GitLab API..."
-  VARIABLES=$(get_variables "$PROJECT_ID") || {
-    echo -e "${RED}ERROR: Не удалось получить переменные проекта $PROJECT_ID${NC}"
-    ERRORS+=("project-$PROJECT_ID|—|—|Не удалось получить переменные из API")
-    continue
-  }
-
-  # --- Получаем все уникальные environment_scope ---
-  SCOPES=$(echo "$VARIABLES" | jq -r '.[].environment_scope' | sort -u | grep -v '^\*$' || true)
-
-  if [[ -z "$SCOPES" ]]; then
-    echo -e "${YELLOW}Нет environment scope в проекте $PROJECT_ID${NC}"
-    ERRORS+=("project-$PROJECT_ID|—|—|Нет environment scope")
-    continue
-  fi
-
-  # --- Скачиваем чарт один раз для проекта ---
-  echo ">>> Скачиваем Helm чарт (ref: $REF)..."
-  if ! download_chart "$PROJECT_ID" "$REF" "$PROJECT_DIR"; then
-    echo -e "${RED}ERROR: Не удалось скачать чарт проекта $PROJECT_ID${NC}"
-    ERRORS+=("project-$PROJECT_ID|—|—|Не удалось скачать Helm чарт")
-    continue
-  fi
-  echo "    Чарт скачан: $PROJECT_DIR/chart/"
-
-  # --- Цикл по environment scope ---
-  while IFS= read -r SCOPE; do
-    echo ""
-    echo -e "  ${YELLOW}>>> Environment: $SCOPE${NC}"
-
-    # Получаем NAMESPACE
-    NAMESPACE=$(echo "$VARIABLES" | jq -r \
-      '.[] | select(.key == "NAMESPACE" and .environment_scope == "'"$SCOPE"'") | .value')
+    SCOPE=$(basename "$SCOPE_DIR")
+    NAMESPACE=$(cat "$SCOPE_DIR/namespace" 2>/dev/null || echo "")
 
     if [[ -z "$NAMESPACE" ]]; then
-      echo -e "  ${RED}NAMESPACE не найден для scope: $SCOPE${NC}"
-      ERRORS+=("project-$PROJECT_ID|$SCOPE|—|NAMESPACE переменная не найдена")
+      echo -e "  ${RED}NAMESPACE не найден для scope $SCOPE${NC}"
+      ERRORS+=("project-$PROJECT_ID|$SCOPE|—|NAMESPACE не найден")
       continue
     fi
 
-    # Получаем VALUES
-    VALUES_CONTENT=$(echo "$VARIABLES" | jq -r \
-      '.[] | select(.key == "VALUES" and .environment_scope == "'"$SCOPE"'") | .value')
+    echo ""
+    echo -e "  ${YELLOW}>>> scope: $SCOPE | namespace: $NAMESPACE${NC}"
 
-    SCOPE_DIR="$PROJECT_DIR/$SCOPE"
-    mkdir -p "$SCOPE_DIR"
-
-    if [[ -n "$VALUES_CONTENT" ]]; then
-      echo "$VALUES_CONTENT" > "$SCOPE_DIR/values.yaml"
+    # Values флаг
+    if [[ -f "$SCOPE_DIR/values.yaml" ]]; then
       VALUES_FLAG="-f $SCOPE_DIR/values.yaml"
     else
-      echo -e "  ${YELLOW}VALUES не найден — деплоим без values файла${NC}"
       VALUES_FLAG=""
+      echo -e "  ${YELLOW}values.yaml не найден — деплоим без него${NC}"
     fi
 
-    echo "    Namespace: $NAMESPACE"
-    echo "    Release:   $RELEASE_NAME"
+    # --- Проверяем существует ли релиз ---
+    RELEASE_EXISTS=$($HELM list -n "$NAMESPACE" -q 2>/dev/null | grep -x "$RELEASE_NAME" || true)
 
-    # --- Показываем память перед деплоем ---
+    if [[ -z "$RELEASE_EXISTS" ]]; then
+      echo -e "  ${YELLOW}Релиз не найден — устанавливаем новый${NC}"
+      HELM_CMD="install"
+    else
+      echo -e "  ${GREEN}Релиз найден — обновляем${NC}"
+      HELM_CMD="upgrade"
+    fi
+
+    # --- Память до деплоя ---
     show_memory
 
-    # --- helm upgrade ---
-    if $HELM upgrade --install "$RELEASE_NAME" "$PROJECT_DIR/chart/" \
-      -n "$NAMESPACE" \
-      --reuse-values \
-      $VALUES_FLAG \
-      --create-namespace \
-      > "$SCOPE_DIR/deploy.log" 2>&1; then
+    # --- helm install или upgrade ---
+    DEPLOY_LOG="$SCOPE_DIR/deploy.log"
 
-      echo -e "  ${GREEN}Helm upgrade OK${NC}"
+    if [[ "$HELM_CMD" == "install" ]]; then
+      HELM_RESULT=$($HELM install "$RELEASE_NAME" "$CHART_DIR" \
+        -n "$NAMESPACE" \
+        --create-namespace \
+        $VALUES_FLAG \
+        > "$DEPLOY_LOG" 2>&1 && echo "ok" || echo "fail")
+    else
+      HELM_RESULT=$($HELM upgrade "$RELEASE_NAME" "$CHART_DIR" \
+        -n "$NAMESPACE" \
+        --reuse-values \
+        --create-namespace \
+        $VALUES_FLAG \
+        > "$DEPLOY_LOG" 2>&1 && echo "ok" || echo "fail")
+    fi
 
-      # --- Ждём rollout ---
+    if [[ "$HELM_RESULT" == "ok" ]]; then
+      echo -e "  ${GREEN}Helm $HELM_CMD OK${NC}"
+
+      # Ждём rollout
       if wait_rollout "$NAMESPACE"; then
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|OK")
+        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|OK")
       else
-        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|ROLLOUT_TIMEOUT")
+        DEPLOYED+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$RELEASE_NAME|$HELM_CMD|ROLLOUT_TIMEOUT")
         ERRORS+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|Rollout не завершился за ${ROLLOUT_TIMEOUT}s")
       fi
 
     else
-      ERROR_MSG=$(tail -3 "$SCOPE_DIR/deploy.log" | tr '\n' ' ')
+      ERROR_MSG=$(tail -3 "$DEPLOY_LOG" | tr '\n' ' ')
       echo -e "  ${RED}ОШИБКА: $ERROR_MSG${NC}"
       ERRORS+=("project-$PROJECT_ID|$SCOPE|$NAMESPACE|$ERROR_MSG")
     fi
 
-    # --- Пауза перед следующим деплоем ---
     DEPLOY_COUNT=$((DEPLOY_COUNT + 1))
-    echo ""
-    echo -e "  ${CYAN}Пауза ${DEPLOY_PAUSE}s перед следующим деплоем...${NC}"
+    echo -e "  ${CYAN}Пауза ${DEPLOY_PAUSE}s...${NC}"
     sleep "$DEPLOY_PAUSE"
 
-  done <<< "$SCOPES"
-
+  done
 done
 
 # =============================================================
-# --- Таблица 1: Успешно задеплоено ---
+# Таблица 1: Задеплоено
 # =============================================================
 echo ""
 echo "=========================================="
 echo "  ЗАДЕПЛОЕНО"
 echo "=========================================="
-printf "%-15s %-25s %-30s %-20s %-15s\n" "PROJECT" "SCOPE" "NAMESPACE" "RELEASE" "СТАТУС"
-printf "%-15s %-25s %-30s %-20s %-15s\n" "---------------" "-------------------------" "------------------------------" "--------------------" "---------------"
+printf "%-15s %-20s %-30s %-20s %-10s %-15s\n" \
+  "PROJECT" "SCOPE" "NAMESPACE" "RELEASE" "ACTION" "СТАТУС"
+printf "%-15s %-20s %-30s %-20s %-10s %-15s\n" \
+  "---------------" "--------------------" "------------------------------" \
+  "--------------------" "----------" "---------------"
 
 if [[ ${#DEPLOYED[@]} -eq 0 ]]; then
   echo "  Нет успешных деплоев"
 else
   for ROW in "${DEPLOYED[@]}"; do
-    IFS='|' read -r PROJ SCOPE NS REL STATUS <<< "$ROW"
+    IFS='|' read -r PROJ SCOPE NS REL ACTION STATUS <<< "$ROW"
     if [[ "$STATUS" == "OK" ]]; then
-      printf "%-15s %-25s %-30s %-20s ${GREEN}%-15s${NC}\n" "$PROJ" "$SCOPE" "$NS" "$REL" "$STATUS"
+      printf "%-15s %-20s %-30s %-20s %-10s ${GREEN}%-15s${NC}\n" \
+        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$STATUS"
     else
-      printf "%-15s %-25s %-30s %-20s ${YELLOW}%-15s${NC}\n" "$PROJ" "$SCOPE" "$NS" "$REL" "$STATUS"
+      printf "%-15s %-20s %-30s %-20s %-10s ${YELLOW}%-15s${NC}\n" \
+        "$PROJ" "$SCOPE" "$NS" "$REL" "$ACTION" "$STATUS"
     fi
   done
 fi
 
 # =============================================================
-# --- Таблица 2: Ошибки ---
+# Таблица 2: Пропущено
 # =============================================================
 echo ""
 echo "=========================================="
-echo "  ОШИБКИ / ПРОПУЩЕНО"
+echo "  ПРОПУЩЕНО"
 echo "=========================================="
-printf "%-15s %-25s %-30s %-40s\n" "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
-printf "%-15s %-25s %-30s %-40s\n" "---------------" "-------------------------" "------------------------------" "----------------------------------------"
+printf "%-15s %-20s %-30s %-20s\n" "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
+printf "%-15s %-20s %-30s %-20s\n" \
+  "---------------" "--------------------" "------------------------------" "--------------------"
+
+if [[ ${#SKIPPED[@]} -eq 0 ]]; then
+  echo "  Пропущенных нет"
+else
+  for ROW in "${SKIPPED[@]}"; do
+    IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
+    printf "%-15s %-20s %-30s ${YELLOW}%-20s${NC}\n" "$PROJ" "$SCOPE" "$NS" "$REASON"
+  done
+fi
+
+# =============================================================
+# Таблица 3: Ошибки
+# =============================================================
+echo ""
+echo "=========================================="
+echo "  ОШИБКИ"
+echo "=========================================="
+printf "%-15s %-20s %-30s %-40s\n" "PROJECT" "SCOPE" "NAMESPACE" "ПРИЧИНА"
+printf "%-15s %-20s %-30s %-40s\n" \
+  "---------------" "--------------------" "------------------------------" \
+  "----------------------------------------"
 
 if [[ ${#ERRORS[@]} -eq 0 ]]; then
   echo "  Ошибок нет"
 else
   for ROW in "${ERRORS[@]}"; do
     IFS='|' read -r PROJ SCOPE NS REASON <<< "$ROW"
-    printf "%-15s %-25s %-30s ${RED}%-40s${NC}\n" "$PROJ" "$SCOPE" "$NS" "$REASON"
+    printf "%-15s %-20s %-30s ${RED}%-40s${NC}\n" "$PROJ" "$SCOPE" "$NS" "$REASON"
   done
 fi
 
 echo ""
-echo "Всего задеплоено: $DEPLOY_COUNT"
-echo "Рабочая директория: $WORK_DIR/"
-
-
-# --- Функция: ждать rollout всех ресурсов в неймспейсе ---
-wait_rollout() {
-  local namespace=$1
-  echo -e "  ${CYAN}Ожидаем rollout в namespace: $namespace (timeout: ${ROLLOUT_TIMEOUT}s)${NC}"
-
-  local all_ok=true
-
-  # --- Deployments ---
-  DEPLOYMENTS=$($KUBECTL get deployments -n "$namespace" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-  if [[ -n "$DEPLOYMENTS" ]]; then
-    for DEPLOY in $DEPLOYMENTS; do
-      echo -e "    Deployment: $DEPLOY"
-      if ! $KUBECTL rollout status deployment/"$DEPLOY" \
-        -n "$namespace" \
-        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
-        echo -e "  ${RED}Rollout не завершился: deployment/$DEPLOY${NC}"
-        all_ok=false
-      fi
-    done
-  else
-    echo "    Deployments: не найдены"
-  fi
-
-  # --- StatefulSets ---
-  STATEFULSETS=$($KUBECTL get statefulsets -n "$namespace" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-  if [[ -n "$STATEFULSETS" ]]; then
-    for STS in $STATEFULSETS; do
-      echo -e "    StatefulSet: $STS"
-      if ! $KUBECTL rollout status statefulset/"$STS" \
-        -n "$namespace" \
-        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
-        echo -e "  ${RED}Rollout не завершился: statefulset/$STS${NC}"
-        all_ok=false
-      fi
-    done
-  else
-    echo "    StatefulSets: не найдены"
-  fi
-
-  # --- DaemonSets ---
-  DAEMONSETS=$($KUBECTL get daemonsets -n "$namespace" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-  if [[ -n "$DAEMONSETS" ]]; then
-    for DS in $DAEMONSETS; do
-      echo -e "    DaemonSet: $DS"
-      if ! $KUBECTL rollout status daemonset/"$DS" \
-        -n "$namespace" \
-        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
-        echo -e "  ${RED}Rollout не завершился: daemonset/$DS${NC}"
-        all_ok=false
-      fi
-    done
-  else
-    echo "    DaemonSets: не найдены"
-  fi
-
-  if $all_ok; then
-    echo -e "  ${GREEN}Rollout завершён успешно${NC}"
-    return 0
-  else
-    return 1
-  fi
-}
-
-
+echo "Всего деплоев: $DEPLOY_COUNT"
