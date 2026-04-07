@@ -1,22 +1,6 @@
-  {
-    "variable_type": "env_var",
-    "key": "NAMESPACE",
-    "value": "schedule-dev-audit",
-    "hidden": false,
-    "protected": false,
-    "masked": false,
-    "raw": false,
-    "environment_scope": "aos_schedule_dev",
-    "description": null
-  },
-  {
-    "variable_type": "file",
-    "key": "VALUES",
-    "value": "imagePullSecret: regcred-3\nbaseNs: schedule-dev\nenableBatchRead: false\nconfigmap:\n   replicas: 20",
-    "hidden": false,
-    "protected": false,
-    "masked": false,
-    "raw": false,
-    "environment_scope": "aos_schedule_dev",
-    "description": null
-  }
+# Скачать архив репо (папка Helm)
+curl -s --header "PRIVATE-TOKEN: <token>" \
+  "https://gitlab.example.com/api/v4/projects/<project_id>/repository/archive.tar.gz?path=Helm" \
+  -o /tmp/helm-chart.tar.gz
+
+tar -tzf /tmp/helm-chart.tar.gz | head -20
