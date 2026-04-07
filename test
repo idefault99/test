@@ -271,3 +271,75 @@ fi
 echo ""
 echo "Всего задеплоено: $DEPLOY_COUNT"
 echo "Рабочая директория: $WORK_DIR/"
+
+
+# --- Функция: ждать rollout всех ресурсов в неймспейсе ---
+wait_rollout() {
+  local namespace=$1
+  echo -e "  ${CYAN}Ожидаем rollout в namespace: $namespace (timeout: ${ROLLOUT_TIMEOUT}s)${NC}"
+
+  local all_ok=true
+
+  # --- Deployments ---
+  DEPLOYMENTS=$($KUBECTL get deployments -n "$namespace" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+  if [[ -n "$DEPLOYMENTS" ]]; then
+    for DEPLOY in $DEPLOYMENTS; do
+      echo -e "    Deployment: $DEPLOY"
+      if ! $KUBECTL rollout status deployment/"$DEPLOY" \
+        -n "$namespace" \
+        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
+        echo -e "  ${RED}Rollout не завершился: deployment/$DEPLOY${NC}"
+        all_ok=false
+      fi
+    done
+  else
+    echo "    Deployments: не найдены"
+  fi
+
+  # --- StatefulSets ---
+  STATEFULSETS=$($KUBECTL get statefulsets -n "$namespace" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+  if [[ -n "$STATEFULSETS" ]]; then
+    for STS in $STATEFULSETS; do
+      echo -e "    StatefulSet: $STS"
+      if ! $KUBECTL rollout status statefulset/"$STS" \
+        -n "$namespace" \
+        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
+        echo -e "  ${RED}Rollout не завершился: statefulset/$STS${NC}"
+        all_ok=false
+      fi
+    done
+  else
+    echo "    StatefulSets: не найдены"
+  fi
+
+  # --- DaemonSets ---
+  DAEMONSETS=$($KUBECTL get daemonsets -n "$namespace" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+  if [[ -n "$DAEMONSETS" ]]; then
+    for DS in $DAEMONSETS; do
+      echo -e "    DaemonSet: $DS"
+      if ! $KUBECTL rollout status daemonset/"$DS" \
+        -n "$namespace" \
+        --timeout="${ROLLOUT_TIMEOUT}s" 2>/dev/null; then
+        echo -e "  ${RED}Rollout не завершился: daemonset/$DS${NC}"
+        all_ok=false
+      fi
+    done
+  else
+    echo "    DaemonSets: не найдены"
+  fi
+
+  if $all_ok; then
+    echo -e "  ${GREEN}Rollout завершён успешно${NC}"
+    return 0
+  else
+    return 1
+  fi
+}
+
+
