@@ -1,8 +1,8 @@
-# 1. Отключить dashboard — прямо сейчас
-sudo microk8s disable dashboard
+# 1. Размер dqlite
+sudo du -sh /var/snap/microk8s/current/var/kubernetes/backend/
 
-# 2. Подождать 2-3 минуты, посмотреть стало ли лучше
-sudo journalctl -u snap.microk8s.daemon-kubelite -f | grep -v "^.*Trace"
+# 2. Версия
+snap info microk8s | grep installed
 
-# 3. Проверить RAM
+# 3. RAM сейчас
 free -h
