@@ -1,725 +1,422 @@
-Нужно внедрить деплой из джобы в гитлабе на стенд, суть такая, текущий скрипт забирает тэги из репозитория, которые я потом сравниваю в кубере и если они не совпадают я запускаю джобу для деплоя из репозитория с app
-Например есть путь /test/sys/tr/db/rtg/db и тэг 1.1.0.bin в репозитории, тогда нужно к пути подставлять ссылку на гитлаб, например https://gitlab-internal.code-discovery.ru/test/sys/tr/db/rtg/db и запускать пайплайн с тэгом 1.1.0 - Если такого тэга нет, писать об этом в выводе
-Вот пример пайплайна и сам скрипт, чтобы понимать как выглядят джобы, так как там нужно запускать мануальную джобу для деплоя на стенд после прохода основных джоб
+# deploy_tag.py
+
+Скрипт для проверки тэгов и запуска деплоя через GitLab pipeline.
+
+## Установка
+
+```bash
+cat << 'EOF' > deploy_tag.py
+#!/usr/bin/env python3
 """
-stages:
-  - build
-  - lint_and_test
-  - deploy
-  - publish_helm_releases
-  - publish_image
-  - publish_helm
-############### DEPLOY ###############
-.deploy:
-  stage: deploy
-  tags:
-    - docker
-  image:
-    name: registry.test.model.svo.aero/dpm/iac/infra:helm
-    pull_policy: [always, if-not-present]
-    entrypoint: [""]
-  variables:
-    REGISTRY: "${CI_REGISTRY_IMAGE}"
-    IMAGE_POSTFIX: ".bin" # для фронта будем указывать "", для прочего просто менять эту переменную
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-  script:
-    - |
-      helm upgrade -i -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
-      --set "image=${REGISTRY}:${TAG}${IMAGE_POSTFIX}"
-  when: manual
-  rules:
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_develop:
-  extends: .deploy
-  environment: aos_dev
-  variables:
-    NAMESPACE: develop
-
-aos_tgo:
-  extends: .deploy
-  environment: aos_tgo
-  variables:
-    NAMESPACE: tgo
-
-aos_gis_2:
-  extends: .deploy
-  environment: aos_gis_2
-  variables:
-    NAMESPACE: gis-2
-
-aos_rms:
-  extends: .deploy
-  environment: aos_rms
-  variables:
-    NAMESPACE: rms
-
-aos_variation_dev:
-  extends: .deploy
-  environment: aos_variation_dev
-  variables:
-    NAMESPACE: variation-dev
-
-aos_auth_dev:
-  extends: .deploy
-  environment: aos_auth_dev
-  variables:
-    NAMESPACE: auth-dev
-
-aos_telegram_dev:
-  extends: .deploy
-  environment: aos_telegram_dev
-  variables:
-    NAMESPACE: telegram-dev
-
-aos_schedule_dev:
-  extends: .deploy
-  environment: aos_schedule_dev
-  variables:
-    NAMESPACE: schedule-dev
-
-aos_rms_sh_demo:
-  extends: .deploy
-  environment: aos_rms_sh_demo
-  variables:
-    NAMESPACE: rms-sh-demo
-
-aos_test_isua_svo:
-  extends: .deploy
-  environment: aos_test_isua_svo
-  variables:
-    NAMESPACE: test-isua-svo
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_test_isua_svo_prod:
-  extends: .deploy
-  environment: aos_test_isua_svo_prod
-  variables:
-    NAMESPACE: test-isua-svo-prod
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_test_isua_led:
-  extends: .deploy
-  environment: aos_test_isua_led
-  variables:
-    NAMESPACE: test-isua-led
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_test_isua_load:
-  extends: .deploy
-  environment: aos_test_isua_load
-  variables:
-    NAMESPACE: test-isua-load
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_test_isua_sochi:
-  extends: .deploy
-  environment: aos_test_isua_sochi
-  variables:
-    NAMESPACE: test-isua-sochi
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_dev_dt:
-  extends: .deploy
-  environment: aos_dev_dt
-  variables:
-    NAMESPACE: dev-dt
-
-aos_dev_sis:
-  extends: .deploy
-  environment: aos_dev_sis
-  variables:
-    NAMESPACE: dev-sis
-
-aos_test_gis_svo:
-  extends: .deploy
-  environment: aos_test_gis_svo
-  variables:
-    NAMESPACE: test-gis-svo
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_demo_isua:
-  extends: .deploy
-  environment: aos_demo_isua
-  variables:
-    NAMESPACE: demo-isua
-
-aos_test_aloms:
-  extends: .deploy
-  environment: aos_test_aloms
-  variables:
-    NAMESPACE: test-aloms
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_dev_aloms:
-  extends: .deploy
-  environment: aos_dev_aloms
-  variables:
-    NAMESPACE: dev-aloms
-
-aos_demo_aloms:
-  extends: .deploy
-  environment: aos_demo_aloms
-  variables:
-    NAMESPACE: demo-aloms
-
-.deploy_aerps_dev:
-  extends: .deploy
-  environment: aerps_dev
-  variables:
-    NAMESPACE: aerps-dev
-
-.deploy_aerps_test:
-  extends: .deploy
-  environment: aerps_test
-  variables:
-    NAMESPACE: aerps-test
-
-aos_rms_eurochem_dev:
-  extends: .deploy
-  environment: aos_rms_eurochem_dev
-  variables:
-    NAMESPACE: rms-eurochem-dev
-
-aos_is_isua_svo:
-  extends: .deploy
-  environment: aos_is_isua_svo
-  variables:
-    NAMESPACE: is-isua-svo
-
-aos_dev_devops:
-  extends: .deploy
-  environment: aos_dev_devops
-  variables:
-    NAMESPACE: dev-devops
-
-aos_dev_sochi:
-  extends: .deploy
-  environment: aos_dev_sochi
-  variables:
-    NAMESPACE: dev-sochi
-
-aos_test_isua_prod_led:
-  extends: .deploy
-  environment: aos_test_isua_prod_led
-  variables:
-    NAMESPACE: test-isua-prod-led
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_aos_svo_test_02:
-  extends: .deploy
-  environment: aos_aos_svo_test_02
-  variables:
-    NAMESPACE: aos-svo-test-02
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_test_isua_auto:
-  extends: .deploy
-  environment: aos_test_isua_auto
-  variables:
-    NAMESPACE: test-isua-auto
-  before_script:
-    - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
-    - |
-      if
-      [[ ${GITLAB_USER_ID} != "122" ]] && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223" ]]; then
-        echo "У вас нет доступа для деплоя на тестовый стенд"
-      exit 1
-      fi
-  rules:
-    - if: $GITLAB_USER_ID != "122" && $GITLAB_USER_ID != "54" && $GITLAB_USER_ID != "53" && $GITLAB_USER_ID != "52" && $GITLAB_USER_ID != "161" && $GITLAB_USER_ID != "223"
-      when: never
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-      # needs: ["linter", "test"]
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
-
-aos_rms_dev_02:
-  extends: .deploy
-  environment: aos_rms_dev_02
-  variables:
-    NAMESPACE: rms-dev-02
-
-aos_dev_fids_svo:
-  extends: .deploy
-  environment: aos_dev_fids_svo
-  variables:
-    NAMESPACE: dev-fids-svo
-
-aos_dev_fids_led:
-  extends: .deploy
-  environment: aos_dev_fids_led
-  variables:
-    NAMESPACE: dev-fids-led
-
-.deploy_aoshub_main:
-  extends: .deploy
-  environment: aoushub_main
-  variables:
-    KUBECONFIG: $KUBE_CONF_3
-    REGISTRY: "${EXTERNAL_REGISTRY}/${EXTERNAL_REGISTRY_PATH}"
-    NAMESPACE: main
-  rules:
-    - if: $CI_COMMIT_TAG
-      when: manual
-
-aoshub_sochi:
-  extends: .deploy_aoshub_main
-  environment: aoshub_sochi
-  variables:
-    NAMESPACE: sochi
-    EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
-
-aoshub_rms_eurochem_demo:
-  extends: .deploy_aoshub_main
-  variables:
-    NAMESPACE: rms-eurochem-demo
-    EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
-  environment: aoushub_rms_eurochem_demo
-
-aoshub_coreon_demo:
-  extends: .deploy_aoshub_main
-  variables:
-    NAMESPACE: coreon-demo
-    EXTERNAL_REGISTRY_PATH: ${REGISTRY_PATH}
-  environment: aoushub_coreon_demo
-"""
-"""
-Скрипт для извлечения image path и tag из values.yaml в GitLab-репозитории через API.
+Скрипт для проверки тэгов в GitLab-репозиториях и запуска деплоя.
 
 Использование:
-    python3 scan_values.py --url https://gitlab.example.com --project-id 123 --token YOUR_TOKEN --branch main
+    python3 deploy_tag.py --input scan_output.txt --gitlab-url https://gitlab-inte.test.ru --token GITLAB_TOKEN --stand schedule-dev
 """
 
 import argparse
+import json
 import re
 import sys
+import time
 from urllib.parse import quote as url_quote
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
-import json
 
 
-SKIP_DIRS = {"inventory", "templates", ".git", ".gitlab"}
+def gitlab_api(base_url, token, endpoint, method="GET", data=None):
+    """Запрос к GitLab API."""
+    url = f"{base_url}/api/v4{endpoint}"
+    headers = {"PRIVATE-TOKEN": token}
+    body = None
+    if data is not None:
+        body = json.dumps(data).encode()
+        headers["Content-Type"] = "application/json"
+    req = Request(url, headers=headers, method=method, data=body)
+    try:
+        with urlopen(req) as resp:
+            content = resp.read().decode()
+            if not content:
+                return None
+            return json.loads(content)
+    except HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode()
+        except Exception:
+            pass
+        raise Exception(f"HTTP {e.code}: {err_body or e.reason}")
 
 
-def gitlab_api(base_url: str, token: str, endpoint: str):
-    """Выполняет GET-запрос к GitLab API."""
+def gitlab_api_raw(base_url, token, endpoint):
+    """GET запрос, возвращает сырой текст (для trace)."""
     url = f"{base_url}/api/v4{endpoint}"
     req = Request(url, headers={"PRIVATE-TOKEN": token})
     try:
         with urlopen(req) as resp:
-            return json.loads(resp.read().decode())
+            return resp.read().decode(errors="replace")
     except HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+        return f"[HTTP {e.code}] {e.reason}"
 
 
-def get_tree(base_url: str, token: str, project_id: str, path: str, branch: str) -> list:
-    """Получает список файлов/директорий в указанном пути."""
-    encoded_path = url_quote(path, safe="")
-    endpoint = (
-        f"/projects/{project_id}/repository/tree"
-        f"?path={encoded_path}&ref={branch}&per_page=100"
-    )
-    result = gitlab_api(base_url, token, endpoint)
-    return result if result else []
-
-
-def get_file_raw(base_url: str, token: str, project_id: str, file_path: str, branch: str) -> str | None:
-    """Получает содержимое файла через repository/files/.../raw."""
-    encoded = url_quote(file_path, safe="")
-    url = f"{base_url}/api/v4/projects/{project_id}/repository/files/{encoded}/raw?ref={branch}"
-    req = Request(url, headers={"PRIVATE-TOKEN": token})
+def find_project_id(base_url, token, project_path):
+    """Находит ID проекта по пути (например test/sys/tr/db/rtg/db)."""
+    path = project_path.strip("/")
+    encoded = url_quote(path, safe="")
     try:
-        with urlopen(req) as resp:
-            return resp.read().decode()
-    except HTTPError:
-        return None
+        result = gitlab_api(base_url, token, f"/projects/{encoded}")
+        return result["id"], None
+    except Exception as e:
+        return None, str(e)
 
 
-def extract_single_image(content: str) -> tuple[str, str] | None:
-    """Извлекает путь и tag из строки image: registry/path:tag (верхний уровень)."""
-    match = re.search(r'^image:\s*[^/\s]+(/\S+):(\S+)', content, re.MULTILINE)
-    if match:
-        return match.group(1), match.group(2)
-    return None
+def check_tag_exists(base_url, token, project_id, tag):
+    """Проверяет существование тэга в проекте."""
+    encoded_tag = url_quote(tag, safe="")
+    try:
+        gitlab_api(base_url, token, f"/projects/{project_id}/repository/tags/{encoded_tag}")
+        return True, None
+    except Exception as e:
+        if "404" in str(e):
+            return False, None
+        return False, str(e)
 
 
-def extract_nested_images(content: str) -> list[tuple[str, str, str]]:
-    """Извлекает вложенные images:\n  name: registry/path:tag
-    Возвращает список (name, path, tag)."""
-    results = []
-    pattern = re.compile(r'^images:\s*\n((?:[ \t]+\S.*\n?)+)', re.MULTILINE)
-    block_match = pattern.search(content)
-    if not block_match:
-        return results
-    block = block_match.group(1)
-    line_pattern = re.compile(r'^\s+(\S+):\s*[^/\s]+(/\S+):(\S+)', re.MULTILINE)
-    for m in line_pattern.finditer(block):
-        results.append((m.group(1), m.group(2), m.group(3)))
-    return results
+def create_pipeline(base_url, token, project_id, ref):
+    """Создаёт новый pipeline на указанном ref."""
+    return gitlab_api(
+        base_url, token,
+        f"/projects/{project_id}/pipeline",
+        method="POST",
+        data={"ref": ref}
+    )
 
 
-def check_templates(base_url: str, token: str, project_id: str, branch: str,
-                    app_path: str) -> str:
-    """Проверяет наличие deployment.yaml и job.yaml в templates/.
-    Возвращает тег только если есть job (или оба)."""
-    templates_items = get_tree(base_url, token, project_id, f"{app_path}/templates", branch)
-    if not templates_items:
-        return ""
-    files = {item["name"] for item in templates_items if item["type"] == "blob"}
-    has_deploy = "deployment.yaml" in files
-    has_job = "job.yaml" in files
-    if has_deploy and has_job:
-        return "[deployment+job]"
-    if has_job:
-        return "[job]"
-    return ""
+def get_pipeline_jobs(base_url, token, project_id, pipeline_id):
+    """Получает список джоб pipeline-а."""
+    return gitlab_api(
+        base_url, token,
+        f"/projects/{project_id}/pipelines/{pipeline_id}/jobs?per_page=100"
+    )
 
 
-def process_values(base_url: str, token: str, project_id: str, branch: str,
-                   display_path: str, file_path: str, app_path: str,
-                   results: list):
-    """Читает values.yaml, извлекает image/images, проверяет templates."""
-    content = get_file_raw(base_url, token, project_id, file_path, branch)
-    tpl_tag = check_templates(base_url, token, project_id, branch, app_path)
+def play_job(base_url, token, project_id, job_id):
+    """Запускает manual job."""
+    return gitlab_api(
+        base_url, token,
+        f"/projects/{project_id}/jobs/{job_id}/play",
+        method="POST"
+    )
 
-    if content is None:
-        results.append((display_path, "", "values.yaml не найден", "", tpl_tag))
+
+def get_job(base_url, token, project_id, job_id):
+    """Получает состояние джобы."""
+    return gitlab_api(base_url, token, f"/projects/{project_id}/jobs/{job_id}")
+
+
+def get_job_trace(base_url, token, project_id, job_id):
+    """Получает лог джобы."""
+    return gitlab_api_raw(base_url, token, f"/projects/{project_id}/jobs/{job_id}/trace")
+
+
+def parse_input_file(filepath):
+    """Парсит вывод scan_values.py."""
+    entries = []
+    current_display = ""
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+            if "не найден" in line:
+                continue
+
+            entry = {
+                "display_path": "",
+                "sub_name": "",
+                "image_path": "",
+                "tag": "",
+            }
+
+            segments = line.split("  —  ")
+            first = segments[0]
+
+            if first.strip():
+                sub_match = re.search(r'\((\S+)\)\s*$', first.strip())
+                if sub_match:
+                    entry["sub_name"] = sub_match.group(1)
+                    path_part = first[:first.rfind("(")].strip()
+                    if path_part:
+                        current_display = path_part
+                else:
+                    current_display = first.strip()
+            else:
+                sub_match = re.search(r'\((\S+)\)', first)
+                if sub_match:
+                    entry["sub_name"] = sub_match.group(1)
+
+            entry["display_path"] = current_display
+
+            if len(segments) >= 2:
+                entry["image_path"] = segments[1].strip()
+            if len(segments) >= 3:
+                third = segments[2].strip()
+                third = re.sub(r'\s*\[.*?\]\s*$', '', third)
+                entry["tag"] = third.strip()
+
+            if entry["image_path"] and entry["tag"]:
+                entries.append(entry)
+
+    return entries
+
+
+def strip_bin(tag):
+    """Обрезает суффикс .bin если есть."""
+    if tag.endswith(".bin"):
+        return tag[:-4]
+    return tag
+
+
+def stand_to_job_name(stand):
+    """schedule-dev -> aos_schedule_dev"""
+    return f"aos_{stand.replace('-', '_')}"
+
+
+def show_entries(entries):
+    """Выводит пронумерованный список app-ов."""
+    print("\nНайденные app и тэги:")
+    print("-" * 80)
+    for i, e in enumerate(entries, 1):
+        label = f" ({e['sub_name']})" if e["sub_name"] else ""
+        print(f"  {i:3}. {e['display_path']}{label}")
+        print(f"       {e['image_path']} : {e['tag']}")
+    print("-" * 80)
+
+
+def menu_select_entry(entries):
+    """Позволяет выбрать app из списка."""
+    show_entries(entries)
+    while True:
+        choice = input(f"\nВыберите app (1-{len(entries)}) или q для отмены: ").strip()
+        if choice.lower() == "q":
+            return None
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(entries):
+                return entries[idx - 1]
+        except ValueError:
+            pass
+        print("Неверный ввод, попробуйте ещё раз.")
+
+
+def deploy_flow(args, entries):
+    """Процесс деплоя одного app."""
+    entry = menu_select_entry(entries)
+    if not entry:
         return
 
-    nested = extract_nested_images(content)
-    single = extract_single_image(content)
+    project_path = entry["image_path"].lstrip("/")
+    print(f"\nВыбран: {entry['display_path']}")
+    print(f"Путь проекта: /{project_path}")
+    print(f"Тэг из репозитория: {entry['tag']}")
 
-    if not nested and not single:
-        results.append((display_path, "", "image не найден в values.yaml", "", tpl_tag))
+    custom = input(f"\nВведите тэг для деплоя или Enter чтобы использовать '{entry['tag']}': ").strip()
+    raw_tag = custom if custom else entry["tag"]
+    git_tag = strip_bin(raw_tag)
+    print(f"\nБудет использован git tag: {git_tag}")
+
+    # Находим проект
+    print(f"\nПоиск проекта {project_path}...")
+    project_id, err = find_project_id(args.gitlab_url, args.token, project_path)
+    if err:
+        print(f"ОШИБКА: не удалось найти проект: {err}")
+        return
+    print(f"Project ID: {project_id}")
+
+    # Проверяем тэг
+    print(f"Проверка тэга {git_tag}...")
+    exists, err = check_tag_exists(args.gitlab_url, args.token, project_id, git_tag)
+    if err:
+        print(f"ОШИБКА проверки тэга: {err}")
+        return
+    if not exists:
+        print(f"ОШИБКА: тэг '{git_tag}' не найден в проекте {project_path}")
+        return
+    print("Тэг существует.")
+
+    # Подтверждение
+    job_name = stand_to_job_name(args.stand)
+    print(f"\nБудет создан pipeline на тэге {git_tag} и запущена джоба {job_name}")
+    confirm = input("Продолжить? (y/n): ").strip().lower()
+    if confirm != "y":
+        print("Отмена.")
         return
 
-    if single:
-        results.append((display_path, "", single[0], single[1], tpl_tag))
+    # Создаём pipeline
+    print(f"\nСоздание pipeline...")
+    try:
+        pipeline = create_pipeline(args.gitlab_url, args.token, project_id, git_tag)
+    except Exception as e:
+        print(f"ОШИБКА создания pipeline: {e}")
+        return
+    pipeline_id = pipeline["id"]
+    print(f"Pipeline создан: #{pipeline_id} — {pipeline.get('web_url', '')}")
 
-    for name, path, tag in nested:
-        results.append((display_path, name, path, tag, tpl_tag))
+    # Ждём появления джобы
+    print(f"\nОжидание появления джобы {job_name}...")
+    target_job = None
+    for attempt in range(15):
+        time.sleep(2)
+        try:
+            jobs = get_pipeline_jobs(args.gitlab_url, args.token, project_id, pipeline_id)
+        except Exception as e:
+            print(f"ОШИБКА получения списка джоб: {e}")
+            return
+        for j in jobs:
+            if j["name"] == job_name:
+                target_job = j
+                break
+        if target_job:
+            break
+        print(f"  попытка {attempt + 1}/15...")
+
+    if not target_job:
+        print(f"ОШИБКА: джоба {job_name} не найдена в pipeline #{pipeline_id}")
+        print("Доступные джобы:")
+        try:
+            jobs = get_pipeline_jobs(args.gitlab_url, args.token, project_id, pipeline_id)
+            for j in jobs:
+                print(f"  - {j['name']} ({j['status']})")
+        except Exception:
+            pass
+        return
+
+    job_id = target_job["id"]
+    print(f"Джоба найдена: #{job_id}, статус: {target_job['status']}")
+
+    # Запускаем manual джобу
+    if target_job["status"] == "manual":
+        print(f"Запуск джобы...")
+        try:
+            play_job(args.gitlab_url, args.token, project_id, job_id)
+        except Exception as e:
+            print(f"ОШИБКА запуска джобы: {e}")
+            return
+        print("Джоба запущена.")
+    else:
+        print(f"Джоба уже в статусе {target_job['status']}, пропускаем play.")
+
+    # Ждём 10 секунд и забираем лог
+    print("\nОжидание 10 секунд...")
+    time.sleep(10)
+
+    try:
+        job_info = get_job(args.gitlab_url, args.token, project_id, job_id)
+    except Exception as e:
+        print(f"ОШИБКА получения статуса: {e}")
+        return
+
+    status = job_info["status"]
+    print(f"\nСтатус джобы: {status}")
+    print(f"URL: {job_info.get('web_url', '')}")
+
+    print("\n" + "=" * 80)
+    print("ЛОГ ДЖОБЫ:")
+    print("=" * 80)
+    trace = get_job_trace(args.gitlab_url, args.token, project_id, job_id)
+    print(trace)
+    print("=" * 80)
+
+    if status == "failed":
+        print("\n!!! Джоба завершилась с ошибкой !!!")
+    elif status in ("running", "pending"):
+        print(f"\nДжоба ещё выполняется. Смотрите в GitLab: {job_info.get('web_url', '')}")
+    elif status == "success":
+        print("\nДжоба завершилась успешно.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Сканирование values.yaml в GitLab-репозитории")
-    parser.add_argument("--url", required=True, help="URL GitLab (например https://gitlab.example.com)")
-    parser.add_argument("--project-id", required=True, help="ID проекта в GitLab")
+    parser = argparse.ArgumentParser(description="Проверка тэгов и деплой через GitLab")
+    parser.add_argument("--input", required=True, help="Файл с выводом scan_values.py")
+    parser.add_argument("--gitlab-url", required=True, help="URL GitLab (например https://gitlab-inte.test.ru)")
     parser.add_argument("--token", required=True, help="GitLab Private Token")
-    parser.add_argument("--branch", required=True, help="Ветка репозитория")
+    parser.add_argument("--stand", required=True, help="Название стенда (например schedule-dev)")
     args = parser.parse_args()
 
-    base_url = args.url.rstrip("/")
-    token = args.token
-    project_id = args.project_id
-    branch = args.branch
+    args.gitlab_url = args.gitlab_url.rstrip("/")
 
-    results: list[tuple[str, str, str, str, str]] = []
+    try:
+        entries = parse_input_file(args.input)
+    except Exception as e:
+        print(f"Ошибка чтения входного файла: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    root_items = get_tree(base_url, token, project_id, "", branch)
-    root_dirs = [item["name"] for item in root_items if item["type"] == "tree"]
-
-    for module in sorted(root_dirs):
-        if module.startswith(".") or module in SKIP_DIRS:
-            continue
-
-        if module == "main":
-            fronts_items = get_tree(base_url, token, project_id, "main/fronts", branch)
-            apps = [item["name"] for item in fronts_items if item["type"] == "tree"]
-            for app in sorted(apps):
-                dp = f"main/fronts/{app}"
-                process_values(base_url, token, project_id, branch,
-                               dp, f"{dp}/values.yaml", dp, results)
-            continue
-
-        module_items = get_tree(base_url, token, project_id, module, branch)
-        module_files = [item["name"] for item in module_items if item["type"] == "blob"]
-        module_dirs = [item["name"] for item in module_items if item["type"] == "tree"]
-
-        if "values.yaml" in module_files:
-            process_values(base_url, token, project_id, branch,
-                           module, f"{module}/values.yaml", module, results)
-
-        for app in sorted(module_dirs):
-            if app in SKIP_DIRS:
-                continue
-            dp = f"{module}/{app}"
-            process_values(base_url, token, project_id, branch,
-                           dp, f"{dp}/values.yaml", dp, results)
-
-    if not results:
-        print("Ничего не найдено.")
+    if not entries:
+        print("Нет валидных записей во входном файле.")
         sys.exit(0)
 
-    # Вычисляем ширину колонок
-    col1 = max(len(r[0]) for r in results)
-    col2 = max((len(f"({r[1]})") for r in results if r[1]), default=0)
-    # Колонка image path / ошибки
-    col3 = max(len(r[2]) for r in results)
-    # Колонка tag
-    col4 = max((len(r[3]) for r in results if r[3]), default=0)
+    while True:
+        print("\n" + "=" * 50)
+        print(f"Стенд: {args.stand}  |  Джоба: {stand_to_job_name(args.stand)}")
+        print("=" * 50)
+        print("  1) Показать найденные тэги")
+        print("  2) Деплой тэга на стенд")
+        print("  q) Выход")
+        choice = input("\nВыбор: ").strip().lower()
 
-    prev_display = None
-    for display_path, sub_name, image_path, tag, tpl_tag in results:
-        if display_path == prev_display:
-            col1_str = " " * col1
+        if choice == "1":
+            show_entries(entries)
+        elif choice == "2":
+            deploy_flow(args, entries)
+        elif choice == "q":
+            break
         else:
-            col1_str = f"{display_path:<{col1}}"
-        prev_display = display_path
-
-        if sub_name:
-            label = f"({sub_name})"
-            col2_str = f"{label:<{col2}}"
-        else:
-            col2_str = " " * col2 if col2 else ""
-
-        spacer2 = "  " if col2 else ""
-
-        if tag:
-            line = f"{col1_str}{spacer2}{col2_str}  —  {image_path:<{col3}}  —  {tag:<{col4}}"
-        else:
-            line = f"{col1_str}{spacer2}{col2_str}  —  {image_path}"
-
-        if tpl_tag:
-            line = f"{line}  {tpl_tag}"
-
-        print(line)
+            print("Неверный ввод.")
 
 
 if __name__ == "__main__":
     main()
-Например если стенд называется schedule-dev тогда джоба будет называться aos_schedule_dev
-Нужно отследить что джоба выполнилась и вывести ее лог, если выдала ошибку, вывести ее лог
-Сделай меню, только вывести тэги или деплой тэга на стенд, при деплое тэга нужно указать какой тэг деплоить или взять тэг из репозитория
+EOF
+chmod +x deploy_tag.py
+```
+
+## Использование
+
+```bash
+python3 deploy_tag.py \
+    --input scan_output.txt \
+    --gitlab-url https://gitlab-inte.test.ru \
+    --token glpat-xxx \
+    --stand schedule-dev
+```
+
+|Параметр      |Описание                                                         |
+|--------------|-----------------------------------------------------------------|
+|`--input`     |Файл с выводом `scan_values.py`                                  |
+|`--gitlab-url`|URL GitLab с репозиториями app (передаётся переменной)           |
+|`--token`     |GitLab Private Token                                             |
+|`--stand`     |Название стенда (напр. `schedule-dev` → джоба `aos_schedule_dev`)|
+
+## Логика
+
+**Меню:**
+
+1. Показать найденные тэги — выводит пронумерованный список из входного файла
+1. Деплой тэга на стенд — интерактивный выбор app и тэга
+1. Выход
+
+**Процесс деплоя:**
+
+1. Выбор app из пронумерованного списка
+1. Ввод тэга (или Enter — берётся из репозитория)
+1. Обрезка суффикса `.bin` → git tag
+1. Поиск проекта в GitLab по пути из `image_path`
+1. Проверка существования тэга — если нет, выход с ошибкой
+1. Подтверждение у пользователя
+1. Создание pipeline через `POST /projects/:id/pipeline` с `ref=<tag>`
+1. Ожидание появления джобы `aos_<stand>` в pipeline (до 30 сек)
+1. Запуск manual-джобы через `POST /jobs/:id/play`
+1. Пауза 10 секунд
+1. Один раз забирается статус и полный лог через `/jobs/:id/trace`
+1. Если статус `failed` — выводится предупреждение
