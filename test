@@ -1,100 +1,25 @@
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: Trace[26606376]: ---"About to start writing response" size:69 1979ms (10:08:10.740)
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: Trace[26606376]: [11.372190658s] [11.372190658s] END
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:11.748353   45955 trace.go:236] Trace[1285513561]: "Get" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:c66417a1-7087-4bf6-86b4-e16c68d3e907,client:192.168.0.83,api-group:,api-version:v1,name:microk8s-1,subresource:,namespace:,protocol:HTTP/2.0,resource:nodes,scope:resource,url:/api/v1/nodes/microk8s-1,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:GET (08-Apr-2026 10:08:00.375) (total time: 11372ms):
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1285513561]: ---"Writing http response done" 11372ms (10:08:11.748)
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1285513561]: [11.372358885s] [11.372358885s] END
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:11.748512   45955 status.go:71] apiserver received an error that is not an metav1.Status: context.deadlineExceededError{}: context deadline exceeded
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:11.748610   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:11.748635   45955 timeout.go:142] post-timeout activity - time-elapsed: 20.112035893s, GET "/api/v1/nodes/microk8s-1" result: <nil>
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:11.903576   45955 wrap.go:54] timeout or abort while handling: method=GET URI="/apis/coordination.k8s.io/v1/namespaces/kube-system/leases/kube-controller-manager?timeout=15s" audit-ID="c94c17a5-bb05-4e08-8439-0c5108343864"
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:11.904779   45955 timeout.go:142] post-timeout activity - time-elapsed: 5.13µs, GET "/apis/coordination.k8s.io/v1/namespaces/kube-system/leases/kube-controller-manager" result: <nil>
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:11.964988   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:11 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:11.965103   45955 writers.go:135] apiserver was unable to write a fallback JSON response: http: Handler timeout
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:12.162642   45955 status.go:71] apiserver received an error that is not an metav1.Status: context.deadlineExceededError{}: context deadline exceeded
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:12.162750   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:12.162810   45955 trace.go:236] Trace[1438650386]: "Get" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:5ed181ec-12a5-43f3-8575-bd607f235587,client:192.168.0.235,api-group:,api-version:v1,name:microk8s-4,subresource:,namespace:,protocol:HTTP/2.0,resource:nodes,scope:resource,url:/api/v1/nodes/microk8s-4,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:GET (08-Apr-2026 10:08:00.373) (total time: 11789ms):
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1438650386]: [11.789055967s] [11.789055967s] END
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:12.162931   45955 timeout.go:142] post-timeout activity - time-elapsed: 6.006458494s, GET "/api/v1/nodes/microk8s-4" result: <nil>
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:12.495938   45955 trace.go:236] Trace[94992501]: "Update" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:79fcae5f-a38c-4eb0-bb0a-9d1667379de4,client:192.168.0.129,api-group:coordination.k8s.io,api-version:v1,name:microk8s-7,subresource:,namespace:kube-node-lease,protocol:HTTP/2.0,resource:leases,scope:resource,url:/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/microk8s-7,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:PUT (08-Apr-2026 10:07:54.120) (total time: 12531ms):
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: Trace[94992501]: ["GuaranteedUpdate etcd3" audit-id:79fcae5f-a38c-4eb0-bb0a-9d1667379de4,key:/leases/kube-node-lease/microk8s-7,type:*coordination.Lease,resource:leases.coordination.k8s.io 12531ms (10:07:54.120)
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: Trace[94992501]:  ---"About to Encode" 2480ms (10:07:56.601)
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: Trace[94992501]:  ---"Txn call failed" err:context canceled 7614ms (10:08:04.215)]
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: Trace[94992501]: ---"Write to database call failed" len:486,err:Timeout: request did not complete within requested timeout - context canceled 1563ms (10:08:05.779)
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: Trace[94992501]: [12.531113778s] [12.531113778s] END
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:12.496068   45955 timeout.go:142] post-timeout activity - time-elapsed: 6.717056748s, PUT "/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/microk8s-7" result: <nil>
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:12.783775   45955 wrap.go:54] timeout or abort while handling: method=GET URI="/api/v1/secrets" audit-ID="9aa9e775-6fb1-45ff-b660-2d13692748e8"
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:12.784039   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:12 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:12.938953   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 9.302584822s, panicked: false, err: context deadline exceeded, panic-reason: <nil>
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.245583   45955 wrap.go:54] timeout or abort while handling: method=PUT URI="/apis/coordination.k8s.io/v1/namespaces/kube-system/leases/kube-scheduler?timeout=15s" audit-ID="a1fde0a4-211d-4f41-871e-328e55cf0af3"
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.246059   45955 timeout.go:142] post-timeout activity - time-elapsed: 6.158µs, PUT "/apis/coordination.k8s.io/v1/namespaces/kube-system/leases/kube-scheduler" result: <nil>
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.255881   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.255963   45955 writers.go:135] apiserver was unable to write a fallback JSON response: http: Handler timeout
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:13.269952   45955 trace.go:236] Trace[1471362384]: "SerializeObject" audit-id:9aa9e775-6fb1-45ff-b660-2d13692748e8,method:GET,url:/api/v1/secrets,protocol:HTTP/2.0,mediaType:application/vnd.kubernetes.protobuf,encoder:{"encodeGV":"v1","encoder":"protobuf","name":"versioning"} (08-Apr-2026 10:07:12.853) (total time: 60416ms):
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1471362384]: ---"Write call failed" writer:*gzip.Writer,size:105886881,firstWrite:true,err:http: Handler timeout 59815ms (10:08:12.784)
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1471362384]: [1m0.416148607s] [1m0.416148607s] END
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:13.270046   45955 trace.go:236] Trace[239413811]: "List" accept:application/vnd.kubernetes.protobuf, */*,audit-id:9aa9e775-6fb1-45ff-b660-2d13692748e8,client:192.168.0.32,api-group:,api-version:v1,name:,subresource:,namespace:,protocol:HTTP/2.0,resource:secrets,scope:cluster,url:/api/v1/secrets,user-agent:dashboard/v2.7.0,verb:LIST (08-Apr-2026 10:07:10.512) (total time: 62757ms):
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: Trace[239413811]: ["List(recursive=true) etcd3" audit-id:9aa9e775-6fb1-45ff-b660-2d13692748e8,key:/secrets,resourceVersion:,resourceVersionMatch:,limit:0,continue: 62757ms (10:07:10.512)]
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: Trace[239413811]: ---"Writing http response done" count:4979 60416ms (10:08:13.270)
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: Trace[239413811]: [1m2.757179612s] [1m2.757179612s] END
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.270461   45955 timeout.go:142] post-timeout activity - time-elapsed: 486.394275ms, GET "/api/v1/secrets" result: <nil>
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.309175   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.309212   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.494101   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.494176   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.494201   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.494820   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 7.714847754s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:13 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:13.965883   45955 timeout.go:142] post-timeout activity - time-elapsed: 7.685655038s, GET "/livez" result: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.059748   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 14.4864085s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.066874   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 9.848015808s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.357007   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.357098   45955 writers.go:135] apiserver was unable to write a fallback JSON response: http: Handler timeout
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.357117   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.357459   45955 writers.go:135] apiserver was unable to write a fallback JSON response: http: Handler timeout
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:14.550934   45955 trace.go:236] Trace[866867228]: "Get" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:61ecf9f6-99bb-4ad5-8637-f4fc83cab521,client:192.168.0.83,api-group:,api-version:v1,name:microk8s-1,subresource:,namespace:,protocol:HTTP/2.0,resource:nodes,scope:resource,url:/api/v1/nodes/microk8s-1,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:GET (08-Apr-2026 10:07:56.492) (total time: 18057ms):
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: Trace[866867228]: [18.057925739s] [18.057925739s] END
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.551094   45955 timeout.go:142] post-timeout activity - time-elapsed: 7.787081266s, GET "/api/v1/nodes/microk8s-1" result: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.551867   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 14.978034182s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:14.756020   45955 trace.go:236] Trace[1241366947]: "Get" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:6426e064-c562-40c5-b8fa-6fc647f52a83,client:127.0.0.1,api-group:,api-version:v1,name:microk8s-master,subresource:,namespace:,protocol:HTTP/2.0,resource:nodes,scope:resource,url:/api/v1/nodes/microk8s-master,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:GET (08-Apr-2026 10:08:07.776) (total time: 6979ms):
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1241366947]: [6.979677219s] [6.979677219s] END
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.756209   45955 timeout.go:142] post-timeout activity - time-elapsed: 399.235674ms, GET "/api/v1/nodes/microk8s-master" result: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.756281   45955 writers.go:135] apiserver was unable to write a fallback JSON response: http: Handler timeout
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.756923   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 10.538305632s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.757610   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 10.541811985s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.757640   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 8.600437803s, panicked: false, err: context deadline exceeded, panic-reason: <nil>
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:14.757696   45955 trace.go:236] Trace[564314839]: "Update" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:2106204b-b913-429c-a73e-0a91fc308920,client:127.0.0.1,api-group:coordination.k8s.io,api-version:v1,name:microk8s-master,subresource:,namespace:kube-node-lease,protocol:HTTP/2.0,resource:leases,scope:resource,url:/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/microk8s-master,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:PUT (08-Apr-2026 10:07:59.509) (total time: 15248ms):
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: Trace[564314839]: ---"Write to database call failed" len:501,err:Timeout: request did not complete within requested timeout - context canceled 11690ms (10:08:11.200)
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: Trace[564314839]: [15.248107114s] [15.248107114s] END
-Apr 08 10:08:14 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:14.757793   45955 timeout.go:142] post-timeout activity - time-elapsed: 400.821498ms, PUT "/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/microk8s-master" result: <nil>
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:15.092510   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 8.330436382s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:15.144262   45955 writers.go:135] apiserver was unable to write a fallback JSON response: http: Handler timeout
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:15.144339   45955 trace.go:236] Trace[1542693859]: "SerializeObject" audit-id:807c9d46-a3de-4c1f-a2eb-13c3e3576c70,method:GET,url:/api/v1/nodes/microk8s-3,protocol:HTTP/2.0,mediaType:application/vnd.kubernetes.protobuf,encoder:{"encodeGV":"v1","encoder":"protobuf","name":"versioning"} (08-Apr-2026 10:08:07.032) (total time: 8112ms):
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1542693859]: ---"About to start writing response" size:16262 6277ms (10:08:13.309)
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1542693859]: ---"About to start writing response" size:69 1835ms (10:08:15.144)
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1542693859]: [8.112247216s] [8.112247216s] END
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:15.144395   45955 trace.go:236] Trace[610041266]: "Get" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:807c9d46-a3de-4c1f-a2eb-13c3e3576c70,client:192.168.0.250,api-group:,api-version:v1,name:microk8s-3,subresource:,namespace:,protocol:HTTP/2.0,resource:nodes,scope:resource,url:/api/v1/nodes/microk8s-3,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:GET (08-Apr-2026 10:07:58.008) (total time: 17135ms):
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: Trace[610041266]: ---"watchCache locked acquired" 9023ms (10:08:07.031)
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: Trace[610041266]: ---"Writing http response done" 8112ms (10:08:15.144)
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: Trace[610041266]: [17.135707966s] [17.135707966s] END
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:15.144512   45955 timeout.go:142] post-timeout activity - time-elapsed: 23.4614945s, GET "/api/v1/nodes/microk8s-3" result: <nil>
-Apr 08 10:08:15 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:15.145216   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"context canceled"}: context canceled
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:16.125737   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 8.104437924s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:16.125780   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 8.486582509s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:16.269458   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 8.24269283s, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:16.503285   45955 wrap.go:54] timeout or abort while handling: method=GET URI="/api/v1/secrets" audit-ID="a9c72c53-fa7c-4d75-8e64-46a4944a3a97"
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:16.503496   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:16.535263   45955 trace.go:236] Trace[1499043988]: "SerializeObject" audit-id:,method:GET,url:/metrics,protocol:HTTP/2.0,mediaType:application/json,encoder:{"encoder":"{\"name\":\"json\",\"pretty\":\"false\",\"strict\":\"false\",\"yaml\":\"false\"}","name":"versioning"} (08-Apr-2026 10:08:09.656) (total time: 6878ms):
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1499043988]: ---"About to start writing response" size:192 6878ms (10:08:16.535)
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1499043988]: [6.878538165s] [6.878538165s] END
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:16.627195   45955 trace.go:236] Trace[1343525117]: "SerializeObject" audit-id:,method:GET,url:/metrics,protocol:HTTP/2.0,mediaType:application/json,encoder:{"encoder":"{\"name\":\"json\",\"pretty\":\"false\",\"strict\":\"false\",\"yaml\":\"false\"}","name":"versioning"} (08-Apr-2026 10:08:09.464) (total time: 7163ms):
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1343525117]: ---"About to start writing response" size:192 7162ms (10:08:16.627)
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1343525117]: [7.16301698s] [7.16301698s] END
-Apr 08 10:08:16 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:16.715742   45955 wrap.go:54] timeout or abort while handling: method=POST URI="/apis/authentication.k8s.io/v1/tokenreviews" audit-ID="2430d2e7-99fd-4a40-a3b1-5abbc8426367"
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:17.270015   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:17.270112   45955 writers.go:135] apiserver was unable to write a fallback JSON response: http: Handler timeout
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:17.580057   45955 status.go:71] apiserver received an error that is not an metav1.Status: context.deadlineExceededError{}: context deadline exceeded
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: I0408 10:08:17.580274   45955 trace.go:236] Trace[1449542795]: "Get" accept:application/vnd.kubernetes.protobuf,application/json,audit-id:69d05948-97b4-4e09-8035-65513961951e,client:192.168.0.119,api-group:,api-version:v1,name:microk8s-ingress-2,subresource:,namespace:,protocol:HTTP/2.0,resource:nodes,scope:resource,url:/api/v1/nodes/microk8s-ingress-2,user-agent:kubelite/v1.30.14 (linux/amd64) kubernetes/9e18483,verb:GET (08-Apr-2026 10:08:12.938) (total time: 4641ms):
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: Trace[1449542795]: [4.641994588s] [4.641994588s] END
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:17.951280   45955 writers.go:122] apiserver was unable to write a JSON response: http: Handler timeout
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:17.951351   45955 status.go:71] apiserver received an error that is not an metav1.Status: &errors.errorString{s:"http: Handler timeout"}: http: Handler timeout
-Apr 08 10:08:17 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:17.951453   45955 finisher.go:175] FinishRequest: post-timeout activity - time-elapsed: 81.407µs, panicked: false, err: context canceled, panic-reason: <nil>
-Apr 08 10:08:18 microk8s-master microk8s.daemon-kubelite[45955]: E0408 10:08:18.349047   45955 wrap.go:54] timeout or abort while handling: method=GET URI="/api/v1/nodes/microk8s-ingress-2?timeout=10s" audit-ID="69d05948-97b4-4e09-8035-65513961951e"
+# Найти и остановить dashboard
+sudo microk8s disable dashboard
+
+# Или убить pod напрямую через crictl (если kubectl не отвечает)
+sudo microk8s ctr tasks ls | grep dashboard
+sudo microk8s ctr tasks kill <dashboard-task-id>
+
+
+sudo snap stop microk8s.daemon-kubelite
+sleep 10
+sudo snap start microk8s.daemon-kubelite
+
+sudo du -sh /var/snap/microk8s/current/var/kubernetes/backend/
+
+# Подключиться напрямую
+sudo /snap/microk8s/current/bin/dqlite \
+  -s $(hostname -I | awk '{print $1}'):19001 \
+  -c /var/snap/microk8s/current/var/kubernetes/backend/cluster.crt \
+  -k /var/snap/microk8s/current/var/kubernetes/backend/cluster.key \
+  k8s <<< "SELECT COUNT(*) FROM kine;"
+
+
+snap info microk8s | grep installed
+# Если версия до февраля 2025:
+sudo snap refresh microk8s --channel=1.30/stable
