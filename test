@@ -1,408 +1,343 @@
-# deploy_tag.py (fixed)
-
-Исправлена проблема: pipeline останавливается в `blocked` после build/test, и manual-джоба не находилась потому что искали слишком рано.
-
-## Что изменилось
-
-- Ждём пока pipeline дойдёт до статуса `blocked` / `manual` / `success` / `failed` (до 5 минут)
-- Только после этого ищем manual-джобу `aos_<stand>`
-- При поиске джоб подтягиваем **все** через `include_retried=true`
-- Показываем прогресс по статусу pipeline каждые 5 секунд
-- Если джоба не найдена — выводим полный список всех джоб pipeline с их статусами для диагностики
-
-## Установка
-
-```bash
-cat << 'EOF' > deploy_tag.py
-#!/usr/bin/env python3
-"""
-Скрипт для проверки тэгов в GitLab-репозиториях и запуска деплоя.
-"""
-
-import argparse
-import json
-import re
-import sys
-import time
-from urllib.parse import quote as url_quote
-from urllib.request import Request, urlopen
-from urllib.error import HTTPError
-
-
-def gitlab_api(base_url, token, endpoint, method="GET", data=None):
-    url = f"{base_url}/api/v4{endpoint}"
-    headers = {"PRIVATE-TOKEN": token}
-    body = None
-    if data is not None:
-        body = json.dumps(data).encode()
-        headers["Content-Type"] = "application/json"
-    req = Request(url, headers=headers, method=method, data=body)
-    try:
-        with urlopen(req) as resp:
-            content = resp.read().decode()
-            if not content:
-                return None
-            return json.loads(content)
-    except HTTPError as e:
-        err_body = ""
-        try:
-            err_body = e.read().decode()
-        except Exception:
-            pass
-        raise Exception(f"HTTP {e.code}: {err_body or e.reason}")
-
-
-def gitlab_api_raw(base_url, token, endpoint):
-    url = f"{base_url}/api/v4{endpoint}"
-    req = Request(url, headers={"PRIVATE-TOKEN": token})
-    try:
-        with urlopen(req) as resp:
-            return resp.read().decode(errors="replace")
-    except HTTPError as e:
-        return f"[HTTP {e.code}] {e.reason}"
-
-
-def find_project_id(base_url, token, project_path):
-    path = project_path.strip("/")
-    encoded = url_quote(path, safe="")
-    try:
-        result = gitlab_api(base_url, token, f"/projects/{encoded}")
-        return result["id"], None
-    except Exception as e:
-        return None, str(e)
-
-
-def check_tag_exists(base_url, token, project_id, tag):
-    encoded_tag = url_quote(tag, safe="")
-    try:
-        gitlab_api(base_url, token, f"/projects/{project_id}/repository/tags/{encoded_tag}")
-        return True, None
-    except Exception as e:
-        if "404" in str(e):
-            return False, None
-        return False, str(e)
-
-
-def create_pipeline(base_url, token, project_id, ref):
-    return gitlab_api(
-        base_url, token,
-        f"/projects/{project_id}/pipeline",
-        method="POST",
-        data={"ref": ref}
-    )
-
-
-def get_pipeline(base_url, token, project_id, pipeline_id):
-    return gitlab_api(base_url, token, f"/projects/{project_id}/pipelines/{pipeline_id}")
-
-
-def get_pipeline_jobs(base_url, token, project_id, pipeline_id):
-    """Получает ВСЕ джобы pipeline включая manual."""
-    return gitlab_api(
-        base_url, token,
-        f"/projects/{project_id}/pipelines/{pipeline_id}/jobs"
-        f"?per_page=100&include_retried=true"
-    )
-
-
-def play_job(base_url, token, project_id, job_id):
-    return gitlab_api(
-        base_url, token,
-        f"/projects/{project_id}/jobs/{job_id}/play",
-        method="POST"
-    )
-
-
-def get_job(base_url, token, project_id, job_id):
-    return gitlab_api(base_url, token, f"/projects/{project_id}/jobs/{job_id}")
-
-
-def get_job_trace(base_url, token, project_id, job_id):
-    return gitlab_api_raw(base_url, token, f"/projects/{project_id}/jobs/{job_id}/trace")
-
-
-def parse_input_file(filepath):
-    entries = []
-    current_display = ""
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if not line.strip() or "не найден" in line:
-                continue
-            entry = {"display_path": "", "sub_name": "", "image_path": "", "tag": ""}
-            segments = line.split("  —  ")
-            first = segments[0]
-            if first.strip():
-                sub_match = re.search(r'\((\S+)\)\s*$', first.strip())
-                if sub_match:
-                    entry["sub_name"] = sub_match.group(1)
-                    path_part = first[:first.rfind("(")].strip()
-                    if path_part:
-                        current_display = path_part
-                else:
-                    current_display = first.strip()
-            else:
-                sub_match = re.search(r'\((\S+)\)', first)
-                if sub_match:
-                    entry["sub_name"] = sub_match.group(1)
-            entry["display_path"] = current_display
-            if len(segments) >= 2:
-                entry["image_path"] = segments[1].strip()
-            if len(segments) >= 3:
-                third = segments[2].strip()
-                third = re.sub(r'\s*\[.*?\]\s*$', '', third)
-                entry["tag"] = third.strip()
-            if entry["image_path"] and entry["tag"]:
-                entries.append(entry)
-    return entries
-
-
-def strip_bin(tag):
-    return tag[:-4] if tag.endswith(".bin") else tag
-
-
-def stand_to_job_name(stand):
-    return f"aos_{stand.replace('-', '_')}"
-
-
-def show_entries(entries):
-    print("\nНайденные app и тэги:")
-    print("-" * 80)
-    for i, e in enumerate(entries, 1):
-        label = f" ({e['sub_name']})" if e["sub_name"] else ""
-        print(f"  {i:3}. {e['display_path']}{label}")
-        print(f"       {e['image_path']} : {e['tag']}")
-    print("-" * 80)
-
-
-def menu_select_entry(entries):
-    show_entries(entries)
-    while True:
-        choice = input(f"\nВыберите app (1-{len(entries)}) или q для отмены: ").strip()
-        if choice.lower() == "q":
-            return None
-        try:
-            idx = int(choice)
-            if 1 <= idx <= len(entries):
-                return entries[idx - 1]
-        except ValueError:
-            pass
-        print("Неверный ввод.")
-
-
-def wait_for_manual_stage(base_url, token, project_id, pipeline_id, job_name, timeout=300):
-    """Ждёт пока pipeline дойдёт до manual-джобы.
-    Возвращает (job_dict | None, все_джобы, финальный_статус_pipeline)."""
-    # Терминальные статусы где manual-джоба уже должна быть доступна
-    ready_statuses = {"manual", "success", "failed", "canceled", "skipped"}
-    # blocked = pipeline остановлен и ждёт ручного ввода — это именно то что нам нужно
-
-    start = time.time()
-    last_status = ""
-    last_jobs = []
-
-    while time.time() - start < timeout:
-        try:
-            pipeline = get_pipeline(base_url, token, project_id, pipeline_id)
-            pipeline_status = pipeline.get("status", "unknown")
-        except Exception as e:
-            print(f"  ошибка получения pipeline: {e}")
-            time.sleep(5)
-            continue
-
-        try:
-            jobs = get_pipeline_jobs(base_url, token, project_id, pipeline_id)
-            last_jobs = jobs
-        except Exception as e:
-            print(f"  ошибка получения джоб: {e}")
-            time.sleep(5)
-            continue
-
-        # Ищем нашу джобу
-        target = None
-        for j in jobs:
-            if j["name"] == job_name:
-                target = j
-                break
-
-        if pipeline_status != last_status:
-            print(f"  pipeline: {pipeline_status}")
-            last_status = pipeline_status
-
-        # Pipeline заблокирован ручной джобой — идеально
-        if pipeline_status == "manual":
-            if target:
-                return target, jobs, pipeline_status
-            # manual статус но нашей джобы нет — зашли в тупик
-            return None, jobs, pipeline_status
-
-        # Pipeline завершился — проверяем есть ли наша джоба
-        if pipeline_status in ready_statuses:
-            return target, jobs, pipeline_status
-
-        # Pipeline всё ещё работает, но джоба может уже существовать в статусе manual
-        if target and target.get("status") == "manual":
-            return target, jobs, pipeline_status
-
-        time.sleep(5)
-
-    return None, last_jobs, last_status
-
-
-def deploy_flow(args, entries):
-    entry = menu_select_entry(entries)
-    if not entry:
-        return
-
-    project_path = entry["image_path"].lstrip("/")
-    print(f"\nВыбран: {entry['display_path']}")
-    print(f"Путь проекта: /{project_path}")
-    print(f"Тэг из репозитория: {entry['tag']}")
-
-    custom = input(f"\nВведите тэг или Enter для '{entry['tag']}': ").strip()
-    raw_tag = custom if custom else entry["tag"]
-    git_tag = strip_bin(raw_tag)
-    print(f"Git tag: {git_tag}")
-
-    print(f"\nПоиск проекта {project_path}...")
-    project_id, err = find_project_id(args.gitlab_url, args.token, project_path)
-    if err:
-        print(f"ОШИБКА: {err}")
-        return
-    print(f"Project ID: {project_id}")
-
-    print(f"Проверка тэга {git_tag}...")
-    exists, err = check_tag_exists(args.gitlab_url, args.token, project_id, git_tag)
-    if err:
-        print(f"ОШИБКА: {err}")
-        return
-    if not exists:
-        print(f"ОШИБКА: тэг '{git_tag}' не найден в проекте")
-        return
-    print("Тэг существует.")
-
-    job_name = stand_to_job_name(args.stand)
-    print(f"\nPipeline на тэге {git_tag}, джоба: {job_name}")
-    if input("Продолжить? (y/n): ").strip().lower() != "y":
-        print("Отмена.")
-        return
-
-    print(f"\nСоздание pipeline...")
-    try:
-        pipeline = create_pipeline(args.gitlab_url, args.token, project_id, git_tag)
-    except Exception as e:
-        print(f"ОШИБКА: {e}")
-        return
-    pipeline_id = pipeline["id"]
-    print(f"Pipeline #{pipeline_id}: {pipeline.get('web_url', '')}")
-
-    # Ждём пока pipeline дойдёт до manual-джобы (после build/test)
-    print(f"\nОжидание прохождения build/test и появления {job_name}...")
-    print("(таймаут 5 минут)")
-    target_job, all_jobs, final_status = wait_for_manual_stage(
-        args.gitlab_url, args.token, project_id, pipeline_id, job_name
-    )
-
-    if not target_job:
-        print(f"\nОШИБКА: джоба {job_name} не найдена или не в статусе manual.")
-        print(f"Финальный статус pipeline: {final_status}")
-        print(f"\nВсе джобы в pipeline #{pipeline_id}:")
-        for j in all_jobs:
-            print(f"  [{j['status']:12}] {j['stage']:15} {j['name']}")
-        return
-
-    job_id = target_job["id"]
-    print(f"\nДжоба найдена: #{job_id}, статус: {target_job['status']}")
-
-    if target_job["status"] != "manual":
-        print(f"Джоба не в статусе manual (сейчас: {target_job['status']}), play не требуется.")
-    else:
-        print("Запуск manual-джобы...")
-        try:
-            play_job(args.gitlab_url, args.token, project_id, job_id)
-        except Exception as e:
-            print(f"ОШИБКА запуска: {e}")
-            return
-        print("Джоба запущена.")
-
-    print("\nОжидание 10 секунд...")
-    time.sleep(10)
-
-    try:
-        job_info = get_job(args.gitlab_url, args.token, project_id, job_id)
-    except Exception as e:
-        print(f"ОШИБКА статуса: {e}")
-        return
-
-    status = job_info["status"]
-    print(f"\nСтатус джобы: {status}")
-    print(f"URL: {job_info.get('web_url', '')}")
-
-    print("\n" + "=" * 80)
-    print("ЛОГ ДЖОБЫ:")
-    print("=" * 80)
-    print(get_job_trace(args.gitlab_url, args.token, project_id, job_id))
-    print("=" * 80)
-
-    if status == "failed":
-        print("\n!!! ОШИБКА: джоба завершилась с failed !!!")
-    elif status in ("running", "pending"):
-        print(f"\nДжоба ещё работает: {job_info.get('web_url', '')}")
-    elif status == "success":
-        print("\nУСПЕХ: джоба завершилась success.")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Проверка тэгов и деплой через GitLab")
-    parser.add_argument("--input", required=True, help="Файл с выводом scan_values.py")
-    parser.add_argument("--gitlab-url", required=True, help="URL GitLab")
-    parser.add_argument("--token", required=True, help="GitLab Private Token")
-    parser.add_argument("--stand", required=True, help="Название стенда")
-    args = parser.parse_args()
-    args.gitlab_url = args.gitlab_url.rstrip("/")
-
-    try:
-        entries = parse_input_file(args.input)
-    except Exception as e:
-        print(f"Ошибка чтения: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if not entries:
-        print("Нет валидных записей.")
-        sys.exit(0)
-
-    while True:
-        print("\n" + "=" * 50)
-        print(f"Стенд: {args.stand}  |  Джоба: {stand_to_job_name(args.stand)}")
-        print("=" * 50)
-        print("  1) Показать найденные тэги")
-        print("  2) Деплой тэга на стенд")
-        print("  q) Выход")
-        choice = input("\nВыбор: ").strip().lower()
-        if choice == "1":
-            show_entries(entries)
-        elif choice == "2":
-            deploy_flow(args, entries)
-        elif choice == "q":
-            break
-        else:
-            print("Неверный ввод.")
-
-
-if __name__ == "__main__":
-    main()
+#!/usr/bin/env bash
+# ============================================================
+#  microk8s-diag.sh — диагностика мастер-ноды MicroK8s
+#  Анализ потребления RAM и дисковой нагрузки
+# ============================================================
+
+set -euo pipefail
+
+# ── цвета ───────────────────────────────────────────────────
+RED='\033[0;31m'
+YEL='\033[0;33m'
+GRN='\033[0;32m'
+CYN='\033[0;36m'
+BLU='\033[0;34m'
+MAG='\033[0;35m'
+WHT='\033[1;37m'
+DIM='\033[2m'
+BOLD='\033[1m'
+RST='\033[0m'
+
+# ── вывод ───────────────────────────────────────────────────
+header() {
+  echo ""
+  echo -e "${BLU}${BOLD}╔══════════════════════════════════════════════════════════╗${RST}"
+  echo -e "${BLU}${BOLD}║${RST}  ${WHT}${BOLD}$1${RST}"
+  echo -e "${BLU}${BOLD}╚══════════════════════════════════════════════════════════╝${RST}"
+}
+
+section() {
+  echo ""
+  echo -e "${CYN}${BOLD}▶ $1${RST}"
+  echo -e "${DIM}──────────────────────────────────────────────────────────${RST}"
+}
+
+ok()   { echo -e "  ${GRN}✔${RST}  $1"; }
+warn() { echo -e "  ${YEL}⚠${RST}  $1"; }
+bad()  { echo -e "  ${RED}✘${RST}  $1"; }
+info() { echo -e "  ${DIM}·${RST}  $1"; }
+kv()   { printf "  ${WHT}%-32s${RST} %s\n" "$1" "$2"; }
+
+# ── утилита: мегабайты из /proc ─────────────────────────────
+kb_to_mb() { echo $(( $1 / 1024 )) MB; }
+
+# ── проверка root ───────────────────────────────────────────
+if [[ $EUID -ne 0 ]]; then
+  echo -e "${YEL}⚠  Запустите с sudo для полной диагностики${RST}"
+  SUDO_PREFIX="sudo"
+else
+  SUDO_PREFIX=""
+fi
+
+LOG_FILE="/tmp/microk8s-diag-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# ════════════════════════════════════════════════════════════
+echo -e "${MAG}${BOLD}"
+cat << 'EOF'
+  ╔╦╗  ┬┌─┌─┐┬─┐┌─┐┬┌─┌─┐  ╔╦╗┌─┐┌─┐┌┬┐
+  ║║║  ││ ├┬┘│ │├┴┐├┴┐└─┐   ║║├┤ ├─┤ │ 
+  ╩ ╩  ┴└─┴└─└─┘┴ ┴┴ ┴└─┘  ═╩╝└─┘┴ ┴ ┴ 
+  Диагностика MicroK8s — RAM & Disk
 EOF
-chmod +x deploy_tag.py
-```
+echo -e "${RST}"
+echo -e "${DIM}  Дата: $(date '+%Y-%m-%d %H:%M:%S')   Хост: $(hostname)${RST}"
+echo -e "${DIM}  Лог сохраняется в: $LOG_FILE${RST}"
 
-## Ключевое исправление
+# ════════════════════════════════════════════════════════════
+header "1. СИСТЕМА — ОБЩАЯ ИНФОРМАЦИЯ"
 
-Добавлена функция `wait_for_manual_stage` — она делает polling каждые 5 секунд и ждёт одного из:
+section "Uptime и нагрузка"
+uptime_raw=$(uptime)
+kv "Uptime:" "$(uptime -p 2>/dev/null || echo "$uptime_raw")"
+load=$(awk '{print $1, $2, $3}' /proc/loadavg)
+cpus=$(nproc)
+kv "CPU cores:" "$cpus"
+kv "Load avg (1/5/15 мин):" "$load"
+load1=$(awk '{print $1}' /proc/loadavg | cut -d. -f1)
+if (( load1 > cpus * 2 )); then
+  bad "Нагрузка критическая (load > 2x CPU)"
+elif (( load1 > cpus )); then
+  warn "Нагрузка выше нормы (load > CPU count)"
+else
+  ok "Нагрузка в норме"
+fi
 
-- `pipeline.status == "manual"` — значит pipeline заблокирован ручной джобой (это то что у тебя происходит как `blocked`, в API это `manual`)
-- Наша джоба `aos_<stand>` появилась в статусе `manual`
-- Pipeline завершился в терминальном состоянии
+section "Ядро и дистрибутив"
+kv "Kernel:" "$(uname -r)"
+if [[ -f /etc/os-release ]]; then
+  kv "OS:" "$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')"
+fi
 
-Только после этого делаем `play`. Таймаут 5 минут на прохождение build/test.
+# ════════════════════════════════════════════════════════════
+header "2. ПАМЯТЬ — ДЕТАЛЬНЫЙ АНАЛИЗ"
 
-Если джоба всё равно не находится — скрипт выведет **полный список всех джоб** с их stage и статусами, покажи мне этот вывод и я пойму почему.
+section "Общий обзор RAM"
+mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+mem_free=$(grep MemFree /proc/meminfo | awk '{print $2}')
+mem_avail=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+mem_cached=$(grep "^Cached:" /proc/meminfo | awk '{print $2}')
+mem_buffers=$(grep "^Buffers:" /proc/meminfo | awk '{print $2}')
+mem_slab=$(grep "^Slab:" /proc/meminfo | awk '{print $2}')
+mem_used=$(( mem_total - mem_free - mem_cached - mem_buffers ))
+mem_used_pct=$(( mem_used * 100 / mem_total ))
+mem_avail_pct=$(( mem_avail * 100 / mem_total ))
+
+kv "Total RAM:"      "$(kb_to_mb $mem_total)"
+kv "Used (без кэша):" "$(kb_to_mb $mem_used) (${mem_used_pct}%)"
+kv "Available:"      "$(kb_to_mb $mem_avail) (${mem_avail_pct}%)"
+kv "Cached:"         "$(kb_to_mb $mem_cached)"
+kv "Buffers:"        "$(kb_to_mb $mem_buffers)"
+kv "Slab:"           "$(kb_to_mb $mem_slab)"
+
+if (( mem_avail_pct < 10 )); then
+  bad "Критически мало свободной RAM (< 10%)"
+elif (( mem_avail_pct < 20 )); then
+  warn "Мало свободной RAM (< 20%)"
+else
+  ok "RAM в норме"
+fi
+
+section "Swap"
+swap_total=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
+swap_free=$(grep SwapFree /proc/meminfo | awk '{print $2}')
+swap_used=$(( swap_total - swap_free ))
+if (( swap_total > 0 )); then
+  swap_pct=$(( swap_used * 100 / swap_total ))
+  kv "Swap total:" "$(kb_to_mb $swap_total)"
+  kv "Swap used:"  "$(kb_to_mb $swap_used) (${swap_pct}%)"
+  if (( swap_pct > 50 )); then
+    bad "Активное использование swap — нехватка RAM"
+  elif (( swap_pct > 10 )); then
+    warn "Swap используется (${swap_pct}%)"
+  else
+    ok "Swap почти не используется"
+  fi
+else
+  warn "Swap не настроен"
+fi
+
+section "OOM Killer — события"
+oom_count=$(dmesg --time-format=reltime 2>/dev/null | grep -c "Out of memory\|oom-kill" || true)
+if (( oom_count > 0 )); then
+  bad "OOM killer срабатывал $oom_count раз(а) с последней загрузки!"
+  dmesg --time-format=reltime 2>/dev/null | grep "Out of memory\|oom-kill\|Killed process" | tail -5 | while read -r line; do
+    echo -e "  ${RED}$line${RST}"
+  done
+else
+  ok "OOM killer не срабатывал"
+fi
+
+section "Топ процессов по RAM"
+echo ""
+ps aux --sort=-%mem | head -16 | awk '
+NR==1 { printf "  \033[2m%-12s %5s %5s %s\033[0m\n", "USER", "%CPU", "%MEM", "COMMAND" }
+NR>1  { printf "  %-12s %5s %5s %s\n", $1, $3, $4, $11 }
+'
+
+# ════════════════════════════════════════════════════════════
+header "3. ДИСКОВАЯ НАГРУЗКА"
+
+section "Использование дисков (df)"
+df -hT | grep -v tmpfs | grep -v udev | awk '
+NR==1 { printf "  \033[2m%-30s %-8s %6s %6s %5s %s\033[0m\n", "FILESYSTEM", "TYPE", "SIZE", "USED", "USE%", "MOUNT" }
+NR>1  {
+  pct = $6; gsub(/%/,"",pct)
+  color = "\033[0m"
+  if (pct+0 > 90) color = "\033[0;31m"
+  else if (pct+0 > 75) color = "\033[0;33m"
+  else color = "\033[0;32m"
+  printf "  %-30s %-8s %6s %6s " color "%5s\033[0m %s\n", $1, $2, $3, $4, $6, $7
+}'
+
+section "iostat — нагрузка на блочные устройства"
+if command -v iostat &>/dev/null; then
+  echo -e "  ${DIM}Снимаем 3-секундный срез (интервал 3с, 1 итерация)...${RST}"
+  echo ""
+  iostat -xh 3 1 | grep -v "^$\|^Linux" | sed 's/^/  /'
+else
+  warn "iostat не найден (установите: apt install sysstat)"
+fi
+
+section "Топ процессов по I/O (iotop снимок)"
+if command -v iotop &>/dev/null; then
+  $SUDO_PREFIX iotop -b -n 1 -P 2>/dev/null | head -20 | sed 's/^/  /' || warn "iotop требует root"
+else
+  warn "iotop не установлен (apt install iotop)"
+  echo ""
+  info "Альтернатива — /proc/diskstats срез:"
+  cat /proc/diskstats | awk '$3 ~ /^(sd|nvme|vd)/ {
+    printf "  %-12s reads=%-8s writes=%s\n", $3, $4, $8
+  }'
+fi
+
+section "Каталоги с наибольшим потреблением диска"
+echo -e "  ${DIM}Анализируем /var, /opt, /snap (MicroK8s пути)...${RST}"
+echo ""
+for dir in /var/snap/microk8s /var/lib/containerd /var/log /tmp /opt; do
+  if [[ -d "$dir" ]]; then
+    size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+    printf "  ${WHT}%-40s${RST} %s\n" "$dir" "$size"
+  fi
+done
+
+section "Большие файлы в /var/log (> 100MB)"
+find /var/log -type f -size +100M 2>/dev/null | while read -r f; do
+  sz=$(du -sh "$f" 2>/dev/null | cut -f1)
+  warn "$sz  $f"
+done || true
+
+section "Inode использование"
+df -i | grep -v tmpfs | grep -v udev | awk '
+NR==1 { printf "  \033[2m%-30s %10s %10s %5s %s\033[0m\n", "FILESYSTEM", "INODES", "IUSED", "USE%", "MOUNT" }
+NR>1  {
+  pct = $5; gsub(/%/,"",pct)
+  color = (pct+0 > 80) ? "\033[0;31m" : "\033[0;32m"
+  printf "  %-30s %10s %10s " color "%5s\033[0m %s\n", $1, $2, $3, $5, $6
+}'
+
+# ════════════════════════════════════════════════════════════
+header "4. MICROK8S — СОСТОЯНИЕ"
+
+section "Статус MicroK8s"
+if command -v microk8s &>/dev/null; then
+  mk8s_status=$(microk8s status 2>&1 | head -5)
+  echo "$mk8s_status" | sed 's/^/  /'
+
+  section "Ноды кластера"
+  microk8s kubectl get nodes -o wide 2>/dev/null | sed 's/^/  /' || true
+
+  section "Pods с наибольшим потреблением RAM"
+  echo ""
+  echo -e "  ${DIM}(требует metrics-server)${RST}"
+  microk8s kubectl top pods -A --sort-by=memory 2>/dev/null | head -20 | sed 's/^/  /' \
+    || warn "metrics-server недоступен: microk8s enable metrics-server"
+
+  section "Pods в нештатном состоянии"
+  bad_pods=$(microk8s kubectl get pods -A 2>/dev/null \
+    | grep -v "Running\|Completed\|NAME" || true)
+  if [[ -n "$bad_pods" ]]; then
+    bad "Обнаружены проблемные pods:"
+    echo "$bad_pods" | sed 's/^/  /'
+  else
+    ok "Все pods в статусе Running/Completed"
+  fi
+
+  section "Containerd — образы и использование диска"
+  microk8s ctr images ls 2>/dev/null | awk '
+    NR==1 { printf "  \033[2m%-70s %s\033[0m\n", "IMAGE", "SIZE" }
+    NR>1  { printf "  %-70s %s\n", $1, $5 }
+  ' | head -25 || true
+
+  section "Containerd snapshots (leaks)"
+  snap_count=$(microk8s ctr snapshots list 2>/dev/null | wc -l || echo "N/A")
+  kv "Snapshots count:" "$snap_count"
+  if [[ "$snap_count" != "N/A" ]] && (( snap_count > 500 )); then
+    warn "Много snapshots — возможна утечка. Проверь: microk8s ctr snapshots list"
+  fi
+
+  section "Системные сервисы MicroK8s"
+  for svc in snap.microk8s.daemon-kubelite snap.microk8s.daemon-containerd \
+              snap.microk8s.daemon-apiserver snap.microk8s.daemon-etcd; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      mem_kb=$(cat /sys/fs/cgroup/system.slice/${svc}.service/memory.current 2>/dev/null \
+               || grep VmRSS /proc/$(systemctl show -p MainPID --value "$svc" 2>/dev/null)/status 2>/dev/null \
+               | awk '{print $2}' || echo "0")
+      ok "${svc##snap.microk8s.}"
+    else
+      bad "${svc##snap.microk8s.} — не запущен"
+    fi
+  done
+
+  section "etcd — использование диска"
+  etcd_dir="/var/snap/microk8s/current/var/kubernetes/backend"
+  if [[ -d "$etcd_dir" ]]; then
+    etcd_size=$(du -sh "$etcd_dir" 2>/dev/null | cut -f1)
+    kv "etcd data dir:" "$etcd_size"
+    if [[ "${etcd_size%M}" =~ ^[0-9]+$ ]] && (( ${etcd_size%M} > 2048 )); then
+      warn "etcd > 2GB — рекомендуется compaction: microk8s kubectl -n kube-system exec \$(microk8s kubectl -n kube-system get pod -l component=etcd -o name) -- etcdctl compact \$(etcdctl endpoint status --write-out=json | jq '.[0].Status.header.revision')"
+    fi
+  fi
+
+  section "Kubelet — eviction thresholds"
+  microk8s kubectl describe node "$(hostname)" 2>/dev/null | grep -A5 "Conditions:\|Allocatable:\|Capacity:" | head -30 | sed 's/^/  /' || true
+
+else
+  bad "microk8s не найден в PATH"
+fi
+
+# ════════════════════════════════════════════════════════════
+header "5. СЕТЕВЫЕ СОЕДИНЕНИЯ"
+
+section "Открытые соединения (top-10 по количеству)"
+ss -tanp 2>/dev/null | awk 'NR>1 {print $1}' | sort | uniq -c | sort -rn | head -10 | \
+  awk '{ printf "  %5s  %s\n", $1, $2 }'
+
+section "CLOSE_WAIT / TIME_WAIT (признак утечек)"
+cw=$(ss -tan 2>/dev/null | grep -c CLOSE_WAIT || true)
+tw=$(ss -tan 2>/dev/null | grep -c TIME_WAIT || true)
+kv "CLOSE_WAIT:" "$cw"
+kv "TIME_WAIT:"  "$tw"
+(( cw > 100 )) && warn "Много CLOSE_WAIT — возможна утечка соединений"
+(( tw > 500 )) && warn "Много TIME_WAIT — высокий трафик или утечка"
+
+# ════════════════════════════════════════════════════════════
+header "6. РЕКОМЕНДАЦИИ"
+
+echo ""
+
+# RAM рекомендации
+if (( mem_avail_pct < 20 )); then
+  echo -e "  ${RED}${BOLD}[RAM]${RST} Критически мало памяти. Действия:"
+  echo -e "  ${YEL}  1.${RST} Найти жрущие pods:  microk8s kubectl top pods -A --sort-by=memory"
+  echo -e "  ${YEL}  2.${RST} Установить LimitRange/ResourceQuota на namespaces"
+  echo -e "  ${YEL}  3.${RST} Проверить утечки:   ps aux --sort=-%mem | head -20"
+  echo -e "  ${YEL}  4.${RST} Очистить образы:    microk8s ctr images prune --all"
+  echo -e "  ${YEL}  5.${RST} Добавить swap (если нет):  fallocate -l 4G /swapfile"
+  echo ""
+fi
+
+# Disk рекомендации
+echo -e "  ${CYN}${BOLD}[DISK I/O]${RST} Диагностика нагрузки на диск:"
+echo -e "  ${DIM}  # Реалтайм I/O по процессам:${RST}"
+echo -e "    sudo iotop -o -P"
+echo -e "  ${DIM}  # Какой pod создаёт нагрузку:${RST}"
+echo -e "    microk8s kubectl top pods -A --sort-by=memory"
+echo -e "  ${DIM}  # Очистка неиспользуемых образов:${RST}"
+echo -e "    microk8s ctr images prune --all"
+echo -e "  ${DIM}  # Очистка завершённых pods:${RST}"
+echo -e "    microk8s kubectl delete pods -A --field-selector=status.phase=Succeeded"
+echo -e "  ${DIM}  # Ротация логов containerd:${RST}"
+echo -e "    sudo journalctl --vacuum-size=500M"
+echo ""
+echo -e "  ${CYN}${BOLD}[МОНИТОРИНГ]${RST} Включить встроенный мониторинг:"
+echo -e "    microk8s enable metrics-server"
+echo -e "    microk8s enable prometheus   # Grafana + Prometheus stack"
+echo ""
+
+# ════════════════════════════════════════════════════════════
+echo -e "${BLU}${BOLD}════════════════════════════════════════════════════════════${RST}"
+echo -e "  ${GRN}${BOLD}Диагностика завершена.${RST}"
+echo -e "  ${DIM}Полный лог: $LOG_FILE${RST}"
+echo -e "${BLU}${BOLD}════════════════════════════════════════════════════════════${RST}"
+echo ""
