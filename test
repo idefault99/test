@@ -1,6 +1,14 @@
-# deploy_tag.py
+# deploy_tag.py (fixed)
 
-Скрипт для проверки тэгов и запуска деплоя через GitLab pipeline.
+Исправлена проблема: pipeline останавливается в `blocked` после build/test, и manual-джоба не находилась потому что искали слишком рано.
+
+## Что изменилось
+
+- Ждём пока pipeline дойдёт до статуса `blocked` / `manual` / `success` / `failed` (до 5 минут)
+- Только после этого ищем manual-джобу `aos_<stand>`
+- При поиске джоб подтягиваем **все** через `include_retried=true`
+- Показываем прогресс по статусу pipeline каждые 5 секунд
+- Если джоба не найдена — выводим полный список всех джоб pipeline с их статусами для диагностики
 
 ## Установка
 
@@ -9,9 +17,6 @@ cat << 'EOF' > deploy_tag.py
 #!/usr/bin/env python3
 """
 Скрипт для проверки тэгов в GitLab-репозиториях и запуска деплоя.
-
-Использование:
-    python3 deploy_tag.py --input scan_output.txt --gitlab-url https://gitlab-inte.test.ru --token GITLAB_TOKEN --stand schedule-dev
 """
 
 import argparse
@@ -25,7 +30,6 @@ from urllib.error import HTTPError
 
 
 def gitlab_api(base_url, token, endpoint, method="GET", data=None):
-    """Запрос к GitLab API."""
     url = f"{base_url}/api/v4{endpoint}"
     headers = {"PRIVATE-TOKEN": token}
     body = None
@@ -49,7 +53,6 @@ def gitlab_api(base_url, token, endpoint, method="GET", data=None):
 
 
 def gitlab_api_raw(base_url, token, endpoint):
-    """GET запрос, возвращает сырой текст (для trace)."""
     url = f"{base_url}/api/v4{endpoint}"
     req = Request(url, headers={"PRIVATE-TOKEN": token})
     try:
@@ -60,7 +63,6 @@ def gitlab_api_raw(base_url, token, endpoint):
 
 
 def find_project_id(base_url, token, project_path):
-    """Находит ID проекта по пути (например test/sys/tr/db/rtg/db)."""
     path = project_path.strip("/")
     encoded = url_quote(path, safe="")
     try:
@@ -71,7 +73,6 @@ def find_project_id(base_url, token, project_path):
 
 
 def check_tag_exists(base_url, token, project_id, tag):
-    """Проверяет существование тэга в проекте."""
     encoded_tag = url_quote(tag, safe="")
     try:
         gitlab_api(base_url, token, f"/projects/{project_id}/repository/tags/{encoded_tag}")
@@ -83,7 +84,6 @@ def check_tag_exists(base_url, token, project_id, tag):
 
 
 def create_pipeline(base_url, token, project_id, ref):
-    """Создаёт новый pipeline на указанном ref."""
     return gitlab_api(
         base_url, token,
         f"/projects/{project_id}/pipeline",
@@ -92,16 +92,20 @@ def create_pipeline(base_url, token, project_id, ref):
     )
 
 
+def get_pipeline(base_url, token, project_id, pipeline_id):
+    return gitlab_api(base_url, token, f"/projects/{project_id}/pipelines/{pipeline_id}")
+
+
 def get_pipeline_jobs(base_url, token, project_id, pipeline_id):
-    """Получает список джоб pipeline-а."""
+    """Получает ВСЕ джобы pipeline включая manual."""
     return gitlab_api(
         base_url, token,
-        f"/projects/{project_id}/pipelines/{pipeline_id}/jobs?per_page=100"
+        f"/projects/{project_id}/pipelines/{pipeline_id}/jobs"
+        f"?per_page=100&include_retried=true"
     )
 
 
 def play_job(base_url, token, project_id, job_id):
-    """Запускает manual job."""
     return gitlab_api(
         base_url, token,
         f"/projects/{project_id}/jobs/{job_id}/play",
@@ -110,38 +114,24 @@ def play_job(base_url, token, project_id, job_id):
 
 
 def get_job(base_url, token, project_id, job_id):
-    """Получает состояние джобы."""
     return gitlab_api(base_url, token, f"/projects/{project_id}/jobs/{job_id}")
 
 
 def get_job_trace(base_url, token, project_id, job_id):
-    """Получает лог джобы."""
     return gitlab_api_raw(base_url, token, f"/projects/{project_id}/jobs/{job_id}/trace")
 
 
 def parse_input_file(filepath):
-    """Парсит вывод scan_values.py."""
     entries = []
     current_display = ""
-
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.rstrip("\n")
-            if not line.strip():
+            if not line.strip() or "не найден" in line:
                 continue
-            if "не найден" in line:
-                continue
-
-            entry = {
-                "display_path": "",
-                "sub_name": "",
-                "image_path": "",
-                "tag": "",
-            }
-
+            entry = {"display_path": "", "sub_name": "", "image_path": "", "tag": ""}
             segments = line.split("  —  ")
             first = segments[0]
-
             if first.strip():
                 sub_match = re.search(r'\((\S+)\)\s*$', first.strip())
                 if sub_match:
@@ -155,36 +145,27 @@ def parse_input_file(filepath):
                 sub_match = re.search(r'\((\S+)\)', first)
                 if sub_match:
                     entry["sub_name"] = sub_match.group(1)
-
             entry["display_path"] = current_display
-
             if len(segments) >= 2:
                 entry["image_path"] = segments[1].strip()
             if len(segments) >= 3:
                 third = segments[2].strip()
                 third = re.sub(r'\s*\[.*?\]\s*$', '', third)
                 entry["tag"] = third.strip()
-
             if entry["image_path"] and entry["tag"]:
                 entries.append(entry)
-
     return entries
 
 
 def strip_bin(tag):
-    """Обрезает суффикс .bin если есть."""
-    if tag.endswith(".bin"):
-        return tag[:-4]
-    return tag
+    return tag[:-4] if tag.endswith(".bin") else tag
 
 
 def stand_to_job_name(stand):
-    """schedule-dev -> aos_schedule_dev"""
     return f"aos_{stand.replace('-', '_')}"
 
 
 def show_entries(entries):
-    """Выводит пронумерованный список app-ов."""
     print("\nНайденные app и тэги:")
     print("-" * 80)
     for i, e in enumerate(entries, 1):
@@ -195,7 +176,6 @@ def show_entries(entries):
 
 
 def menu_select_entry(entries):
-    """Позволяет выбрать app из списка."""
     show_entries(entries)
     while True:
         choice = input(f"\nВыберите app (1-{len(entries)}) или q для отмены: ").strip()
@@ -207,11 +187,69 @@ def menu_select_entry(entries):
                 return entries[idx - 1]
         except ValueError:
             pass
-        print("Неверный ввод, попробуйте ещё раз.")
+        print("Неверный ввод.")
+
+
+def wait_for_manual_stage(base_url, token, project_id, pipeline_id, job_name, timeout=300):
+    """Ждёт пока pipeline дойдёт до manual-джобы.
+    Возвращает (job_dict | None, все_джобы, финальный_статус_pipeline)."""
+    # Терминальные статусы где manual-джоба уже должна быть доступна
+    ready_statuses = {"manual", "success", "failed", "canceled", "skipped"}
+    # blocked = pipeline остановлен и ждёт ручного ввода — это именно то что нам нужно
+
+    start = time.time()
+    last_status = ""
+    last_jobs = []
+
+    while time.time() - start < timeout:
+        try:
+            pipeline = get_pipeline(base_url, token, project_id, pipeline_id)
+            pipeline_status = pipeline.get("status", "unknown")
+        except Exception as e:
+            print(f"  ошибка получения pipeline: {e}")
+            time.sleep(5)
+            continue
+
+        try:
+            jobs = get_pipeline_jobs(base_url, token, project_id, pipeline_id)
+            last_jobs = jobs
+        except Exception as e:
+            print(f"  ошибка получения джоб: {e}")
+            time.sleep(5)
+            continue
+
+        # Ищем нашу джобу
+        target = None
+        for j in jobs:
+            if j["name"] == job_name:
+                target = j
+                break
+
+        if pipeline_status != last_status:
+            print(f"  pipeline: {pipeline_status}")
+            last_status = pipeline_status
+
+        # Pipeline заблокирован ручной джобой — идеально
+        if pipeline_status == "manual":
+            if target:
+                return target, jobs, pipeline_status
+            # manual статус но нашей джобы нет — зашли в тупик
+            return None, jobs, pipeline_status
+
+        # Pipeline завершился — проверяем есть ли наша джоба
+        if pipeline_status in ready_statuses:
+            return target, jobs, pipeline_status
+
+        # Pipeline всё ещё работает, но джоба может уже существовать в статусе manual
+        if target and target.get("status") == "manual":
+            return target, jobs, pipeline_status
+
+        time.sleep(5)
+
+    return None, last_jobs, last_status
 
 
 def deploy_flow(args, entries):
-    """Процесс деплоя одного app."""
     entry = menu_select_entry(entries)
     if not entry:
         return
@@ -221,100 +259,79 @@ def deploy_flow(args, entries):
     print(f"Путь проекта: /{project_path}")
     print(f"Тэг из репозитория: {entry['tag']}")
 
-    custom = input(f"\nВведите тэг для деплоя или Enter чтобы использовать '{entry['tag']}': ").strip()
+    custom = input(f"\nВведите тэг или Enter для '{entry['tag']}': ").strip()
     raw_tag = custom if custom else entry["tag"]
     git_tag = strip_bin(raw_tag)
-    print(f"\nБудет использован git tag: {git_tag}")
+    print(f"Git tag: {git_tag}")
 
-    # Находим проект
     print(f"\nПоиск проекта {project_path}...")
     project_id, err = find_project_id(args.gitlab_url, args.token, project_path)
     if err:
-        print(f"ОШИБКА: не удалось найти проект: {err}")
+        print(f"ОШИБКА: {err}")
         return
     print(f"Project ID: {project_id}")
 
-    # Проверяем тэг
     print(f"Проверка тэга {git_tag}...")
     exists, err = check_tag_exists(args.gitlab_url, args.token, project_id, git_tag)
     if err:
-        print(f"ОШИБКА проверки тэга: {err}")
+        print(f"ОШИБКА: {err}")
         return
     if not exists:
-        print(f"ОШИБКА: тэг '{git_tag}' не найден в проекте {project_path}")
+        print(f"ОШИБКА: тэг '{git_tag}' не найден в проекте")
         return
     print("Тэг существует.")
 
-    # Подтверждение
     job_name = stand_to_job_name(args.stand)
-    print(f"\nБудет создан pipeline на тэге {git_tag} и запущена джоба {job_name}")
-    confirm = input("Продолжить? (y/n): ").strip().lower()
-    if confirm != "y":
+    print(f"\nPipeline на тэге {git_tag}, джоба: {job_name}")
+    if input("Продолжить? (y/n): ").strip().lower() != "y":
         print("Отмена.")
         return
 
-    # Создаём pipeline
     print(f"\nСоздание pipeline...")
     try:
         pipeline = create_pipeline(args.gitlab_url, args.token, project_id, git_tag)
     except Exception as e:
-        print(f"ОШИБКА создания pipeline: {e}")
+        print(f"ОШИБКА: {e}")
         return
     pipeline_id = pipeline["id"]
-    print(f"Pipeline создан: #{pipeline_id} — {pipeline.get('web_url', '')}")
+    print(f"Pipeline #{pipeline_id}: {pipeline.get('web_url', '')}")
 
-    # Ждём появления джобы
-    print(f"\nОжидание появления джобы {job_name}...")
-    target_job = None
-    for attempt in range(15):
-        time.sleep(2)
-        try:
-            jobs = get_pipeline_jobs(args.gitlab_url, args.token, project_id, pipeline_id)
-        except Exception as e:
-            print(f"ОШИБКА получения списка джоб: {e}")
-            return
-        for j in jobs:
-            if j["name"] == job_name:
-                target_job = j
-                break
-        if target_job:
-            break
-        print(f"  попытка {attempt + 1}/15...")
+    # Ждём пока pipeline дойдёт до manual-джобы (после build/test)
+    print(f"\nОжидание прохождения build/test и появления {job_name}...")
+    print("(таймаут 5 минут)")
+    target_job, all_jobs, final_status = wait_for_manual_stage(
+        args.gitlab_url, args.token, project_id, pipeline_id, job_name
+    )
 
     if not target_job:
-        print(f"ОШИБКА: джоба {job_name} не найдена в pipeline #{pipeline_id}")
-        print("Доступные джобы:")
-        try:
-            jobs = get_pipeline_jobs(args.gitlab_url, args.token, project_id, pipeline_id)
-            for j in jobs:
-                print(f"  - {j['name']} ({j['status']})")
-        except Exception:
-            pass
+        print(f"\nОШИБКА: джоба {job_name} не найдена или не в статусе manual.")
+        print(f"Финальный статус pipeline: {final_status}")
+        print(f"\nВсе джобы в pipeline #{pipeline_id}:")
+        for j in all_jobs:
+            print(f"  [{j['status']:12}] {j['stage']:15} {j['name']}")
         return
 
     job_id = target_job["id"]
-    print(f"Джоба найдена: #{job_id}, статус: {target_job['status']}")
+    print(f"\nДжоба найдена: #{job_id}, статус: {target_job['status']}")
 
-    # Запускаем manual джобу
-    if target_job["status"] == "manual":
-        print(f"Запуск джобы...")
+    if target_job["status"] != "manual":
+        print(f"Джоба не в статусе manual (сейчас: {target_job['status']}), play не требуется.")
+    else:
+        print("Запуск manual-джобы...")
         try:
             play_job(args.gitlab_url, args.token, project_id, job_id)
         except Exception as e:
-            print(f"ОШИБКА запуска джобы: {e}")
+            print(f"ОШИБКА запуска: {e}")
             return
         print("Джоба запущена.")
-    else:
-        print(f"Джоба уже в статусе {target_job['status']}, пропускаем play.")
 
-    # Ждём 10 секунд и забираем лог
     print("\nОжидание 10 секунд...")
     time.sleep(10)
 
     try:
         job_info = get_job(args.gitlab_url, args.token, project_id, job_id)
     except Exception as e:
-        print(f"ОШИБКА получения статуса: {e}")
+        print(f"ОШИБКА статуса: {e}")
         return
 
     status = job_info["status"]
@@ -324,36 +341,34 @@ def deploy_flow(args, entries):
     print("\n" + "=" * 80)
     print("ЛОГ ДЖОБЫ:")
     print("=" * 80)
-    trace = get_job_trace(args.gitlab_url, args.token, project_id, job_id)
-    print(trace)
+    print(get_job_trace(args.gitlab_url, args.token, project_id, job_id))
     print("=" * 80)
 
     if status == "failed":
-        print("\n!!! Джоба завершилась с ошибкой !!!")
+        print("\n!!! ОШИБКА: джоба завершилась с failed !!!")
     elif status in ("running", "pending"):
-        print(f"\nДжоба ещё выполняется. Смотрите в GitLab: {job_info.get('web_url', '')}")
+        print(f"\nДжоба ещё работает: {job_info.get('web_url', '')}")
     elif status == "success":
-        print("\nДжоба завершилась успешно.")
+        print("\nУСПЕХ: джоба завершилась success.")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Проверка тэгов и деплой через GitLab")
     parser.add_argument("--input", required=True, help="Файл с выводом scan_values.py")
-    parser.add_argument("--gitlab-url", required=True, help="URL GitLab (например https://gitlab-inte.test.ru)")
+    parser.add_argument("--gitlab-url", required=True, help="URL GitLab")
     parser.add_argument("--token", required=True, help="GitLab Private Token")
-    parser.add_argument("--stand", required=True, help="Название стенда (например schedule-dev)")
+    parser.add_argument("--stand", required=True, help="Название стенда")
     args = parser.parse_args()
-
     args.gitlab_url = args.gitlab_url.rstrip("/")
 
     try:
         entries = parse_input_file(args.input)
     except Exception as e:
-        print(f"Ошибка чтения входного файла: {e}", file=sys.stderr)
+        print(f"Ошибка чтения: {e}", file=sys.stderr)
         sys.exit(1)
 
     if not entries:
-        print("Нет валидных записей во входном файле.")
+        print("Нет валидных записей.")
         sys.exit(0)
 
     while True:
@@ -364,7 +379,6 @@ def main():
         print("  2) Деплой тэга на стенд")
         print("  q) Выход")
         choice = input("\nВыбор: ").strip().lower()
-
         if choice == "1":
             show_entries(entries)
         elif choice == "2":
@@ -381,42 +395,14 @@ EOF
 chmod +x deploy_tag.py
 ```
 
-## Использование
+## Ключевое исправление
 
-```bash
-python3 deploy_tag.py \
-    --input scan_output.txt \
-    --gitlab-url https://gitlab-inte.test.ru \
-    --token glpat-xxx \
-    --stand schedule-dev
-```
+Добавлена функция `wait_for_manual_stage` — она делает polling каждые 5 секунд и ждёт одного из:
 
-|Параметр      |Описание                                                         |
-|--------------|-----------------------------------------------------------------|
-|`--input`     |Файл с выводом `scan_values.py`                                  |
-|`--gitlab-url`|URL GitLab с репозиториями app (передаётся переменной)           |
-|`--token`     |GitLab Private Token                                             |
-|`--stand`     |Название стенда (напр. `schedule-dev` → джоба `aos_schedule_dev`)|
+- `pipeline.status == "manual"` — значит pipeline заблокирован ручной джобой (это то что у тебя происходит как `blocked`, в API это `manual`)
+- Наша джоба `aos_<stand>` появилась в статусе `manual`
+- Pipeline завершился в терминальном состоянии
 
-## Логика
+Только после этого делаем `play`. Таймаут 5 минут на прохождение build/test.
 
-**Меню:**
-
-1. Показать найденные тэги — выводит пронумерованный список из входного файла
-1. Деплой тэга на стенд — интерактивный выбор app и тэга
-1. Выход
-
-**Процесс деплоя:**
-
-1. Выбор app из пронумерованного списка
-1. Ввод тэга (или Enter — берётся из репозитория)
-1. Обрезка суффикса `.bin` → git tag
-1. Поиск проекта в GitLab по пути из `image_path`
-1. Проверка существования тэга — если нет, выход с ошибкой
-1. Подтверждение у пользователя
-1. Создание pipeline через `POST /projects/:id/pipeline` с `ref=<tag>`
-1. Ожидание появления джобы `aos_<stand>` в pipeline (до 30 сек)
-1. Запуск manual-джобы через `POST /jobs/:id/play`
-1. Пауза 10 секунд
-1. Один раз забирается статус и полный лог через `/jobs/:id/trace`
-1. Если статус `failed` — выводится предупреждение
+Если джоба всё равно не находится — скрипт выведет **полный список всех джоб** с их stage и статусами, покажи мне этот вывод и я пойму почему.
