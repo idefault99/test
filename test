@@ -1,8 +1,11 @@
-# 1. Размер dqlite
-sudo du -sh /var/snap/microk8s/current/var/kubernetes/backend/
+sudo microk8s ctr -n k8s.io tasks ls | grep dashboard
 
-# 2. Версия
-snap info microk8s | grep installed
+# Взять TASK ID из предыдущей команды
+sudo microk8s ctr -n k8s.io tasks kill -s SIGKILL <TASK_ID>
 
-# 3. RAM сейчас
-free -h
+
+# Найти PID
+ps aux | grep dashboard | grep -v grep
+
+# Убить
+sudo kill -9 <PID>
