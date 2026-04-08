@@ -1,343 +1,40 @@
-#!/usr/bin/env bash
-# ============================================================
-#  microk8s-diag.sh — диагностика мастер-ноды MicroK8s
-#  Анализ потребления RAM и дисковой нагрузки
-# ============================================================
+# Сколько реально занимает в мегабайтах
+sudo cat /proc/$(pgrep kubelite)/status | grep -E "VmRSS|VmPeak|VmSize"
 
-set -euo pipefail
+# Детально по cgroup
+sudo systemd-cgtop -m | head -20
 
-# ── цвета ───────────────────────────────────────────────────
-RED='\033[0;31m'
-YEL='\033[0;33m'
-GRN='\033[0;32m'
-CYN='\033[0;36m'
-BLU='\033[0;34m'
-MAG='\033[0;35m'
-WHT='\033[1;37m'
-DIM='\033[2m'
-BOLD='\033[1m'
-RST='\033[0m'
+# Лог — смотрим что происходит прямо сейчас
+sudo journalctl -f -u snap.microk8s.daemon-kubelite --no-pager | head -50
 
-# ── вывод ───────────────────────────────────────────────────
-header() {
-  echo ""
-  echo -e "${BLU}${BOLD}╔══════════════════════════════════════════════════════════╗${RST}"
-  echo -e "${BLU}${BOLD}║${RST}  ${WHT}${BOLD}$1${RST}"
-  echo -e "${BLU}${BOLD}╚══════════════════════════════════════════════════════════╝${RST}"
-}
+# Размер базы dqlite
+sudo du -sh /var/snap/microk8s/current/var/kubernetes/backend/
 
-section() {
-  echo ""
-  echo -e "${CYN}${BOLD}▶ $1${RST}"
-  echo -e "${DIM}──────────────────────────────────────────────────────────${RST}"
-}
+# Лог dqlite — ищем "compaction lag"
+sudo journalctl -u snap.microk8s.daemon-k8s-dqlite --no-pager | tail -30
 
-ok()   { echo -e "  ${GRN}✔${RST}  $1"; }
-warn() { echo -e "  ${YEL}⚠${RST}  $1"; }
-bad()  { echo -e "  ${RED}✘${RST}  $1"; }
-info() { echo -e "  ${DIM}·${RST}  $1"; }
-kv()   { printf "  ${WHT}%-32s${RST} %s\n" "$1" "$2"; }
+# Кол-во записей в базе (должно быть десятки тысяч, не сотни тысяч)
+sudo /snap/microk8s/current/bin/dqlite \
+  -s $(hostname -I | awk '{print $1}'):19001 \
+  -c /var/snap/microk8s/current/var/kubernetes/backend/cluster.crt \
+  -k /var/snap/microk8s/current/var/kubernetes/backend/cluster.key \
+  k8s <<< "SELECT COUNT(*) FROM kine;"
 
-# ── утилита: мегабайты из /proc ─────────────────────────────
-kb_to_mb() { echo $(( $1 / 1024 )) MB; }
 
-# ── проверка root ───────────────────────────────────────────
-if [[ $EUID -ne 0 ]]; then
-  echo -e "${YEL}⚠  Запустите с sudo для полной диагностики${RST}"
-  SUDO_PREFIX="sudo"
-else
-  SUDO_PREFIX=""
-fi
+# Проверить версию
+snap info microk8s | grep installed
 
-LOG_FILE="/tmp/microk8s-diag-$(date +%Y%m%d-%H%M%S).log"
-exec > >(tee -a "$LOG_FILE") 2>&1
+# Обновить до последнего стабильного
+sudo snap refresh microk8s --channel=1.32/stable
 
-# ════════════════════════════════════════════════════════════
-echo -e "${MAG}${BOLD}"
-cat << 'EOF'
-  ╔╦╗  ┬┌─┌─┐┬─┐┌─┐┬┌─┌─┐  ╔╦╗┌─┐┌─┐┌┬┐
-  ║║║  ││ ├┬┘│ │├┴┐├┴┐└─┐   ║║├┤ ├─┤ │ 
-  ╩ ╩  ┴└─┴└─└─┘┴ ┴┴ ┴└─┘  ═╩╝└─┘┴ ┴ ┴ 
-  Диагностика MicroK8s — RAM & Disk
-EOF
-echo -e "${RST}"
-echo -e "${DIM}  Дата: $(date '+%Y-%m-%d %H:%M:%S')   Хост: $(hostname)${RST}"
-echo -e "${DIM}  Лог сохраняется в: $LOG_FILE${RST}"
 
-# ════════════════════════════════════════════════════════════
-header "1. СИСТЕМА — ОБЩАЯ ИНФОРМАЦИЯ"
+# Проверить диск под dqlite
+sudo hdparm -Tt /dev/sda   # или nvme0n1
 
-section "Uptime и нагрузка"
-uptime_raw=$(uptime)
-kv "Uptime:" "$(uptime -p 2>/dev/null || echo "$uptime_raw")"
-load=$(awk '{print $1, $2, $3}' /proc/loadavg)
-cpus=$(nproc)
-kv "CPU cores:" "$cpus"
-kv "Load avg (1/5/15 мин):" "$load"
-load1=$(awk '{print $1}' /proc/loadavg | cut -d. -f1)
-if (( load1 > cpus * 2 )); then
-  bad "Нагрузка критическая (load > 2x CPU)"
-elif (( load1 > cpus )); then
-  warn "Нагрузка выше нормы (load > CPU count)"
-else
-  ok "Нагрузка в норме"
-fi
+# dd тест записи
+sudo dd if=/dev/zero of=/tmp/test.img bs=1G count=1 oflag=dsync 2>&1
+rm /tmp/test.img
 
-section "Ядро и дистрибутив"
-kv "Kernel:" "$(uname -r)"
-if [[ -f /etc/os-release ]]; then
-  kv "OS:" "$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')"
-fi
-
-# ════════════════════════════════════════════════════════════
-header "2. ПАМЯТЬ — ДЕТАЛЬНЫЙ АНАЛИЗ"
-
-section "Общий обзор RAM"
-mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-mem_free=$(grep MemFree /proc/meminfo | awk '{print $2}')
-mem_avail=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-mem_cached=$(grep "^Cached:" /proc/meminfo | awk '{print $2}')
-mem_buffers=$(grep "^Buffers:" /proc/meminfo | awk '{print $2}')
-mem_slab=$(grep "^Slab:" /proc/meminfo | awk '{print $2}')
-mem_used=$(( mem_total - mem_free - mem_cached - mem_buffers ))
-mem_used_pct=$(( mem_used * 100 / mem_total ))
-mem_avail_pct=$(( mem_avail * 100 / mem_total ))
-
-kv "Total RAM:"      "$(kb_to_mb $mem_total)"
-kv "Used (без кэша):" "$(kb_to_mb $mem_used) (${mem_used_pct}%)"
-kv "Available:"      "$(kb_to_mb $mem_avail) (${mem_avail_pct}%)"
-kv "Cached:"         "$(kb_to_mb $mem_cached)"
-kv "Buffers:"        "$(kb_to_mb $mem_buffers)"
-kv "Slab:"           "$(kb_to_mb $mem_slab)"
-
-if (( mem_avail_pct < 10 )); then
-  bad "Критически мало свободной RAM (< 10%)"
-elif (( mem_avail_pct < 20 )); then
-  warn "Мало свободной RAM (< 20%)"
-else
-  ok "RAM в норме"
-fi
-
-section "Swap"
-swap_total=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
-swap_free=$(grep SwapFree /proc/meminfo | awk '{print $2}')
-swap_used=$(( swap_total - swap_free ))
-if (( swap_total > 0 )); then
-  swap_pct=$(( swap_used * 100 / swap_total ))
-  kv "Swap total:" "$(kb_to_mb $swap_total)"
-  kv "Swap used:"  "$(kb_to_mb $swap_used) (${swap_pct}%)"
-  if (( swap_pct > 50 )); then
-    bad "Активное использование swap — нехватка RAM"
-  elif (( swap_pct > 10 )); then
-    warn "Swap используется (${swap_pct}%)"
-  else
-    ok "Swap почти не используется"
-  fi
-else
-  warn "Swap не настроен"
-fi
-
-section "OOM Killer — события"
-oom_count=$(dmesg --time-format=reltime 2>/dev/null | grep -c "Out of memory\|oom-kill" || true)
-if (( oom_count > 0 )); then
-  bad "OOM killer срабатывал $oom_count раз(а) с последней загрузки!"
-  dmesg --time-format=reltime 2>/dev/null | grep "Out of memory\|oom-kill\|Killed process" | tail -5 | while read -r line; do
-    echo -e "  ${RED}$line${RST}"
-  done
-else
-  ok "OOM killer не срабатывал"
-fi
-
-section "Топ процессов по RAM"
-echo ""
-ps aux --sort=-%mem | head -16 | awk '
-NR==1 { printf "  \033[2m%-12s %5s %5s %s\033[0m\n", "USER", "%CPU", "%MEM", "COMMAND" }
-NR>1  { printf "  %-12s %5s %5s %s\n", $1, $3, $4, $11 }
-'
-
-# ════════════════════════════════════════════════════════════
-header "3. ДИСКОВАЯ НАГРУЗКА"
-
-section "Использование дисков (df)"
-df -hT | grep -v tmpfs | grep -v udev | awk '
-NR==1 { printf "  \033[2m%-30s %-8s %6s %6s %5s %s\033[0m\n", "FILESYSTEM", "TYPE", "SIZE", "USED", "USE%", "MOUNT" }
-NR>1  {
-  pct = $6; gsub(/%/,"",pct)
-  color = "\033[0m"
-  if (pct+0 > 90) color = "\033[0;31m"
-  else if (pct+0 > 75) color = "\033[0;33m"
-  else color = "\033[0;32m"
-  printf "  %-30s %-8s %6s %6s " color "%5s\033[0m %s\n", $1, $2, $3, $4, $6, $7
-}'
-
-section "iostat — нагрузка на блочные устройства"
-if command -v iostat &>/dev/null; then
-  echo -e "  ${DIM}Снимаем 3-секундный срез (интервал 3с, 1 итерация)...${RST}"
-  echo ""
-  iostat -xh 3 1 | grep -v "^$\|^Linux" | sed 's/^/  /'
-else
-  warn "iostat не найден (установите: apt install sysstat)"
-fi
-
-section "Топ процессов по I/O (iotop снимок)"
-if command -v iotop &>/dev/null; then
-  $SUDO_PREFIX iotop -b -n 1 -P 2>/dev/null | head -20 | sed 's/^/  /' || warn "iotop требует root"
-else
-  warn "iotop не установлен (apt install iotop)"
-  echo ""
-  info "Альтернатива — /proc/diskstats срез:"
-  cat /proc/diskstats | awk '$3 ~ /^(sd|nvme|vd)/ {
-    printf "  %-12s reads=%-8s writes=%s\n", $3, $4, $8
-  }'
-fi
-
-section "Каталоги с наибольшим потреблением диска"
-echo -e "  ${DIM}Анализируем /var, /opt, /snap (MicroK8s пути)...${RST}"
-echo ""
-for dir in /var/snap/microk8s /var/lib/containerd /var/log /tmp /opt; do
-  if [[ -d "$dir" ]]; then
-    size=$(du -sh "$dir" 2>/dev/null | cut -f1)
-    printf "  ${WHT}%-40s${RST} %s\n" "$dir" "$size"
-  fi
-done
-
-section "Большие файлы в /var/log (> 100MB)"
-find /var/log -type f -size +100M 2>/dev/null | while read -r f; do
-  sz=$(du -sh "$f" 2>/dev/null | cut -f1)
-  warn "$sz  $f"
-done || true
-
-section "Inode использование"
-df -i | grep -v tmpfs | grep -v udev | awk '
-NR==1 { printf "  \033[2m%-30s %10s %10s %5s %s\033[0m\n", "FILESYSTEM", "INODES", "IUSED", "USE%", "MOUNT" }
-NR>1  {
-  pct = $5; gsub(/%/,"",pct)
-  color = (pct+0 > 80) ? "\033[0;31m" : "\033[0;32m"
-  printf "  %-30s %10s %10s " color "%5s\033[0m %s\n", $1, $2, $3, $5, $6
-}'
-
-# ════════════════════════════════════════════════════════════
-header "4. MICROK8S — СОСТОЯНИЕ"
-
-section "Статус MicroK8s"
-if command -v microk8s &>/dev/null; then
-  mk8s_status=$(microk8s status 2>&1 | head -5)
-  echo "$mk8s_status" | sed 's/^/  /'
-
-  section "Ноды кластера"
-  microk8s kubectl get nodes -o wide 2>/dev/null | sed 's/^/  /' || true
-
-  section "Pods с наибольшим потреблением RAM"
-  echo ""
-  echo -e "  ${DIM}(требует metrics-server)${RST}"
-  microk8s kubectl top pods -A --sort-by=memory 2>/dev/null | head -20 | sed 's/^/  /' \
-    || warn "metrics-server недоступен: microk8s enable metrics-server"
-
-  section "Pods в нештатном состоянии"
-  bad_pods=$(microk8s kubectl get pods -A 2>/dev/null \
-    | grep -v "Running\|Completed\|NAME" || true)
-  if [[ -n "$bad_pods" ]]; then
-    bad "Обнаружены проблемные pods:"
-    echo "$bad_pods" | sed 's/^/  /'
-  else
-    ok "Все pods в статусе Running/Completed"
-  fi
-
-  section "Containerd — образы и использование диска"
-  microk8s ctr images ls 2>/dev/null | awk '
-    NR==1 { printf "  \033[2m%-70s %s\033[0m\n", "IMAGE", "SIZE" }
-    NR>1  { printf "  %-70s %s\n", $1, $5 }
-  ' | head -25 || true
-
-  section "Containerd snapshots (leaks)"
-  snap_count=$(microk8s ctr snapshots list 2>/dev/null | wc -l || echo "N/A")
-  kv "Snapshots count:" "$snap_count"
-  if [[ "$snap_count" != "N/A" ]] && (( snap_count > 500 )); then
-    warn "Много snapshots — возможна утечка. Проверь: microk8s ctr snapshots list"
-  fi
-
-  section "Системные сервисы MicroK8s"
-  for svc in snap.microk8s.daemon-kubelite snap.microk8s.daemon-containerd \
-              snap.microk8s.daemon-apiserver snap.microk8s.daemon-etcd; do
-    if systemctl is-active --quiet "$svc" 2>/dev/null; then
-      mem_kb=$(cat /sys/fs/cgroup/system.slice/${svc}.service/memory.current 2>/dev/null \
-               || grep VmRSS /proc/$(systemctl show -p MainPID --value "$svc" 2>/dev/null)/status 2>/dev/null \
-               | awk '{print $2}' || echo "0")
-      ok "${svc##snap.microk8s.}"
-    else
-      bad "${svc##snap.microk8s.} — не запущен"
-    fi
-  done
-
-  section "etcd — использование диска"
-  etcd_dir="/var/snap/microk8s/current/var/kubernetes/backend"
-  if [[ -d "$etcd_dir" ]]; then
-    etcd_size=$(du -sh "$etcd_dir" 2>/dev/null | cut -f1)
-    kv "etcd data dir:" "$etcd_size"
-    if [[ "${etcd_size%M}" =~ ^[0-9]+$ ]] && (( ${etcd_size%M} > 2048 )); then
-      warn "etcd > 2GB — рекомендуется compaction: microk8s kubectl -n kube-system exec \$(microk8s kubectl -n kube-system get pod -l component=etcd -o name) -- etcdctl compact \$(etcdctl endpoint status --write-out=json | jq '.[0].Status.header.revision')"
-    fi
-  fi
-
-  section "Kubelet — eviction thresholds"
-  microk8s kubectl describe node "$(hostname)" 2>/dev/null | grep -A5 "Conditions:\|Allocatable:\|Capacity:" | head -30 | sed 's/^/  /' || true
-
-else
-  bad "microk8s не найден в PATH"
-fi
-
-# ════════════════════════════════════════════════════════════
-header "5. СЕТЕВЫЕ СОЕДИНЕНИЯ"
-
-section "Открытые соединения (top-10 по количеству)"
-ss -tanp 2>/dev/null | awk 'NR>1 {print $1}' | sort | uniq -c | sort -rn | head -10 | \
-  awk '{ printf "  %5s  %s\n", $1, $2 }'
-
-section "CLOSE_WAIT / TIME_WAIT (признак утечек)"
-cw=$(ss -tan 2>/dev/null | grep -c CLOSE_WAIT || true)
-tw=$(ss -tan 2>/dev/null | grep -c TIME_WAIT || true)
-kv "CLOSE_WAIT:" "$cw"
-kv "TIME_WAIT:"  "$tw"
-(( cw > 100 )) && warn "Много CLOSE_WAIT — возможна утечка соединений"
-(( tw > 500 )) && warn "Много TIME_WAIT — высокий трафик или утечка"
-
-# ════════════════════════════════════════════════════════════
-header "6. РЕКОМЕНДАЦИИ"
-
-echo ""
-
-# RAM рекомендации
-if (( mem_avail_pct < 20 )); then
-  echo -e "  ${RED}${BOLD}[RAM]${RST} Критически мало памяти. Действия:"
-  echo -e "  ${YEL}  1.${RST} Найти жрущие pods:  microk8s kubectl top pods -A --sort-by=memory"
-  echo -e "  ${YEL}  2.${RST} Установить LimitRange/ResourceQuota на namespaces"
-  echo -e "  ${YEL}  3.${RST} Проверить утечки:   ps aux --sort=-%mem | head -20"
-  echo -e "  ${YEL}  4.${RST} Очистить образы:    microk8s ctr images prune --all"
-  echo -e "  ${YEL}  5.${RST} Добавить swap (если нет):  fallocate -l 4G /swapfile"
-  echo ""
-fi
-
-# Disk рекомендации
-echo -e "  ${CYN}${BOLD}[DISK I/O]${RST} Диагностика нагрузки на диск:"
-echo -e "  ${DIM}  # Реалтайм I/O по процессам:${RST}"
-echo -e "    sudo iotop -o -P"
-echo -e "  ${DIM}  # Какой pod создаёт нагрузку:${RST}"
-echo -e "    microk8s kubectl top pods -A --sort-by=memory"
-echo -e "  ${DIM}  # Очистка неиспользуемых образов:${RST}"
-echo -e "    microk8s ctr images prune --all"
-echo -e "  ${DIM}  # Очистка завершённых pods:${RST}"
-echo -e "    microk8s kubectl delete pods -A --field-selector=status.phase=Succeeded"
-echo -e "  ${DIM}  # Ротация логов containerd:${RST}"
-echo -e "    sudo journalctl --vacuum-size=500M"
-echo ""
-echo -e "  ${CYN}${BOLD}[МОНИТОРИНГ]${RST} Включить встроенный мониторинг:"
-echo -e "    microk8s enable metrics-server"
-echo -e "    microk8s enable prometheus   # Grafana + Prometheus stack"
-echo ""
-
-# ════════════════════════════════════════════════════════════
-echo -e "${BLU}${BOLD}════════════════════════════════════════════════════════════${RST}"
-echo -e "  ${GRN}${BOLD}Диагностика завершена.${RST}"
-echo -e "  ${DIM}Полный лог: $LOG_FILE${RST}"
-echo -e "${BLU}${BOLD}════════════════════════════════════════════════════════════${RST}"
-echo ""
+# Смотреть медленные записи в логе
+sudo journalctl -u snap.microk8s.daemon-kubelite --no-pager | \
+  grep -i "stored in database\|slow\|timeout" | tail -20
