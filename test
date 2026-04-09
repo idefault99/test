@@ -1,34 +1,136 @@
-def extract_folder_name(yaml_content):
-    """Извлекает FOLDER_NAME со второго уровня вложенности.
-    Если не найден — пытается найти pathLabel на верхнем уровне.
-    Пример:
-        configmap:
-          FOLDER_NAME: test/ui/
-    или:
-        pathLabel: front/app/
-    Возвращает значение с обрезанным trailing слэшем."""
-    # Сначала FOLDER_NAME на втором уровне
-    match = re.search(
-        r'^[ \t]+FOLDER_NAME:\s*["\']?([^"\'\n]+?)["\']?\s*$',
-        yaml_content,
-        re.MULTILINE
-    )
-    if match:
-        return match.group(1).strip().rstrip("/")
+#!/bin/bash
+# =============================================================
+# Helm — Redeploy all releases via kubectl apply
+# Совместим с MicroK8s
+# =============================================================
+set -euo pipefail
 
-    # Fallback: pathLabel на верхнем уровне (без отступа)
-    match = re.search(
-        r'^pathLabel:\s*["\']?([^"\'\n]+?)["\']?\s*$',
-        yaml_content,
-        re.MULTILINE
-    )
-    if match:
-        return match.group(1).strip().rstrip("/")
+# --- Определяем команды для microk8s ---
+if command -v microk8s.helm3 &>/dev/null; then
+  HELM="microk8s.helm3"
+  KUBECTL="microk8s.kubectl"
+elif command -v microk8s &>/dev/null; then
+  helm() { microk8s helm "$@"; }
+  kubectl() { microk8s kubectl "$@"; }
+  export -f helm kubectl
+  HELM="helm"
+  KUBECTL="kubectl"
+elif command -v helm &>/dev/null; then
+  HELM="helm"
+  KUBECTL="kubectl"
+else
+  echo "ERROR: helm не найден"
+  exit 1
+fi
 
-    return None
+echo "Используем: $HELM / $KUBECTL"
+echo ""
 
----
-    folder_name = extract_folder_name(content)
-    if not folder_name:
-        print("ОШИБКА: ни FOLDER_NAME, ни pathLabel не найдены в Helm/values.yaml")
-        return
+# --- Цвета ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# --- Результаты ---
+DEPLOYED=()   # "namespace|release|revision|chart"
+ERRORS=()     # "namespace|release|причина"
+
+BACKUP_ROOT="./helm-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_ROOT"
+
+# --- Получаем все неймспейсы ---
+NAMESPACES=$($KUBECTL get namespaces -o jsonpath='{.items[*].metadata.name}')
+
+for NS in $NAMESPACES; do
+  echo "--- Обрабатываем namespace: $NS ---"
+
+  # Получаем релизы в неймспейсе
+  RELEASES=$($HELM list -n "$NS" -q 2>/dev/null || true)
+
+  if [[ -z "$RELEASES" ]]; then
+    echo -e "  ${YELLOW}Релизов нет${NC}"
+    ERRORS+=("$NS|—|Нет helm релизов")
+    continue
+  fi
+
+  for RELEASE in $RELEASES; do
+    echo -e "  ${GREEN}Релиз: $RELEASE${NC}"
+
+    BACKUP_DIR="$BACKUP_ROOT/$NS/$RELEASE"
+    mkdir -p "$BACKUP_DIR"
+
+    # --- Info ---
+    RELEASE_JSON=$($HELM list -n "$NS" -o json 2>/dev/null | jq '.[] | select(.name=="'"$RELEASE"'")' || true)
+    if [[ -z "$RELEASE_JSON" ]]; then
+      echo -e "  ${RED}Не удалось получить info${NC}"
+      ERRORS+=("$NS|$RELEASE|Не удалось получить helm list -o json")
+      continue
+    fi
+
+    CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
+    REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
+
+    # --- Manifest ---
+    if ! $HELM get manifest "$RELEASE" -n "$NS" > "$BACKUP_DIR/manifest.yaml" 2>/dev/null; then
+      echo -e "  ${RED}Не удалось получить manifest${NC}"
+      ERRORS+=("$NS|$RELEASE|Не удалось получить helm manifest")
+      continue
+    fi
+
+    # --- Values ---
+    $HELM get values "$RELEASE" -n "$NS" > "$BACKUP_DIR/values.yaml" 2>/dev/null || true
+
+    # --- kubectl apply ---
+    if $KUBECTL apply -f "$BACKUP_DIR/manifest.yaml" -n "$NS" > "$BACKUP_DIR/apply.log" 2>&1; then
+      echo -e "  ${GREEN}OK${NC}"
+      DEPLOYED+=("$NS|$RELEASE|$REVISION|$CHART_FULL")
+    else
+      ERROR_MSG=$(tail -3 "$BACKUP_DIR/apply.log" | tr '\n' ' ')
+      echo -e "  ${RED}ОШИБКА: $ERROR_MSG${NC}"
+      ERRORS+=("$NS|$RELEASE|$ERROR_MSG")
+    fi
+
+  done
+done
+
+# =============================================================
+# --- Таблица 1: Успешно задеплоено ---
+# =============================================================
+echo ""
+echo "=========================================="
+echo "  ЗАДЕПЛОЕНО"
+echo "=========================================="
+printf "%-30s %-25s %-10s %-30s\n" "NAMESPACE" "RELEASE" "REVISION" "CHART"
+printf "%-30s %-25s %-10s %-30s\n" "------------------------------" "-------------------------" "----------" "------------------------------"
+
+if [[ ${#DEPLOYED[@]} -eq 0 ]]; then
+  echo "  Нет успешных деплоев"
+else
+  for ROW in "${DEPLOYED[@]}"; do
+    IFS='|' read -r NS REL REV CHART <<< "$ROW"
+    printf "%-30s %-25s %-10s %-30s\n" "$NS" "$REL" "$REV" "$CHART"
+  done
+fi
+
+# =============================================================
+# --- Таблица 2: Ошибки ---
+# =============================================================
+echo ""
+echo "=========================================="
+echo "  ОШИБКИ / ПРОПУЩЕНО"
+echo "=========================================="
+printf "%-30s %-25s %-50s\n" "NAMESPACE" "RELEASE" "ПРИЧИНА"
+printf "%-30s %-25s %-50s\n" "------------------------------" "-------------------------" "--------------------------------------------------"
+
+if [[ ${#ERRORS[@]} -eq 0 ]]; then
+  echo "  Ошибок нет"
+else
+  for ROW in "${ERRORS[@]}"; do
+    IFS='|' read -r NS REL REASON <<< "$ROW"
+    printf "%-30s %-25s %-50s\n" "$NS" "$REL" "$REASON"
+  done
+fi
+
+echo ""
+echo "Бэкапы манифестов: $BACKUP_ROOT/"
