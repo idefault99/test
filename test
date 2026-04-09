@@ -1,11 +1,7 @@
-# Включить
-sudo microk8s enable dashboard
+tcpdump -i eth0 -n src host 192.168.1.50 and port 443
 
-# Статус поднятия
-sudo microk8s kubectl get pods -n kube-system | grep dashboard
+# В одном терминале — дамп с временными метками
+tcpdump -i eth0 -n port 443 -tttt
 
-# Живой watch
-sudo microk8s kubectl get pods -n kube-system -w | grep dashboard
-
-# Логи самого dashboard
-sudo microk8s kubectl logs -n kube-system -l k8s-app=kubernetes-dashboard -f
+# В другом терминале — curl с твоего клиента
+curl -v https://gitlab.example.com
