@@ -1,6 +1,6 @@
-# deploy_tag.py (с поддержкой main/fronts)
+# deploy_tag.py (финальная версия)
 
-Добавлена ветка для деплоя фронтов: проверка `projectLabel` из `Helm/values.yaml` проекта, сравнение с `/versions` стенда, polling новой версии после деплоя.
+Полный скрипт с поддержкой обычных app и `main/fronts/*` через `FOLDER_NAME`.
 
 ## Установка
 
@@ -143,11 +143,19 @@ def get_file_raw(base_url, token, project_id, file_path, ref):
         return None, str(e)
 
 
-def extract_project_label(yaml_content):
-    """Извлекает projectLabel из YAML (ключ верхнего уровня)."""
-    match = re.search(r'^projectLabel:\s*["\']?([^"\'\n]+)["\']?\s*$', yaml_content, re.MULTILINE)
+def extract_folder_name(yaml_content):
+    """Извлекает FOLDER_NAME со второго уровня вложенности.
+    Пример:
+        configmap:
+          FOLDER_NAME: test/ui/
+    Возвращает 'test/ui' (с обрезанным trailing слэшем)."""
+    match = re.search(
+        r'^[ \t]+FOLDER_NAME:\s*["\']?([^"\'\n]+?)["\']?\s*$',
+        yaml_content,
+        re.MULTILINE
+    )
     if match:
-        return match.group(1).strip()
+        return match.group(1).strip().rstrip("/")
     return None
 
 
@@ -199,7 +207,6 @@ def build_stand_url(gitlab_url, stand):
     """https://gitlab-test.domen.ru + test-stand -> https://test-stand.domen.ru"""
     parsed = urlparse(gitlab_url)
     host = parsed.hostname or ""
-    # Отрезаем первую часть хоста (gitlab-test) и берём домен
     parts = host.split(".", 1)
     if len(parts) < 2:
         return None
@@ -402,8 +409,8 @@ def deploy_regular_flow(args, entry):
 
 def deploy_frontend_flow(args, entry):
     """Флоу деплоя фронта:
-    1. Находим проект, читаем Helm/values.yaml, берём projectLabel
-    2. Запрашиваем /versions на стенде, ищем запись по name == projectLabel
+    1. Находим проект, читаем Helm/values.yaml, берём FOLDER_NAME
+    2. Запрашиваем /versions на стенде, ищем запись по folder == FOLDER_NAME
     3. Сравниваем version со строкой из входа
     4. Если совпадает — выводим и выходим
     5. Если нет — деплой, потом polling /versions до 5 минут
@@ -439,11 +446,11 @@ def deploy_frontend_flow(args, entry):
         print(f"ОШИБКА чтения Helm/values.yaml: {err}")
         return
 
-    project_label = extract_project_label(content)
-    if not project_label:
-        print("ОШИБКА: ключ projectLabel не найден в Helm/values.yaml")
+    folder_name = extract_folder_name(content)
+    if not folder_name:
+        print("ОШИБКА: ключ FOLDER_NAME не найден в Helm/values.yaml")
         return
-    print(f"projectLabel: {project_label}")
+    print(f"FOLDER_NAME: {folder_name}")
 
     # 3. Запрос /versions на стенде
     versions_url = f"{stand_url}/versions"
@@ -456,20 +463,20 @@ def deploy_frontend_flow(args, entry):
         print(f"ОШИБКА: ожидался список в /versions, получено {type(versions).__name__}")
         return
 
-    # 4. Ищем совпадение по name == projectLabel
-    matched = next((v for v in versions if v.get("name") == project_label), None)
+    # 4. Ищем совпадение по folder == FOLDER_NAME
+    matched = next((v for v in versions if v.get("folder") == folder_name), None)
     if not matched:
-        print(f"ОШИБКА: в /versions нет записи с name='{project_label}'")
-        print("Доступные name:")
+        print(f"ОШИБКА: в /versions нет записи с folder='{folder_name}'")
+        print("Доступные folder:")
         for v in versions:
-            print(f"  - {v.get('name', '?')}")
+            print(f"  - {v.get('folder', '?')}")
         return
 
     stand_version = matched.get("version", "")
     print(f"\nНа стенде:")
-    print(f"  name:    {matched.get('name')}")
+    print(f"  folder:  {matched.get('folder')}")
+    print(f"  name:    {matched.get('name', '')}")
     print(f"  version: {stand_version}")
-    print(f"  folder:  {matched.get('folder', '')}")
 
     repo_tag_clean = strip_bin(current_tag)
     print(f"\nТэг из репозитория: {current_tag} (без .bin: {repo_tag_clean})")
@@ -538,9 +545,9 @@ def deploy_frontend_flow(args, entry):
         if err:
             print(f"  ошибка /versions: {err}")
             continue
-        entry_v = next((v for v in versions if v.get("name") == project_label), None)
+        entry_v = next((v for v in versions if v.get("folder") == folder_name), None)
         if not entry_v:
-            print(f"  запись {project_label} исчезла из /versions")
+            print(f"  запись {folder_name} исчезла из /versions")
             continue
         current = entry_v.get("version", "")
         print(f"  текущая версия: {current}")
@@ -554,7 +561,6 @@ def deploy_frontend_flow(args, entry):
 
     print(f"\nУСПЕХ: версия обновлена: {stand_version} -> {new_version}")
 
-    # Проверяем что новая совпадает с задеплоенным
     if new_version != deploy_tag and new_version != git_tag:
         print(f"ВНИМАНИЕ: новая версия ({new_version}) не совпадает с задеплоенной ({deploy_tag})")
 
@@ -613,17 +619,12 @@ EOF
 chmod +x deploy_tag.py
 ```
 
-## Флоу для `main/fronts/*`
+## Использование
 
-1. Находит GitLab-проект по `image_path` (например `/dpm/system/ui/gr/front`)
-1. Читает `Helm/values.yaml` из default-ветки проекта, извлекает ключ `projectLabel`
-1. Формирует URL стенда: `https://gitlab-test.domen.ru` + `test-stand` → `https://test-stand.domen.ru`
-1. Запрашивает `https://<stand>/versions`, парсит JSON-массив
-1. Ищет запись с `name == projectLabel`. Если нет — выводит все доступные `name` и выходит
-1. Сравнивает `version` из JSON с тэгом из входного файла. Если совпадает — сообщает и выходит
-1. Если отличаются — спрашивает тэг, проверяет его в GitLab, создаёт pipeline, запускает manual-джобу `aos_<stand>`
-1. **Ждёт завершения** джобы (до 10 минут, polling каждые 5 сек). Если не `success` — выводит лог
-1. Если успех — polling `/versions` каждые 10 сек до 5 минут. Ищет ту же запись, сравнивает с исходной версией
-1. Если версия сменилась — выводит `старая -> новая`. Если нет — таймаут с ошибкой
-
-Все ошибки (нет проекта, нет файла, нет projectLabel, нет /versions, нет записи с таким name, таймауты, failed-джоба) обрабатываются явно с понятным сообщением.
+```bash
+python3 deploy_tag.py \
+    --input scan_output.txt \
+    --gitlab-url https://gitlab-test.domen.ru \
+    --token glpat-xxx \
+    --stand test-stand
+```
