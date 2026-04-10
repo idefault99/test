@@ -1,240 +1,104 @@
-#!/usr/bin/env bash
-# ================================================================
-#  microk8s-not-starting.sh
-#  Диагностика когда microk8s не стартует
-#  Все команды в одном файле, только встроенные средства
-# ================================================================
+r 10 12:01:10 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:10.447572   46980 daemon.go:73] Waiting for the API server
+Apr 10 12:01:10 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:10.450113   46980 daemon.go:65] Starting API Server
+Apr 10 12:01:10 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:10.452504   46980 options.go:221] external host was not specified, using 10.91.0.148
+Apr 10 12:01:10 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:10.453561   46980 server.go:153] Version: v1.30.14
+Apr 10 12:01:10 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:10.453613   46980 server.go:155] "Golang settings" GOGC="" GOMAXPROCS="" GOTRACEBACK=""
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:11.127660   46980 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:11.127687   46980 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:11.127717   46980 shared_informer.go:313] Waiting for caches to sync for node_authorizer
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:11.135635   46980 shared_informer.go:313] Waiting for caches to sync for *generic.policySource[*k8s.io/api/admissionregistration/v1.ValidatingAdmissionPolicy,*k8s.io/api/admissionregistration/v1.ValidatingAdmissionPolicyBinding,k8s.io/apiserver/pkg/admission/plugin/policy/validating.Validator]
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:11.142068   46980 plugins.go:157] Loaded 11 mutating admission controller(s) successfully in the following order: NamespaceLifecycle,LimitRanger,ServiceAccount,TaintNodesByCondition,Priority,DefaultTolerationSeconds,DefaultStorageClass,StorageObjectInUseProtection,RuntimeClass,DefaultIngressClass,MutatingAdmissionWebhook.
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:11.142119   46980 plugins.go:160] Loaded 14 validating admission controller(s) successfully in the following order: LimitRanger,ServiceAccount,PodSecurity,Priority,EventRateLimit,PersistentVolumeClaimResize,RuntimeClass,CertificateApproval,CertificateSigning,ClusterTrustBundleAttest,CertificateSubjectRestriction,ValidatingAdmissionPolicy,ValidatingAdmissionWebhook,ResourceQuota.
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: I0410 12:01:11.142443   46980 instance.go:299] Using reconciler: lease
+Apr 10 12:01:11 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:11.143169   46980 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:12 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:12.128569   46980 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:12 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:12.128572   46980 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:12 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:12.144633   46980 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:13 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:13.683119   46980 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:13 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:13.717352   46980 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:13 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:13.811485   46980 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:16 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:16.184692   46980 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:16 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:16.542254   46980 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:16 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:16.549395   46980 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:19 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:19.885246   46980 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:20 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:20.388806   46980 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:20 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:20.892786   46980 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:27 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:27.165309   46980 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:27 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:27.409847   46980 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+Apr 10 12:01:28 external-microk8s microk8s.daemon-kubelite[46980]: W0410 12:01:28.165226   46980 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
 
-RED='\033[0;31m'; YEL='\033[0;33m'; GRN='\033[0;32m'
-CYN='\033[0;36m'; WHT='\033[1;37m'; DIM='\033[2m'
-BOLD='\033[1m';   RST='\033[0m'
 
-header()  { echo -e "\n${CYN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  $1\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"; }
-section() { echo -e "\n${WHT}${BOLD}▶ $1${RST}\n${DIM}──────────────────────────────────────────────────────${RST}"; }
-ok()      { echo -e "  ${GRN}✔${RST}  $1"; }
-warn()    { echo -e "  ${YEL}⚠${RST}  $1"; }
-bad()     { echo -e "  ${RED}✘${RST}  $1"; }
-kv()      { printf "  ${WHT}%-36s${RST} %s\n" "$1" "$2"; }
 
-LOG="/tmp/mk8s-nostart-$(date +%Y%m%d-%H%M%S).log"
-exec > >(tee -a "$LOG") 2>&1
 
-echo -e "${BOLD}${CYN}"
-echo "  MicroK8s не стартует — диагностика"
-echo "  $(date '+%Y-%m-%d %H:%M:%S')  |  host: $(hostname)"
-echo -e "${RST}"
-
-# ════════════════════════════════════════════════════════════════
-header "1. РЕСУРСЫ — диск и RAM"
-
-section "Диск (первая причина отказа)"
-df -h | grep -v "tmpfs\|udev" | while read -r fs sz us av pc mnt; do
-  [[ "$pc" =~ ^[0-9]+%$ ]] || continue
-  pct=${pc//%/}
-  if (( pct > 90 )); then
-    bad "ДИСК ЗАПОЛНЕН: ${mnt} = ${pct}%  — microk8s не стартует при 100%"
-    echo -e "  ${RED}Очистить: journalctl --vacuum-size=200M${RST}"
-  elif (( pct > 80 )); then
-    warn "Диск ${mnt} = ${pct}%"
-  else
-    ok "${mnt} = ${pct}%"
-  fi
-done
-
-section "RAM"
-mem_avail=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-mem_total=$(grep MemTotal     /proc/meminfo | awk '{print $2}')
-mem_pct=$(( mem_avail * 100 / mem_total ))
-kv "Available:" "$(( mem_avail / 1024 )) MB (${mem_pct}%)"
-(( mem_pct < 10 )) && bad "Мало RAM — microk8s может не запуститься" \
-                   || ok "RAM достаточно"
-
-# ════════════════════════════════════════════════════════════════
-header "2. SNAP — состояние пакета"
-
-section "Версия и статус snap"
-snap info microk8s | grep -E "installed|channel|tracking|refresh"
-
-section "Все сервисы microk8s"
-snap services microk8s
-
-# ════════════════════════════════════════════════════════════════
-header "3. SYSTEMD — статус каждого демона"
-
-DAEMONS=(
-  "snap.microk8s.daemon-kubelite"
-  "snap.microk8s.daemon-k8s-dqlite"
-  "snap.microk8s.daemon-containerd"
-  "snap.microk8s.daemon-cluster-agent"
-  "snap.microk8s.daemon-apiserver-kicker"
-)
-
-for svc in "${DAEMONS[@]}"; do
-  section "${svc##snap.microk8s.}"
-  state=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
-  if [[ "$state" == "active" ]]; then
-    ok "Запущен"
-  elif [[ "$state" == "failed" ]]; then
-    bad "FAILED"
-  else
-    warn "Статус: $state"
-  fi
-  # Последние строки статуса
-  systemctl status "$svc" --no-pager -l 2>/dev/null | tail -20 | sed 's/^/  /'
-done
-
-# ════════════════════════════════════════════════════════════════
-header "4. ЛОГИ ДЕМОНОВ (последние 60 строк каждого)"
-
-section "kubelite"
-journalctl -u snap.microk8s.daemon-kubelite \
-  -n 60 --no-pager -o short-iso 2>/dev/null | \
-  grep -v "^-- " | sed 's/^/  /'
-
-section "k8s-dqlite"
-journalctl -u snap.microk8s.daemon-k8s-dqlite \
-  -n 60 --no-pager -o short-iso 2>/dev/null | \
-  grep -v "^-- " | sed 's/^/  /'
-
-section "containerd"
-journalctl -u snap.microk8s.daemon-containerd \
-  -n 60 --no-pager -o short-iso 2>/dev/null | \
-  grep -v "^-- " | sed 's/^/  /'
-
-section "cluster-agent"
-journalctl -u snap.microk8s.daemon-cluster-agent \
-  -n 30 --no-pager -o short-iso 2>/dev/null | \
-  grep -v "^-- " | sed 's/^/  /'
-
-section "apiserver-kicker"
-journalctl -u snap.microk8s.daemon-apiserver-kicker \
-  -n 30 --no-pager -o short-iso 2>/dev/null | \
-  grep -v "^-- " | sed 's/^/  /'
-
-section "Snap logs (общий)"
-snap logs microk8s -n 50 2>/dev/null | sed 's/^/  /'
-
-# ════════════════════════════════════════════════════════════════
-header "5. КЛЮЧЕВЫЕ ОШИБКИ — фильтр по всем логам"
-
-section "Все ERROR/FATAL/PANIC за последние 30 минут"
-journalctl -u snap.microk8s.daemon-kubelite \
-           -u snap.microk8s.daemon-k8s-dqlite \
-           -u snap.microk8s.daemon-containerd \
-  --since "30 minutes ago" --no-pager 2>/dev/null | \
-  grep -iE "error|fatal|panic|failed|timeout|permission denied|no space|cannot|address already in use|certificate|tls|connection refused" | \
-  grep -v "^-- " | \
-  sed 's/^/  /' | head -50
-
-# ════════════════════════════════════════════════════════════════
-header "6. СЕТЬ — порты и конфликты"
-
-section "Порты которые должен слушать microk8s"
-for port in 6443 2380 2379 19001 10250 10255 10257 10259; do
-  # Проверяем через /proc/net/tcp6 и tcp
-  hex_port=$(printf '%04X' $port)
-  if grep -q ":${hex_port} " /proc/net/tcp6 2>/dev/null || \
-     grep -q ":${hex_port} " /proc/net/tcp  2>/dev/null; then
-    ok "Порт $port — слушает"
-  else
-    warn "Порт $port — не слушает"
-  fi
-done
-
-section "Что занимает порт 6443 (apiserver)"
-ss -tlnp 2>/dev/null | grep ":6443" | sed 's/^/  /' || echo "  Никто не слушает 6443"
-
-section "Что занимает порт 19001 (dqlite)"
-ss -tlnp 2>/dev/null | grep ":19001" | sed 's/^/  /' || echo "  Никто не слушает 19001"
-
-# ════════════════════════════════════════════════════════════════
-header "7. ФАЙЛЫ И ПРАВА"
-
-section "Ключевые файлы конфигурации"
-FILES=(
-  "/var/snap/microk8s/current/args/kube-apiserver"
-  "/var/snap/microk8s/current/args/kubelet"
-  "/var/snap/microk8s/current/args/kube-controller-manager"
-  "/var/snap/microk8s/current/var/kubernetes/backend/cluster.crt"
-  "/var/snap/microk8s/current/var/kubernetes/backend/cluster.key"
-  "/var/snap/microk8s/current/certs/ca.crt"
-  "/var/snap/microk8s/current/credentials/kubelet.config"
-)
-for f in "${FILES[@]}"; do
-  if [[ -f "$f" ]]; then
-    perm=$(stat -c "%a %U:%G" "$f" 2>/dev/null)
-    ok "${f##*/}  [$perm]"
-  else
-    bad "НЕТ ФАЙЛА: $f"
-  fi
-done
-
-section "Размер dqlite базы"
-dqlite_dir="/var/snap/microk8s/current/var/kubernetes/backend"
-if [[ -d "$dqlite_dir" ]]; then
-  du -sh "$dqlite_dir" 2>/dev/null | sed 's/^/  /'
-  ls -lh "$dqlite_dir" 2>/dev/null | sed 's/^/  /'
-else
-  bad "dqlite директория не найдена: $dqlite_dir"
-fi
-
-section "Snap директория — свободное место"
-df -h /var/snap/microk8s/ 2>/dev/null | sed 's/^/  /'
-
-# ════════════════════════════════════════════════════════════════
-header "8. СЕРТИФИКАТЫ"
-
-section "Проверка срока действия сертификатов"
-CERT_DIR="/var/snap/microk8s/current/certs"
-if [[ -d "$CERT_DIR" ]]; then
-  for cert in "$CERT_DIR"/*.crt; do
-    [[ -f "$cert" ]] || continue
-    expiry=$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2)
-    exp_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo 0)
-    now_epoch=$(date +%s)
-    days_left=$(( (exp_epoch - now_epoch) / 86400 ))
-    if (( days_left < 0 )); then
-      bad "ИСТЁК: $(basename $cert) — ${expiry}"
-    elif (( days_left < 30 )); then
-      warn "Скоро истекает: $(basename $cert) — через ${days_left} дней"
-    else
-      ok "$(basename $cert) — действителен ещё ${days_left} дней"
-    fi
-  done
-else
-  warn "Директория сертификатов не найдена: $CERT_DIR"
-fi
-
-# ════════════════════════════════════════════════════════════════
-header "9. ВСТРОЕННАЯ ДИАГНОСТИКА MICROK8S"
-
-section "microk8s inspect"
-microk8s inspect 2>&1 | tail -40 | sed 's/^/  /' || warn "microk8s inspect недоступен"
-
-# ════════════════════════════════════════════════════════════════
-header "10. ПОПЫТКА ЗАПУСКА"
-
-section "Попытка старта"
-echo -e "  ${DIM}Выполняем: snap start microk8s...${RST}"
-snap start microk8s 2>&1 | sed 's/^/  /'
-sleep 5
-
-echo -e "  ${DIM}Статус после старта:${RST}"
-snap services microk8s 2>/dev/null | sed 's/^/  /'
-
-echo -e "\n  ${DIM}Ждём ready (30 сек таймаут)...${RST}"
-microk8s status --wait-ready --timeout 30 2>&1 | sed 's/^/  /' || true
-
-# ════════════════════════════════════════════════════════════════
-header "ИТОГ"
-
-echo ""
-echo -e "  ${WHT}Лог сохранён: ${CYN}${LOG}${RST}"
-echo ""
-echo -e "  ${WHT}Следующие шаги если не помогло:${RST}"
-echo -e "  ${DIM}1.${RST} Скинуть лог: ${CYN}cat $LOG${RST}"
-echo -e "  ${DIM}2.${RST} Полный inspect: ${CYN}sudo microk8s inspect${RST}"
-echo -e "  ${DIM}3.${RST} Если сертификаты истекли: ${CYN}sudo microk8s refresh-certs --cert ca.crt${RST}"
-echo -e "  ${DIM}4.${RST} Если диск полный: ${CYN}journalctl --vacuum-size=200M && microk8s ctr images prune --all${RST}"
-echo -e "  ${DIM}5.${RST} Крайний случай: ${CYN}sudo snap remove microk8s && sudo snap install microk8s --classic${RST}"
-echo ""
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49196]: + grep -q 'Status: active'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + is_strict
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49199]: + /snap/microk8s/8566/bin/cat /snap/microk8s/8566/meta/snap.yaml
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49200]: + /snap/microk8s/8566/bin/grep confinement
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49201]: + /snap/microk8s/8566/bin/grep -q strict
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + return 1
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49203]: + systemctl show snap.microk8s.daemon-kubelite.service -p NRestarts
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49204]: + grep -qv NRestarts=0
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49205]: + grep -qv cpuset /sys/fs/cgroup/cgroup.subtree_control
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + grep -e '--address ' /var/snap/microk8s/8566/args/containerd
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49208]: ++ grep -e '--address ' /var/snap/microk8s/8566/args/containerd
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49209]: ++ gawk '{print $2}'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + socket='${SNAP_COMMON}/run/containerd.sock'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49210]: ++ eval echo '${SNAP_COMMON}/run/containerd.sock'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49210]: +++ echo /var/snap/microk8s/common/run/containerd.sock
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + socket_file_expand=/var/snap/microk8s/common/run/containerd.sock
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + n=0
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' 0 -ge 10 ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + test -S /var/snap/microk8s/common/run/containerd.sock
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + break
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -e /proc/49009/cgroup ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49212]: ++ gawk -F '[:]' '(/cpu/ && !/cpuset/) || /memory/ {print $3}' /proc/49009/cgroup
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49213]: ++ uniq
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49214]: ++ wc -l
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + [[ 0 -eq 2 ]]
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -L /var/lib/kubelet ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + echo '`/var/lib/kubelet` is a symbolic link'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: `/var/lib/kubelet` is a symbolic link
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + ls -l /var/lib/kubelet
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49215]: lrwxrwxrwx 1 root root 41 Oct  4  2024 /var/lib/kubelet -> /var/snap/microk8s/common/var/lib/kubelet
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -e /var/snap/microk8s/8566/args/cni-network/cni.yaml ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + ipvs='ipv4 ipv6'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + for ipv in $ipvs
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -e /proc/sys/net/ipv4/conf/all/forwarding ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + grep -e 1 /proc/sys/net/ipv4/conf/all/forwarding
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49216]: 1
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + for ipv in $ipvs
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -e /proc/sys/net/ipv6/conf/all/forwarding ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + grep -e 1 /proc/sys/net/ipv6/conf/all/forwarding
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49217]: 1
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -f /var/snap/microk8s/8566/var/lock/host-access-enabled ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -f /proc/sys/net/netfilter/nf_conntrack_max ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + grep -E lxc /proc/1/environ
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -f /proc/sys/net/bridge/bridge-nf-call-iptables ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + '[' -f /proc/sys/net/bridge/bridge-nf-call-iptables ']'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + grep 0 /proc/sys/net/bridge/bridge-nf-call-iptables
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49220]: ++ cat /var/snap/microk8s/8566/args/kubelite
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + declare -a 'args=(--scheduler-args-file=$SNAP_DATA/args/kube-scheduler
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: --controller-manager-args-file=$SNAP_DATA/args/kube-controller-manager
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: --proxy-args-file=$SNAP_DATA/args/kube-proxy
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: --kubelet-args-file=$SNAP_DATA/args/kubelet
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: --apiserver-args-file=$SNAP_DATA/args/kube-apiserver
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: --kubeconfig-file=$SNAP_DATA/credentials/client.config
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: --start-control-plane=true)'
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: + exec /snap/microk8s/8566/kubelite --scheduler-args-file=/var/snap/microk8s/8566/args/kube-scheduler --controller-manager-args-file=/var/snap/microk8s/8566/args/kube-controller-manager --proxy-args-file=/var/snap/microk8s/8566/args/kube-proxy --kubelet-args-file=/var/snap/microk8s/8566/args/kubelet --apiserver-args-file=/var/snap/microk8s/8566/args/kube-apiserver --kubeconfig-file=/var/snap/microk8s/8566/credentials/client.config --start-control-plane=true
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: Starting kubelite
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: I0410 12:03:41.629471   49009 daemon.go:73] Waiting for the API server
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: I0410 12:03:41.630433   49009 daemon.go:65] Starting API Server
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: I0410 12:03:41.631052   49009 options.go:221] external host was not specified, using 10.91.0.148
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: I0410 12:03:41.631779   49009 server.go:153] Version: v1.30.14
+2026-04-10T12:03:41Z microk8s.daemon-kubelite[49009]: I0410 12:03:41.631842   49009 server.go:155] "Golang settings" GOGC="" GOMAXPROCS="" GOTRACEBACK=""
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: W0410 12:03:42.045839   49009 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: W0410 12:03:42.045875   49009 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: I0410 12:03:42.045987   49009 shared_informer.go:313] Waiting for caches to sync for node_authorizer
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: I0410 12:03:42.054964   49009 shared_informer.go:313] Waiting for caches to sync for *generic.policySource[*k8s.io/api/admissionregistration/v1.ValidatingAdmissionPolicy,*k8s.io/api/admissionregistration/v1.ValidatingAdmissionPolicyBinding,k8s.io/apiserver/pkg/admission/plugin/policy/validating.Validator]
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: I0410 12:03:42.060450   49009 plugins.go:157] Loaded 11 mutating admission controller(s) successfully in the following order: NamespaceLifecycle,LimitRanger,ServiceAccount,TaintNodesByCondition,Priority,DefaultTolerationSeconds,DefaultStorageClass,StorageObjectInUseProtection,RuntimeClass,DefaultIngressClass,MutatingAdmissionWebhook.
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: I0410 12:03:42.060504   49009 plugins.go:160] Loaded 14 validating admission controller(s) successfully in the following order: LimitRanger,ServiceAccount,PodSecurity,Priority,EventRateLimit,PersistentVolumeClaimResize,RuntimeClass,CertificateApproval,CertificateSigning,ClusterTrustBundleAttest,CertificateSubjectRestriction,ValidatingAdmissionPolicy,ValidatingAdmissionWebhook,ResourceQuota.
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: I0410 12:03:42.060839   49009 instance.go:299] Using reconciler: lease
+2026-04-10T12:03:42Z microk8s.daemon-kubelite[49009]: W0410 12:03:42.061438   49009 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+2026-04-10T12:03:43Z microk8s.daemon-kubelite[49009]: W0410 12:03:43.047417   49009 logging.go:59] [core] [Channel #2 SubChannel #4] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+2026-04-10T12:03:43Z microk8s.daemon-kubelite[49009]: W0410 12:03:43.047472   49009 logging.go:59] [core] [Channel #1 SubChannel #3] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
+2026-04-10T12:03:43Z microk8s.daemon-kubelite[49009]: W0410 12:03:43.062590   49009 logging.go:59] [core] [Channel #5 SubChannel #6] grpc: addrConn.createTransport failed to connect to {Addr: "unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379", ServerName: "kine.sock:12379", }. Err: connection error: desc = "transport: Error while dialing: dial unix /var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379: connect: connection refused"
