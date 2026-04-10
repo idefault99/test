@@ -1,4 +1,36 @@
 #!/usr/bin/env bash
+
+set -u
+
+URL="https://example.com/api/resource"
+TOKEN="YOUR_TOKEN"
+INTERVAL=5
+COUNT=10
+
+for ((i=1; i<=COUNT; i++)); do
+  echo "=============================="
+  echo "Request #$i"
+  echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "=============================="
+
+  RESPONSE=$(curl -sS -X GET "$URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json")
+
+  if echo "$RESPONSE" | jq . >/dev/null 2>&1; then
+    echo "$RESPONSE" | jq .
+  else
+    echo "Ответ не является валидным JSON:"
+    echo "$RESPONSE"
+  fi
+
+  echo
+  sleep "$INTERVAL"
+done
+
+---
+
+#!/usr/bin/env bash
 # ================================================================
 #  node-diag.sh — полная диагностика Ubuntu VM
 #  Только встроенные средства: /proc, /sys, journalctl, ss, ip, dd
