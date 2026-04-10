@@ -1,24 +1,118 @@
-# 1. Поднять MinIO как Pod или docker-контейнер на ноде
-docker run -d --name minio \
-  -p 9000:9000 -p 9001:9001 \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  -v /opt/minio-data:/data \
-  quay.io/minio/minio server /data --console-address ":9001"
+#!/bin/bash
+# replace-image.sh — заменить образ (без тега) во всех деплойментах всех неймспейсов
 
-# 2. Создать bucket и залить туда содержимое архива
-mc alias set local http://localhost:9000 minioadmin minioadmin
-mc mb local/velero
-# Распаковать архив в bucket (структура должна быть: velero/backups/<backup-name>/...)
-mc cp --recursive ./velero-backup-extracted/ local/velero/
+set -euo pipefail
 
-# 3. Указать Velero использовать этот MinIO
-velero backup-location create local-minio \
-  --provider aws \
-  --bucket velero \
-  --config region=minio,s3ForcePathStyle=true,s3Url=http://<NODE-IP>:9000 \
-  --credential-key-file ./credentials-velero
+usage() {
+  echo "Usage: $0 <old-image-url> <new-image-url>"
+  echo "  Example: $0 registry.old.com/myapp registry.new.com/myapp"
+  echo ""
+  echo "  Replaces image URL (without tag) in all deployments across all namespaces."
+  echo "  Tag is preserved from the original image."
+  exit 1
+}
 
-# 4. Подождать sync (30 сек) и проверить
-velero backup get
-velero restore create --from-backup <backup-name>
+[[ $# -ne 2 ]] && usage
+
+OLD_IMAGE="$1"
+NEW_IMAGE="$2"
+
+# Убрать возможный trailing slash
+OLD_IMAGE="${OLD_IMAGE%/}"
+NEW_IMAGE="${NEW_IMAGE%/}"
+
+KUBECTL="${KUBECTL:-kubectl}"
+
+echo "==> Searching for image: ${OLD_IMAGE}"
+echo "==> Will replace with:   ${NEW_IMAGE}"
+echo ""
+
+found=0
+patched=0
+
+# Получить все неймспейсы
+NAMESPACES=$($KUBECTL get namespaces -o jsonpath='{.items[*].metadata.name}')
+
+for ns in $NAMESPACES; do
+  # Получить все деплойменты в неймспейсе
+  DEPLOYMENTS=$($KUBECTL get deployments -n "$ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null) || continue
+  [[ -z "$DEPLOYMENTS" ]] && continue
+
+  for deploy in $DEPLOYMENTS; do
+    # Получить все контейнеры (включая initContainers)
+    CONTAINERS=$($KUBECTL get deployment "$deploy" -n "$ns" \
+      -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}{range .spec.template.spec.initContainers[*]}{.name}={.image}{"\n"}{end}' 2>/dev/null) || continue
+
+    while IFS='=' read -r container_name current_image; do
+      [[ -z "$container_name" || -z "$current_image" ]] && continue
+
+      # Извлечь URL без тега (всё до последнего ':' или '@')
+      if [[ "$current_image" == *"@"* ]]; then
+        # digest-формат: image@sha256:...
+        current_url="${current_image%%@*}"
+        current_suffix="@${current_image#*@}"
+      elif [[ "$current_image" == *":"* ]]; then
+        # стандартный формат: image:tag
+        # Но нужно учесть registry с портом: registry:5000/image:tag
+        # Всё после последнего ':' — тег; всё до — url
+        current_tag="${current_image##*:}"
+        current_url="${current_image%:*}"
+        current_suffix=":${current_tag}"
+      else
+        # Нет тега — просто url
+        current_url="$current_image"
+        current_suffix=""
+      fi
+
+      # Сравниваем URL образа (без тега) с искомым
+      if [[ "$current_url" == "$OLD_IMAGE" ]]; then
+        new_full_image="${NEW_IMAGE}${current_suffix}"
+        ((found++)) || true
+
+        echo "[${ns}/${deploy}] container '${container_name}'"
+        echo "  old: ${current_image}"
+        echo "  new: ${new_full_image}"
+
+        # Определить, initContainer это или нет
+        IS_INIT=$($KUBECTL get deployment "$deploy" -n "$ns" \
+          -o jsonpath="{.spec.template.spec.initContainers[?(@.name==\"${container_name}\")].name}" 2>/dev/null)
+
+        if [[ -n "$IS_INIT" ]]; then
+          CONTAINER_TYPE="initContainers"
+        else
+          CONTAINER_TYPE="containers"
+        fi
+
+        # Patch через strategic merge
+        PATCH=$(cat <<EOF
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "${CONTAINER_TYPE}": [
+          {
+            "name": "${container_name}",
+            "image": "${new_full_image}"
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+)
+        if $KUBECTL patch deployment "$deploy" -n "$ns" \
+            --type=strategic \
+            -p "$PATCH" > /dev/null 2>&1; then
+          echo "  ✓ patched"
+          ((patched++)) || true
+        else
+          echo "  ✗ FAILED to patch"
+        fi
+        echo ""
+      fi
+    done <<< "$CONTAINERS"
+  done
+done
+
+echo "==> Done. Found: ${found}, Patched: ${patched}"
