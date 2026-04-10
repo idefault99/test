@@ -1,42 +1,9 @@
 #!/usr/bin/env bash
-
-set -u
-
-URL="https://example.com/api/resource"
-TOKEN="YOUR_TOKEN"
-INTERVAL=5
-COUNT=10
-
-for ((i=1; i<=COUNT; i++)); do
-  echo "=============================="
-  echo "Request #$i"
-  echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
-  echo "=============================="
-
-  RESPONSE=$(curl -sS -X GET "$URL" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Accept: application/json")
-
-  if echo "$RESPONSE" | jq . >/dev/null 2>&1; then
-    echo "$RESPONSE" | jq .
-  else
-    echo "Ответ не является валидным JSON:"
-    echo "$RESPONSE"
-  fi
-
-  echo
-  sleep "$INTERVAL"
-done
-
----
-
-#!/usr/bin/env bash
 # ================================================================
-#  node-diag.sh — полная диагностика Ubuntu VM
-#  Только встроенные средства: /proc, /sys, journalctl, ss, ip, dd
-#  Без внешних утилит (iotop, sysstat, etc.)
+#  microk8s-not-starting.sh
+#  Диагностика когда microk8s не стартует
+#  Все команды в одном файле, только встроенные средства
 # ================================================================
-set -uo pipefail
 
 RED='\033[0;31m'; YEL='\033[0;33m'; GRN='\033[0;32m'
 CYN='\033[0;36m'; WHT='\033[1;37m'; DIM='\033[2m'
@@ -45,544 +12,229 @@ BOLD='\033[1m';   RST='\033[0m'
 header()  { echo -e "\n${CYN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  $1\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"; }
 section() { echo -e "\n${WHT}${BOLD}▶ $1${RST}\n${DIM}──────────────────────────────────────────────────────${RST}"; }
 ok()      { echo -e "  ${GRN}✔${RST}  $1"; }
-warn()    { echo -e "  ${YEL}⚠${RST}  $1"; WARNINGS+=("$1"); }
-bad()     { echo -e "  ${RED}✘${RST}  $1"; ISSUES+=("$1"); }
-info()    { echo -e "  ${DIM}·${RST}  $1"; }
-kv()      { printf "  ${WHT}%-38s${RST} %s\n" "$1" "$2"; }
-rec()     { RECOMMENDATIONS+=("$1"); }
+warn()    { echo -e "  ${YEL}⚠${RST}  $1"; }
+bad()     { echo -e "  ${RED}✘${RST}  $1"; }
+kv()      { printf "  ${WHT}%-36s${RST} %s\n" "$1" "$2"; }
 
-declare -a ISSUES=()
-declare -a WARNINGS=()
-declare -a RECOMMENDATIONS=()
-
-[[ $EUID -ne 0 ]] && { echo -e "${RED}Запустите с sudo${RST}"; exit 1; }
-
-LOG="/tmp/node-diag-$(date +%Y%m%d-%H%M%S).log"
+LOG="/tmp/mk8s-nostart-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
-echo -e "${CYN}${BOLD}"
-cat << 'BANNER'
-  ███╗   ██╗ ██████╗ ██████╗ ███████╗    ██████╗ ██╗ █████╗  ██████╗
-  ████╗  ██║██╔═══██╗██╔══██╗██╔════╝    ██╔══██╗██║██╔══██╗██╔════╝
-  ██╔██╗ ██║██║   ██║██║  ██║█████╗      ██║  ██║██║███████║██║  ███╗
-  ██║╚██╗██║██║   ██║██║  ██║██╔══╝      ██║  ██║██║██╔══██║██║   ██║
-  ██║ ╚████║╚██████╔╝██████╔╝███████╗    ██████╔╝██║██║  ██║╚██████╔╝
-  ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚═════╝ ╚═╝╚═╝  ╚═╝ ╚═════╝
-  Ubuntu VM — Полная диагностика ноды
-BANNER
+echo -e "${BOLD}${CYN}"
+echo "  MicroK8s не стартует — диагностика"
+echo "  $(date '+%Y-%m-%d %H:%M:%S')  |  host: $(hostname)"
 echo -e "${RST}"
-echo -e "${DIM}  $(date '+%Y-%m-%d %H:%M:%S')  |  host: $(hostname)  |  лог: $LOG${RST}"
 
 # ════════════════════════════════════════════════════════════════
-header "1. СИСТЕМА"
+header "1. РЕСУРСЫ — диск и RAM"
 
-section "Идентификация"
-kv "Hostname:"        "$(hostname)"
-kv "OS:"              "$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')"
-kv "Kernel:"          "$(uname -r)"
-kv "Arch:"            "$(uname -m)"
-kv "Virtualization:"  "$(systemd-detect-virt 2>/dev/null || echo 'unknown')"
-
-uptime_sec=$(awk '{print int($1)}' /proc/uptime)
-kv "Uptime:"  "$(( uptime_sec/86400 ))д $(( (uptime_sec%86400)/3600 ))ч $(( (uptime_sec%3600)/60 ))м"
-
-(( uptime_sec > 15552000 )) && warn "Нода работает без перезагрузки более 180 дней"
-
-section "CPU"
-cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
-cpu_cores=$(grep -c "^processor" /proc/cpuinfo)
-cpu_mhz=$(grep "cpu MHz" /proc/cpuinfo | head -1 | awk '{print $4}' | cut -d. -f1)
-kv "Model:"   "$cpu_model"
-kv "Cores:"   "$cpu_cores"
-kv "MHz:"     "${cpu_mhz:-unknown}"
-
-load1=$(awk '{print $1}' /proc/loadavg)
-load5=$(awk '{print $2}' /proc/loadavg)
-load15=$(awk '{print $3}' /proc/loadavg)
-load1_int=${load1%.*}
-kv "Load 1/5/15:" "$load1 / $load5 / $load15"
-(( load1_int > cpu_cores * 3 )) && { bad  "Критическая нагрузка: load=${load1} при ${cpu_cores} CPU"; rec "Найти тяжёлый процесс: для каждого /proc/[0-9]*/stat вывести cpu-time"; }
-(( load1_int > cpu_cores     )) && (( load1_int <= cpu_cores*3 )) && warn "Нагрузка выше нормы: load=${load1}"
-(( load1_int <= cpu_cores    )) && ok "Load в норме: ${load1}"
-
-section "CPU время по режимам (/proc/stat)"
-read -r _cpu user nice system idle iowait irq softirq steal _ < /proc/stat
-total=$(( user+nice+system+idle+iowait+irq+softirq+steal ))
-pct_iowait=$(( iowait*100/total ))
-pct_steal=$(( steal*100/total ))
-pct_idle=$(( idle*100/total ))
-kv "user:"   "$(( user*100/total ))%"
-kv "system:" "$(( system*100/total ))%"
-kv "iowait:" "${pct_iowait}%"
-kv "steal:"  "${pct_steal}%"
-kv "idle:"   "${pct_idle}%"
-
-(( pct_iowait > 20 )) && { bad  "iowait=${pct_iowait}% — диск не справляется с нагрузкой"; rec "Определить источник I/O: ls /proc/[0-9]*/io 2>/dev/null | xargs -I{} sh -c 'echo {}; cat {}'|grep -A1 write_bytes|sort -rn|head"; }
-(( pct_iowait > 10 )) && (( pct_iowait <= 20 )) && warn "iowait=${pct_iowait}% — диск под нагрузкой"
-(( pct_steal  > 10 )) && { bad  "CPU steal=${pct_steal}% — гипервизор забирает CPU"; rec "CPU steal > 10%: обратиться к провайдеру — перегруз физического хоста"; }
-(( pct_steal  > 5  )) && (( pct_steal <= 10 )) && warn "CPU steal=${pct_steal}% — небольшой шум от гипервизора"
-
-section "Zombie процессы"
-zombie_count=$(grep -rl "^State:.*Z" /proc/[0-9]*/status 2>/dev/null | wc -l)
-if (( zombie_count > 0 )); then
-  warn "Zombie процессов: $zombie_count"
-  grep -rl "^State:.*Z" /proc/[0-9]*/status 2>/dev/null | while read -r f; do
-    pid=$(echo "$f" | cut -d/ -f3)
-    name=$(grep "^Name:" "$f" 2>/dev/null | awk '{print $2}')
-    ppid=$(grep "^PPid:" "$f" 2>/dev/null | awk '{print $2}')
-    info "zombie pid=$pid name=$name ppid=$ppid"
-  done
-  rec "Zombie: родитель не вызывает wait(). Перезапустить родительский процесс."
-else
-  ok "Zombie процессов нет"
-fi
-
-# ════════════════════════════════════════════════════════════════
-header "2. ПАМЯТЬ"
-
-section "RAM (/proc/meminfo)"
-mem_total=$(   grep "^MemTotal:"      /proc/meminfo | awk '{print $2}')
-mem_avail=$(   grep "^MemAvailable:"  /proc/meminfo | awk '{print $2}')
-mem_free=$(    grep "^MemFree:"       /proc/meminfo | awk '{print $2}')
-mem_buffers=$( grep "^Buffers:"       /proc/meminfo | awk '{print $2}')
-mem_cached=$(  grep "^Cached:"        /proc/meminfo | awk '{print $2}')
-mem_slab=$(    grep "^Slab:"          /proc/meminfo | awk '{print $2}')
-mem_sreclam=$( grep "^SReclaimable:"  /proc/meminfo | awk '{print $2}')
-mem_sunreclam=$(grep "^SUnreclaim:"   /proc/meminfo | awk '{print $2}')
-mem_dirty=$(   grep "^Dirty:"         /proc/meminfo | awk '{print $2}')
-mem_anon=$(    grep "^AnonPages:"     /proc/meminfo | awk '{print $2}')
-swap_total=$(  grep "^SwapTotal:"     /proc/meminfo | awk '{print $2}')
-swap_free=$(   grep "^SwapFree:"      /proc/meminfo | awk '{print $2}')
-
-mem_used=$(( mem_total - mem_avail ))
-mem_pct=$(( mem_used*100/mem_total ))
-mem_avail_pct=$(( mem_avail*100/mem_total ))
-mb() { echo "$(( $1/1024 )) MB"; }
-gb() { awk "BEGIN{printf \"%.1f GB\",$1/1048576}"; }
-
-kv "Total:"            "$(echo $mem_total | gb)"
-kv "Used:"             "$(mb $mem_used) (${mem_pct}%)"
-kv "Available:"        "$(mb $mem_avail) (${mem_avail_pct}%)"
-kv "Cached:"           "$(mb $mem_cached)"
-kv "Buffers:"          "$(mb $mem_buffers)"
-kv "Slab (reclaim):"   "$(mb $mem_sreclam)"
-kv "Slab (unreclaim):" "$(mb $mem_sunreclam)"
-kv "AnonPages:"        "$(mb $mem_anon)"
-kv "Dirty pages:"      "$(mb $mem_dirty)"
-
-(( mem_avail_pct < 5  )) && { bad  "КРИТИЧНО: доступно ${mem_avail_pct}% RAM — риск OOM"; rec "СРОЧНО: найти утечку — смотреть топ процессов по RSS ниже"; }
-(( mem_avail_pct < 15 )) && (( mem_avail_pct >= 5  )) && { warn "Мало RAM: доступно ${mem_avail_pct}%"; rec "Найти процессы с утечкой памяти по VmRSS"; }
-(( mem_avail_pct >= 15 )) && ok "RAM в норме: ${mem_avail_pct}% доступно"
-
-dirty_mb=$(( mem_dirty/1024 ))
-(( dirty_mb > 1000 )) && { warn "Много dirty pages: ${dirty_mb} MB"; rec "Диск не успевает писать. Уменьшить: echo 10 > /proc/sys/vm/dirty_ratio"; }
-
-slab_u_mb=$(( mem_sunreclam/1024 ))
-(( slab_u_mb > 500 )) && { warn "Slab unreclaim: ${slab_u_mb} MB — возможна kernel утечка"; rec "Проверить: cat /proc/slabinfo | sort -k3 -rn | head -20"; }
-
-section "Swap"
-if (( swap_total > 0 )); then
-  swap_used=$(( swap_total - swap_free ))
-  swap_pct=$(( swap_used*100/swap_total ))
-  kv "Swap total:" "$(mb $swap_total)"
-  kv "Swap used:"  "$(mb $swap_used) (${swap_pct}%)"
-  (( swap_pct > 50 )) && { bad  "Активный swap ${swap_pct}% — критическая нехватка RAM"; rec "Добавить RAM или уменьшить нагрузку"; }
-  (( swap_pct > 10 )) && (( swap_pct <= 50 )) && warn "Swap используется на ${swap_pct}%"
-  (( swap_pct <= 10 )) && ok "Swap в норме (${swap_pct}%)"
-else
-  warn "Swap не настроен"
-  rec "Добавить swap: fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"
-fi
-
-section "OOM killer"
-oom_count=$(dmesg 2>/dev/null | grep -cE "Out of memory|oom.kill|Killed process" || true)
-if (( oom_count > 0 )); then
-  bad "OOM killer срабатывал ${oom_count} раз(а)!"
-  dmesg 2>/dev/null | grep -E "Out of memory|oom.kill|Killed process" | tail -5 | sed 's/^/    /'
-  rec "OOM зафиксирован — добавить swap или найти процесс с утечкой"
-else
-  ok "OOM killer не срабатывал"
-fi
-
-section "Топ процессов по RSS > 100MB"
-echo ""
-printf "  ${DIM}%-7s %-14s %9s %7s  %s${RST}\n" "PID" "USER" "RSS" "MEM%" "COMMAND"
-for pd in /proc/[0-9]*/; do
-  pid=${pd%/}; pid=${pid##*/}
-  [[ -f "${pd}status" ]] || continue
-  rss=$(grep "^VmRSS:" "${pd}status" 2>/dev/null | awk '{print $2}')
-  [[ -z "${rss:-}" || "${rss:-0}" -lt 102400 ]] && continue
-  uid=$(grep "^Uid:" "${pd}status" 2>/dev/null | awk '{print $2}')
-  user=$(getent passwd "$uid" 2>/dev/null | cut -d: -f1 || echo "$uid")
-  cmd=$(tr '\0' ' ' < "${pd}cmdline" 2>/dev/null | cut -c1-50 || grep "^Name:" "${pd}status" | awk '{print $2}')
-  printf "  %-7s %-14s %9s %7s  %s\n" \
-    "$pid" "${user:0:14}" "$(( rss/1024 ))MB" "$(( rss*100/mem_total ))%" "${cmd:0:50}"
-done 2>/dev/null | sort -k4 -rn | head -15
-
-section "Процессы с VmPeak >> VmRSS (признак утечки, diff > 512MB)"
-echo ""
-found_leak=0
-printf "  ${DIM}%-7s %10s %10s %10s  %s${RST}\n" "PID" "Peak" "RSS" "Diff" "NAME"
-for pd in /proc/[0-9]*/; do
-  pid=${pd%/}; pid=${pid##*/}
-  [[ -f "${pd}status" ]] || continue
-  peak=$(grep "^VmPeak:" "${pd}status" 2>/dev/null | awk '{print $2}')
-  rss=$( grep "^VmRSS:"  "${pd}status" 2>/dev/null | awk '{print $2}')
-  [[ -z "${peak:-}" || -z "${rss:-}" || "${rss:-0}" -lt 51200 ]] && continue
-  diff=$(( peak - rss ))
-  [[ "$diff" -lt 524288 ]] && continue
-  name=$(grep "^Name:" "${pd}status" 2>/dev/null | awk '{print $2}')
-  printf "  %-7s %10s %10s %10s  %s\n" \
-    "$pid" "$(( peak/1024 ))MB" "$(( rss/1024 ))MB" "$(( diff/1024 ))MB" "$name"
-  found_leak=$(( found_leak + 1 ))
-done 2>/dev/null | sort -k4 -rn | head -10
-(( found_leak == 0 )) && ok "Признаков утечки памяти не обнаружено"
-
-# ════════════════════════════════════════════════════════════════
-header "3. ДИСК"
-
-section "Использование разделов"
-echo ""
-printf "  ${DIM}%-30s %6s %6s %6s %5s  %s${RST}\n" "FILESYSTEM" "SIZE" "USED" "AVAIL" "USE%" "MOUNT"
-df -h 2>/dev/null | grep -v "^Filesystem\|tmpfs\|udev\|devtmpfs" | while read -r fs sz us av pc mnt; do
+section "Диск (первая причина отказа)"
+df -h | grep -v "tmpfs\|udev" | while read -r fs sz us av pc mnt; do
+  [[ "$pc" =~ ^[0-9]+%$ ]] || continue
   pct=${pc//%/}
-  [[ "$pct" =~ ^[0-9]+$ ]] || continue
   if (( pct > 90 )); then
-    printf "  ${RED}%-30s %6s %6s %6s %5s%%  %s${RST}\n" "$fs" "$sz" "$us" "$av" "$pct" "$mnt"
-    bad "Диск ${mnt} заполнен на ${pct}%"
-    rec "Очистить ${mnt}: journalctl --vacuum-size=500M; find ${mnt} -name '*.log' -size +100M -delete"
-  elif (( pct > 75 )); then
-    printf "  ${YEL}%-30s %6s %6s %6s %5s%%  %s${RST}\n" "$fs" "$sz" "$us" "$av" "$pct" "$mnt"
-    warn "Диск ${mnt} заполнен на ${pct}%"
+    bad "ДИСК ЗАПОЛНЕН: ${mnt} = ${pct}%  — microk8s не стартует при 100%"
+    echo -e "  ${RED}Очистить: journalctl --vacuum-size=200M${RST}"
+  elif (( pct > 80 )); then
+    warn "Диск ${mnt} = ${pct}%"
   else
-    printf "  %-30s %6s %6s %6s %5s%%  %s\n" "$fs" "$sz" "$us" "$av" "$pct" "$mnt"
+    ok "${mnt} = ${pct}%"
   fi
 done
 
-section "Inode использование"
-echo ""
-printf "  ${DIM}%-30s %10s %10s %5s  %s${RST}\n" "FILESYSTEM" "INODES" "IUSED" "USE%" "MOUNT"
-df -i 2>/dev/null | grep -v "^Filesystem\|tmpfs\|udev" | while read -r fs in iu _ ip mnt; do
-  pct=${ip//%/}
-  [[ "$pct" =~ ^[0-9]+$ ]] || continue
-  if (( pct > 80 )); then
-    printf "  ${RED}%-30s %10s %10s %5s%%  %s${RST}\n" "$fs" "$in" "$iu" "$pct" "$mnt"
-    bad "Inodes ${mnt} исчерпаны на ${pct}%"
-    rec "Найти мусорные файлы: find ${mnt} -xdev -type f | wc -l"
-  elif (( pct > 60 )); then
-    printf "  ${YEL}%-30s %10s %10s %5s%%  %s${RST}\n" "$fs" "$in" "$iu" "$pct" "$mnt"
-    warn "Inodes ${mnt}: ${pct}%"
-  else
-    printf "  %-30s %10s %10s %5s%%  %s\n" "$fs" "$in" "$iu" "$pct" "$mnt"
-  fi
-done
-
-section "I/O статистика (/proc/diskstats)"
-echo ""
-printf "  ${DIM}%-12s %10s %10s %10s %10s %10s${RST}\n" "DEVICE" "reads" "read_MB" "writes" "write_MB" "io_ms"
-grep -E "^\s+[0-9]+ [0-9]+ (sd|vd|nvme|xvd)[a-z]$" /proc/diskstats 2>/dev/null | \
-while read -r _ _ dev r_ios _ r_sect _ w_ios _ w_sect _ _ io_ms _; do
-  printf "  %-12s %10s %10s %10s %10s %10s\n" \
-    "$dev" "$r_ios" "$(( r_sect/2048 ))MB" "$w_ios" "$(( w_sect/2048 ))MB" "${io_ms}ms"
-done
-
-section "Скорость записи (dd тест 256MB, oflag=dsync)"
-info "Тест занимает 5-30 секунд..."
-dd_out=$(dd if=/dev/zero of=/tmp/_nd_test bs=64M count=4 oflag=dsync 2>&1)
-rm -f /tmp/_nd_test
-write_spd=$(echo "$dd_out" | grep -oE '[0-9.]+ [MGk]B/s' | tail -1)
-kv "Скорость записи:" "${write_spd:-не определена}"
-if [[ -n "${write_spd:-}" ]]; then
-  spd_n=${write_spd%% *}; spd_u=${write_spd##* }; spd_i=${spd_n%.*}
-  if [[ "$spd_u" == "kB/s" ]]; then
-    bad "Диск критически медленный (${write_spd})"
-    rec "Диск < 1 MB/s — обратиться к провайдеру, мигрировать на SSD volume"
-  elif [[ "$spd_u" == "MB/s" ]]; then
-    (( spd_i < 30  )) && { bad  "Диск медленный: ${write_spd}"; rec "Диск < 30 MB/s — возможны таймауты БД и k8s. Рассмотреть замену на SSD."; }
-    (( spd_i < 100 )) && (( spd_i >= 30  )) && warn "Диск медленноват: ${write_spd}"
-    (( spd_i >= 100 )) && ok "Скорость диска нормальная: ${write_spd}"
-  fi
-fi
-
-section "Большие файлы > 200MB"
-echo ""
-found_big=0
-find / -xdev -type f -size +200M 2>/dev/null | while read -r f; do
-  sz=$(du -sh "$f" 2>/dev/null | cut -f1)
-  printf "  ${YEL}%-10s${RST}  %s\n" "$sz" "$f"
-  found_big=1
-done
-(( found_big == 0 )) && ok "Больших файлов не найдено"
-
-section "Топ каталогов по размеру"
-echo ""
-for dir in /var /opt /home /tmp /root /snap /srv; do
-  [[ -d "$dir" ]] && printf "  ${WHT}%-40s${RST} %s\n" "$dir" "$(du -sh "$dir" 2>/dev/null | cut -f1)"
-done
-
-section "Большие логи > 50MB"
-find /var/log -type f -size +50M 2>/dev/null | while read -r f; do
-  sz=$(du -sh "$f" 2>/dev/null | cut -f1)
-  warn "Большой лог: ${sz}  ${f}"
-  rec "Ротировать лог: logrotate -f /etc/logrotate.conf или journalctl --vacuum-size=500M"
-done || ok "Больших логов нет"
+section "RAM"
+mem_avail=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+mem_total=$(grep MemTotal     /proc/meminfo | awk '{print $2}')
+mem_pct=$(( mem_avail * 100 / mem_total ))
+kv "Available:" "$(( mem_avail / 1024 )) MB (${mem_pct}%)"
+(( mem_pct < 10 )) && bad "Мало RAM — microk8s может не запуститься" \
+                   || ok "RAM достаточно"
 
 # ════════════════════════════════════════════════════════════════
-header "4. СЕТЬ"
+header "2. SNAP — состояние пакета"
 
-section "Интерфейсы (/proc/net/dev)"
-echo ""
-printf "  ${DIM}%-12s %12s %10s %8s %12s %10s %8s${RST}\n" \
-  "IFACE" "RX_MB" "RX_pkts" "RX_err" "TX_MB" "TX_pkts" "TX_err"
-tail -n +3 /proc/net/dev | while IFS=: read -r iface stats; do
-  iface=$(echo "$iface" | xargs)
-  [[ "$iface" == "lo" ]] && continue
-  read -r rx_b rx_p rx_e _ _ _ _ _ tx_b tx_p tx_e _ <<< "$stats"
-  printf "  %-12s %12s %10s %8s %12s %10s %8s\n" \
-    "$iface" "$(( ${rx_b:-0}/1048576 ))MB" "${rx_p:-0}" "${rx_e:-0}" \
-    "$(( ${tx_b:-0}/1048576 ))MB" "${tx_p:-0}" "${tx_e:-0}"
-  (( ${rx_e:-0} > 1000 )) && { warn "RX ошибки на ${iface}: ${rx_e}"; rec "Проверить сетевой интерфейс ${iface}: ip -s link show ${iface}"; }
-  (( ${tx_e:-0} > 1000 )) && { warn "TX ошибки на ${iface}: ${tx_e}"; }
-done
+section "Версия и статус snap"
+snap info microk8s | grep -E "installed|channel|tracking|refresh"
 
-section "TCP соединения (/proc/net/tcp + tcp6)"
-# state hex: 01=ESTABLISHED 06=TIME_WAIT 08=CLOSE_WAIT 0A=LISTEN
-c_est=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '$4=="01"' | wc -l)
-c_tw=$( cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '$4=="06"' | wc -l)
-c_cw=$( cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '$4=="08"' | wc -l)
-c_ls=$( cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '$4=="0A"' | wc -l)
-kv "ESTABLISHED:" "$c_est"
-kv "LISTEN:"      "$c_ls"
-kv "TIME_WAIT:"   "$c_tw"
-kv "CLOSE_WAIT:"  "$c_cw"
-(( c_cw  > 200  )) && { bad  "Много CLOSE_WAIT (${c_cw}) — утечка соединений"; rec "Найти: ss -tnp state close-wait | head -20"; }
-(( c_tw  > 1000 )) && { warn "Много TIME_WAIT (${c_tw})"; rec "echo 1 > /proc/sys/net/ipv4/tcp_tw_reuse"; }
-(( c_est > 5000 )) && warn "Много ESTABLISHED (${c_est})"
-
-section "Слушающие порты"
-echo ""
-ss -tlnp 2>/dev/null | grep LISTEN | awk '{printf "  %-40s %s\n", $4, $6}' | head -20
-
-section "TCP ретрансмиты (/proc/net/snmp)"
-retrans=$(grep "^Tcp:" /proc/net/snmp | tail -1 | awk '{print $13}')
-resets=$(grep "^Tcp:"  /proc/net/snmp | tail -1 | awk '{print $9}')
-kv "RetransSegs:" "${retrans:-0}"
-kv "EstabResets:" "${resets:-0}"
-(( ${retrans:-0} > 10000 )) && { warn "Много TCP ретрансмитов (${retrans}) — проблемы с сетью"; rec "Проверить пакетные потери: ping -c 100 <gateway> | tail -3"; }
+section "Все сервисы microk8s"
+snap services microk8s
 
 # ════════════════════════════════════════════════════════════════
-header "5. KERNEL И ПАРАМЕТРЫ"
+header "3. SYSTEMD — статус каждого демона"
 
-section "Sysctl — ключевые параметры"
-rd() { cat "/proc/sys/$1" 2>/dev/null || echo "N/A"; }
-vm_swap=$(     rd vm/swappiness)
-vm_dirty=$(    rd vm/dirty_ratio)
-vm_dirty_bg=$( rd vm/dirty_background_ratio)
-net_conn=$(    rd net/core/somaxconn)
-net_backlog=$( rd net/core/netdev_max_backlog)
-net_twr=$(     rd net/ipv4/tcp_tw_reuse)
-net_syn=$(     rd net/ipv4/tcp_syncookies)
-fs_inot=$(     rd fs/inotify/max_user_watches)
-fs_max=$(      rd fs/file-max)
-fs_open=$(     awk '{print $1}' /proc/sys/fs/file-nr 2>/dev/null)
+DAEMONS=(
+  "snap.microk8s.daemon-kubelite"
+  "snap.microk8s.daemon-k8s-dqlite"
+  "snap.microk8s.daemon-containerd"
+  "snap.microk8s.daemon-cluster-agent"
+  "snap.microk8s.daemon-apiserver-kicker"
+)
 
-kv "vm.swappiness:"               "$vm_swap"
-kv "vm.dirty_ratio:"               "$vm_dirty"
-kv "vm.dirty_background_ratio:"    "$vm_dirty_bg"
-kv "net.core.somaxconn:"           "$net_conn"
-kv "net.core.netdev_max_backlog:"  "$net_backlog"
-kv "net.ipv4.tcp_tw_reuse:"        "$net_twr"
-kv "net.ipv4.tcp_syncookies:"      "$net_syn"
-kv "fs.inotify.max_user_watches:"  "$fs_inot"
-kv "fs.file-max:"                  "$fs_max"
-kv "Открытых fd сейчас:"           "${fs_open:-?}"
+for svc in "${DAEMONS[@]}"; do
+  section "${svc##snap.microk8s.}"
+  state=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
+  if [[ "$state" == "active" ]]; then
+    ok "Запущен"
+  elif [[ "$state" == "failed" ]]; then
+    bad "FAILED"
+  else
+    warn "Статус: $state"
+  fi
+  # Последние строки статуса
+  systemctl status "$svc" --no-pager -l 2>/dev/null | tail -20 | sed 's/^/  /'
+done
 
-CFG="/etc/sysctl.d/99-node-tuning.conf"
-needs_sysctl=0
+# ════════════════════════════════════════════════════════════════
+header "4. ЛОГИ ДЕМОНОВ (последние 60 строк каждого)"
 
-(( ${vm_swap:-60}  > 30   )) && { warn "vm.swappiness=${vm_swap} высокий для сервера"; needs_sysctl=1; }
-(( ${net_conn:-128} < 4096 )) && { warn "net.core.somaxconn=${net_conn} мало";          needs_sysctl=1; }
-(( ${fs_inot:-8192} < 131072 )) && { warn "fs.inotify.max_user_watches=${fs_inot} мало"; needs_sysctl=1; }
-[[ "$net_syn" == "0" ]] && { warn "tcp_syncookies=0 — уязвимость к SYN flood"; needs_sysctl=1; }
+section "kubelite"
+journalctl -u snap.microk8s.daemon-kubelite \
+  -n 60 --no-pager -o short-iso 2>/dev/null | \
+  grep -v "^-- " | sed 's/^/  /'
 
-if (( needs_sysctl )); then
-  rec "Применить оптимальные параметры:
-    cat >> ${CFG} << 'EOF'
-vm.swappiness=10
-vm.dirty_ratio=15
-vm.dirty_background_ratio=5
-net.core.somaxconn=4096
-net.core.netdev_max_backlog=4096
-net.ipv4.tcp_tw_reuse=1
-net.ipv4.tcp_syncookies=1
-fs.inotify.max_user_watches=524288
-fs.file-max=2097152
-EOF
-    sysctl -p ${CFG}"
+section "k8s-dqlite"
+journalctl -u snap.microk8s.daemon-k8s-dqlite \
+  -n 60 --no-pager -o short-iso 2>/dev/null | \
+  grep -v "^-- " | sed 's/^/  /'
+
+section "containerd"
+journalctl -u snap.microk8s.daemon-containerd \
+  -n 60 --no-pager -o short-iso 2>/dev/null | \
+  grep -v "^-- " | sed 's/^/  /'
+
+section "cluster-agent"
+journalctl -u snap.microk8s.daemon-cluster-agent \
+  -n 30 --no-pager -o short-iso 2>/dev/null | \
+  grep -v "^-- " | sed 's/^/  /'
+
+section "apiserver-kicker"
+journalctl -u snap.microk8s.daemon-apiserver-kicker \
+  -n 30 --no-pager -o short-iso 2>/dev/null | \
+  grep -v "^-- " | sed 's/^/  /'
+
+section "Snap logs (общий)"
+snap logs microk8s -n 50 2>/dev/null | sed 's/^/  /'
+
+# ════════════════════════════════════════════════════════════════
+header "5. КЛЮЧЕВЫЕ ОШИБКИ — фильтр по всем логам"
+
+section "Все ERROR/FATAL/PANIC за последние 30 минут"
+journalctl -u snap.microk8s.daemon-kubelite \
+           -u snap.microk8s.daemon-k8s-dqlite \
+           -u snap.microk8s.daemon-containerd \
+  --since "30 minutes ago" --no-pager 2>/dev/null | \
+  grep -iE "error|fatal|panic|failed|timeout|permission denied|no space|cannot|address already in use|certificate|tls|connection refused" | \
+  grep -v "^-- " | \
+  sed 's/^/  /' | head -50
+
+# ════════════════════════════════════════════════════════════════
+header "6. СЕТЬ — порты и конфликты"
+
+section "Порты которые должен слушать microk8s"
+for port in 6443 2380 2379 19001 10250 10255 10257 10259; do
+  # Проверяем через /proc/net/tcp6 и tcp
+  hex_port=$(printf '%04X' $port)
+  if grep -q ":${hex_port} " /proc/net/tcp6 2>/dev/null || \
+     grep -q ":${hex_port} " /proc/net/tcp  2>/dev/null; then
+    ok "Порт $port — слушает"
+  else
+    warn "Порт $port — не слушает"
+  fi
+done
+
+section "Что занимает порт 6443 (apiserver)"
+ss -tlnp 2>/dev/null | grep ":6443" | sed 's/^/  /' || echo "  Никто не слушает 6443"
+
+section "Что занимает порт 19001 (dqlite)"
+ss -tlnp 2>/dev/null | grep ":19001" | sed 's/^/  /' || echo "  Никто не слушает 19001"
+
+# ════════════════════════════════════════════════════════════════
+header "7. ФАЙЛЫ И ПРАВА"
+
+section "Ключевые файлы конфигурации"
+FILES=(
+  "/var/snap/microk8s/current/args/kube-apiserver"
+  "/var/snap/microk8s/current/args/kubelet"
+  "/var/snap/microk8s/current/args/kube-controller-manager"
+  "/var/snap/microk8s/current/var/kubernetes/backend/cluster.crt"
+  "/var/snap/microk8s/current/var/kubernetes/backend/cluster.key"
+  "/var/snap/microk8s/current/certs/ca.crt"
+  "/var/snap/microk8s/current/credentials/kubelet.config"
+)
+for f in "${FILES[@]}"; do
+  if [[ -f "$f" ]]; then
+    perm=$(stat -c "%a %U:%G" "$f" 2>/dev/null)
+    ok "${f##*/}  [$perm]"
+  else
+    bad "НЕТ ФАЙЛА: $f"
+  fi
+done
+
+section "Размер dqlite базы"
+dqlite_dir="/var/snap/microk8s/current/var/kubernetes/backend"
+if [[ -d "$dqlite_dir" ]]; then
+  du -sh "$dqlite_dir" 2>/dev/null | sed 's/^/  /'
+  ls -lh "$dqlite_dir" 2>/dev/null | sed 's/^/  /'
+else
+  bad "dqlite директория не найдена: $dqlite_dir"
 fi
 
-section "File descriptors — топ процессов"
-echo ""
-printf "  ${DIM}%-8s %-20s %10s %10s${RST}\n" "PID" "NAME" "FD_COUNT" "FD_LIMIT"
-for pd in /proc/[0-9]*/; do
-  pid=${pd%/}; pid=${pid##*/}
-  [[ -d "${pd}fd" ]] || continue
-  fdc=$(ls "${pd}fd" 2>/dev/null | wc -l)
-  [[ "$fdc" -lt 300 ]] && continue
-  fdl=$(grep "^Max open files" "${pd}limits" 2>/dev/null | awk '{print $4}')
-  name=$(grep "^Name:" "${pd}status" 2>/dev/null | awk '{print $2}')
-  printf "  %-8s %-20s %10s %10s\n" "$pid" "${name:0:20}" "$fdc" "${fdl:-?}"
-  fdl_i=${fdl//[^0-9]/}
-  [[ -n "${fdl_i:-}" ]] && (( fdl_i > 0 )) && (( fdc * 100 / fdl_i > 80 )) && \
-    warn "PID $pid ($name) использует > 80% лимита fd"
-done 2>/dev/null | sort -k3 -rn | head -10
+section "Snap директория — свободное место"
+df -h /var/snap/microk8s/ 2>/dev/null | sed 's/^/  /'
 
-section "Kernel ring buffer — ошибки"
-echo ""
-dmesg_err=$(dmesg 2>/dev/null | grep -iE "error|fault|panic|oops|BUG|Call Trace|segfault|hung_task|soft lockup|hard LOCKUP|RCU stall|I/O error" | tail -15)
-if [[ -n "$dmesg_err" ]]; then
-  echo "$dmesg_err" | while read -r line; do
-    if echo "$line" | grep -qiE "panic|BUG|oops|hard LOCKUP|Call Trace"; then
-      echo -e "  ${RED}$line${RST}"
-      bad "Kernel panic/BUG в dmesg"
-      rec "Изучить: journalctl -k --since '1 hour ago' | grep -iE 'panic|BUG|oops'"
-    elif echo "$line" | grep -qiE "I/O error|blk_update"; then
-      echo -e "  ${RED}$line${RST}"
-      bad "I/O ошибки диска в dmesg"
-      rec "Проверить диск: dmesg | grep -iE 'I/O error|blk_update' | tail -20"
-    elif echo "$line" | grep -qiE "soft lockup|hung_task|RCU stall"; then
-      echo -e "  ${YEL}$line${RST}"
-      warn "CPU lockup/stall в dmesg"
+# ════════════════════════════════════════════════════════════════
+header "8. СЕРТИФИКАТЫ"
+
+section "Проверка срока действия сертификатов"
+CERT_DIR="/var/snap/microk8s/current/certs"
+if [[ -d "$CERT_DIR" ]]; then
+  for cert in "$CERT_DIR"/*.crt; do
+    [[ -f "$cert" ]] || continue
+    expiry=$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2)
+    exp_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo 0)
+    now_epoch=$(date +%s)
+    days_left=$(( (exp_epoch - now_epoch) / 86400 ))
+    if (( days_left < 0 )); then
+      bad "ИСТЁК: $(basename $cert) — ${expiry}"
+    elif (( days_left < 30 )); then
+      warn "Скоро истекает: $(basename $cert) — через ${days_left} дней"
     else
-      echo -e "  ${DIM}$line${RST}"
+      ok "$(basename $cert) — действителен ещё ${days_left} дней"
     fi
   done
 else
-  ok "Критических ошибок в dmesg нет"
+  warn "Директория сертификатов не найдена: $CERT_DIR"
 fi
 
 # ════════════════════════════════════════════════════════════════
-header "6. SYSTEMD СЕРВИСЫ"
+header "9. ВСТРОЕННАЯ ДИАГНОСТИКА MICROK8S"
 
-section "Failed сервисы"
-failed=$(systemctl list-units --state=failed --no-legend --no-pager 2>/dev/null)
-if [[ -n "$failed" ]]; then
-  bad "Упавшие сервисы:"
-  echo "$failed" | head -20 | sed 's/^/  /'
-  rec "Диагностика упавшего сервиса: systemctl status <unit> && journalctl -u <unit> -n 50"
-else
-  ok "Упавших сервисов нет"
-fi
-
-section "Топ сервисов по памяти"
-echo ""
-printf "  ${DIM}%-50s %10s %8s${RST}\n" "UNIT" "MEM(MB)" "TASKS"
-systemctl list-units --type=service --state=active --no-legend --no-pager 2>/dev/null | \
-awk '{print $1}' | while read -r unit; do
-  mem=$(systemctl show "$unit" -p MemoryCurrent --value 2>/dev/null)
-  tasks=$(systemctl show "$unit" -p TasksCurrent --value 2>/dev/null)
-  [[ -z "${mem:-}" || "$mem" == "18446744073709551615" ]] && continue
-  mem_mb=$(( mem/1048576 ))
-  [[ "$mem_mb" -lt 50 ]] && continue
-  printf "  %-50s %10s %8s\n" "$unit" "${mem_mb}MB" "${tasks:-?}"
-done 2>/dev/null | sort -k2 -rn | head -15
-
-section "Journal ошибки за последний час"
-jerr=$(journalctl --since "1 hour ago" -p err --no-pager 2>/dev/null | \
-  grep -v "^-- \|audit\|logind" | tail -15)
-if [[ -n "$jerr" ]]; then
-  warn "Ошибки в journal:"
-  echo "$jerr" | tail -10 | sed 's/^/  /'
-else
-  ok "Ошибок в journal за последний час нет"
-fi
+section "microk8s inspect"
+microk8s inspect 2>&1 | tail -40 | sed 's/^/  /' || warn "microk8s inspect недоступен"
 
 # ════════════════════════════════════════════════════════════════
-header "7. БЕЗОПАСНОСТЬ"
+header "10. ПОПЫТКА ЗАПУСКА"
 
-section "Последние входы"
-last 2>/dev/null | head -10 | sed 's/^/  /'
+section "Попытка старта"
+echo -e "  ${DIM}Выполняем: snap start microk8s...${RST}"
+snap start microk8s 2>&1 | sed 's/^/  /'
+sleep 5
 
-section "Открытые порты на всех интерфейсах (0.0.0.0 / ::)"
-echo ""
-ss -tlnp 2>/dev/null | grep LISTEN | grep -E "0\.0\.0\.0:|:::" | \
-  awk '{printf "  %-40s %s\n", $4, $6}'
+echo -e "  ${DIM}Статус после старта:${RST}"
+snap services microk8s 2>/dev/null | sed 's/^/  /'
 
-section "sudo NOPASSWD"
-if grep -rh "NOPASSWD:ALL" /etc/sudoers /etc/sudoers.d/ 2>/dev/null | grep -v "^#" | grep -q .; then
-  warn "Пользователи с NOPASSWD:ALL sudo:"
-  grep -rh "NOPASSWD:ALL" /etc/sudoers /etc/sudoers.d/ 2>/dev/null | grep -v "^#" | sed 's/^/  /'
-else
-  ok "Опасных sudo правил не найдено"
-fi
-
-section "Авторизованные SSH ключи"
-for uhome in /root /home/*/; do
-  ak="${uhome}.ssh/authorized_keys"
-  [[ -f "$ak" ]] && info "$(basename $uhome): $(wc -l < $ak) ключей"
-done
+echo -e "\n  ${DIM}Ждём ready (30 сек таймаут)...${RST}"
+microk8s status --wait-ready --timeout 30 2>&1 | sed 's/^/  /' || true
 
 # ════════════════════════════════════════════════════════════════
-header "8. ОБНОВЛЕНИЯ"
-
-section "Статус обновлений (apt)"
-if command -v apt-get &>/dev/null; then
-  upgradable=$(apt list --upgradable 2>/dev/null | grep -c "/" || true)
-  security=$(apt list --upgradable 2>/dev/null | grep -c "security" || true)
-  kv "Доступно обновлений:" "$upgradable"
-  kv "Security обновлений:" "$security"
-  (( security > 0  )) && { bad  "Есть ${security} security обновлений!"; rec "Установить: apt-get update && apt-get upgrade -y"; }
-  (( upgradable > 30 && security == 0 )) && warn "Много необновлённых пакетов: $upgradable"
-  (( upgradable == 0 )) && ok "Система обновлена"
-else
-  info "apt недоступен"
-fi
-
-kv "Kernel:"   "$(uname -r)"
-kv "systemd:"  "$(systemctl --version 2>/dev/null | head -1 | awk '{print $2}' || echo N/A)"
-kv "glibc:"    "$(ldd --version 2>/dev/null | head -1 | awk '{print $NF}' || echo N/A)"
-
-# ════════════════════════════════════════════════════════════════
-header "ИТОГОВЫЙ ОТЧЁТ"
+header "ИТОГ"
 
 echo ""
-n_issues=${#ISSUES[@]}
-n_warn=${#WARNINGS[@]}
-n_recs=${#RECOMMENDATIONS[@]}
-
-if (( n_issues == 0 && n_warn == 0 )); then
-  echo -e "  ${GRN}${BOLD}✔  Система в норме — критических проблем не обнаружено${RST}"
-fi
-
-if (( n_issues > 0 )); then
-  echo -e "\n${RED}${BOLD}  ПРОБЛЕМЫ (${n_issues}):${RST}"
-  for i in "${!ISSUES[@]}"; do
-    echo -e "  ${RED}$(( i+1 )).${RST} ${ISSUES[$i]}"
-  done
-fi
-
-if (( n_warn > 0 )); then
-  echo -e "\n${YEL}${BOLD}  ПРЕДУПРЕЖДЕНИЯ (${n_warn}):${RST}"
-  for i in "${!WARNINGS[@]}"; do
-    echo -e "  ${YEL}$(( i+1 )).${RST} ${WARNINGS[$i]}"
-  done
-fi
-
-if (( n_recs > 0 )); then
-  echo -e "\n${CYN}${BOLD}  РЕКОМЕНДАЦИИ (${n_recs}):${RST}"
-  declare -A _seen
-  idx=1
-  for r in "${RECOMMENDATIONS[@]}"; do
-    if [[ -z "${_seen[$r]+_}" ]]; then
-      echo -e "  ${CYN}${idx}.${RST} ${r}"
-      _seen[$r]="_"
-      (( idx++ ))
-    fi
-  done
-fi
-
+echo -e "  ${WHT}Лог сохранён: ${CYN}${LOG}${RST}"
 echo ""
-echo -e "${DIM}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
-echo -e "  Лог: ${WHT}${LOG}${RST}"
-echo -e "${DIM}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+echo -e "  ${WHT}Следующие шаги если не помогло:${RST}"
+echo -e "  ${DIM}1.${RST} Скинуть лог: ${CYN}cat $LOG${RST}"
+echo -e "  ${DIM}2.${RST} Полный inspect: ${CYN}sudo microk8s inspect${RST}"
+echo -e "  ${DIM}3.${RST} Если сертификаты истекли: ${CYN}sudo microk8s refresh-certs --cert ca.crt${RST}"
+echo -e "  ${DIM}4.${RST} Если диск полный: ${CYN}journalctl --vacuum-size=200M && microk8s ctr images prune --all${RST}"
+echo -e "  ${DIM}5.${RST} Крайний случай: ${CYN}sudo snap remove microk8s && sudo snap install microk8s --classic${RST}"
 echo ""
