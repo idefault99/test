@@ -1,77 +1,130 @@
 #!/bin/bash
-# replace-registry.sh — заменить registry-хост во всех деплойментах всех неймспейсов
+# set-resources.sh — изменить requests cpu/memory в деплойментах указанного неймспейса
 
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <old-registry-host> <new-registry-host>"
-  echo "  Example: $0 test.def harbor.test"
-  echo ""
-  echo "  Before: test.def/repo/project/test:tag.1"
-  echo "  After:  harbor.test/repo/project/test:tag.1"
+  echo "Usage: $0 <namespace>"
+  echo "  Example: $0 production"
   exit 1
 }
 
-[[ $# -ne 2 ]] && usage
+[[ $# -ne 1 ]] && usage
 
-OLD_REGISTRY="${1%/}"
-NEW_REGISTRY="${2%/}"
-
+NAMESPACE="$1"
 KUBECTL="${KUBECTL:-kubectl}"
 
-echo "==> Old registry: ${OLD_REGISTRY}"
-echo "==> New registry: ${NEW_REGISTRY}"
+# Проверить что неймспейс существует
+if ! $KUBECTL get namespace "$NAMESPACE" &>/dev/null; then
+  echo "ERROR: namespace '$NAMESPACE' not found"
+  exit 1
+fi
+
+echo "==> Namespace: ${NAMESPACE}"
 echo ""
 
-found=0
-patched=0
+DEPLOYMENTS=$($KUBECTL get deployments -n "$NAMESPACE" \
+  -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
 
-NAMESPACES=$($KUBECTL get namespaces -o jsonpath='{.items[*].metadata.name}')
+if [[ -z "$DEPLOYMENTS" ]]; then
+  echo "No deployments found in namespace '${NAMESPACE}'"
+  exit 0
+fi
 
-for ns in $NAMESPACES; do
-  DEPLOYMENTS=$($KUBECTL get deployments -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null) || continue
-  [[ -z "$DEPLOYMENTS" ]] && continue
+for deploy in $DEPLOYMENTS; do
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "Deployment: ${deploy}"
+  echo ""
 
-  for deploy in $DEPLOYMENTS; do
-    CONTAINERS=$($KUBECTL get deployment "$deploy" -n "$ns" \
-      -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}{range .spec.template.spec.initContainers[*]}{.name}={.image}{"\n"}{end}' \
-      2>/dev/null) || continue
+  # Получить все контейнеры с текущими resources
+  CONTAINER_NAMES=$($KUBECTL get deployment "$deploy" -n "$NAMESPACE" \
+    -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' 2>/dev/null)
 
-    while IFS='=' read -r cname cimage; do
-      [[ -z "$cname" || -z "$cimage" ]] && continue
+  [[ -z "$CONTAINER_NAMES" ]] && continue
 
-      # Хост — всё до первого '/'
-      cur_registry="${cimage%%/*}"
-      # Остаток — путь + тег
-      cur_rest="${cimage#*/}"
+  # Собрать патчи для всех контейнеров деплоймента
+  PATCHES=()
 
-      if [[ "$cur_registry" == "$OLD_REGISTRY" ]]; then
-        new_full="${NEW_REGISTRY}/${cur_rest}"
-        ((found++)) || true
+  while IFS= read -r cname; do
+    [[ -z "$cname" ]] && continue
 
-        echo "[${ns}/${deploy}] ${cname}"
-        echo "  old: ${cimage}"
-        echo "  new: ${new_full}"
+    # Текущие значения
+    cur_cpu=$($KUBECTL get deployment "$deploy" -n "$NAMESPACE" \
+      -o jsonpath="{.spec.template.spec.containers[?(@.name==\"${cname}\")].resources.requests.cpu}" \
+      2>/dev/null)
+    cur_mem=$($KUBECTL get deployment "$deploy" -n "$NAMESPACE" \
+      -o jsonpath="{.spec.template.spec.containers[?(@.name==\"${cname}\")].resources.requests.memory}" \
+      2>/dev/null)
 
-        IS_INIT=$($KUBECTL get deployment "$deploy" -n "$ns" \
-          -o jsonpath="{.spec.template.spec.initContainers[?(@.name==\"${cname}\")].name}" \
-          2>/dev/null)
-        CTYPE=$([[ -n "$IS_INIT" ]] && echo "initContainers" || echo "containers")
+    echo "  Container: ${cname}"
+    echo "  Current requests:"
+    echo "    cpu:    ${cur_cpu:-<not set>}"
+    echo "    memory: ${cur_mem:-<not set>}"
+    echo ""
 
-        PATCH="{\"spec\":{\"template\":{\"spec\":{\"${CTYPE}\":[{\"name\":\"${cname}\",\"image\":\"${new_full}\"}]}}}}"
+    # Спросить новые значения
+    read -rp "  New cpu request    (enter to skip) [${cur_cpu:-<not set>}]: " new_cpu
+    read -rp "  New memory request (enter to skip) [${cur_mem:-<not set>}]: " new_mem
+    echo ""
 
-        if $KUBECTL patch deployment "$deploy" -n "$ns" \
-            --type=strategic -p "$PATCH" > /dev/null 2>&1; then
-          echo "  ✓ patched"
-          ((patched++)) || true
-        else
-          echo "  ✗ FAILED"
-        fi
-        echo ""
-      fi
-    done <<< "$CONTAINERS"
-  done
+    # Если ничего не введено — пропустить контейнер
+    if [[ -z "$new_cpu" && -z "$new_mem" ]]; then
+      echo "  → Skipped"
+      echo ""
+      continue
+    fi
+
+    # Использовать текущие если не введено новое
+    final_cpu="${new_cpu:-$cur_cpu}"
+    final_mem="${new_mem:-$cur_mem}"
+
+    echo "  Will set for '${cname}':"
+    echo "    cpu:    ${cur_cpu:-<not set>} → ${final_cpu:-<not set>}"
+    echo "    memory: ${cur_mem:-<not set>} → ${final_mem:-<not set>}"
+    echo ""
+
+    # Собрать json для этого контейнера
+    RESOURCES_JSON="{}"
+    if [[ -n "$final_cpu" && -n "$final_mem" ]]; then
+      RESOURCES_JSON="{\"cpu\":\"${final_cpu}\",\"memory\":\"${final_mem}\"}"
+    elif [[ -n "$final_cpu" ]]; then
+      RESOURCES_JSON="{\"cpu\":\"${final_cpu}\"}"
+    elif [[ -n "$final_mem" ]]; then
+      RESOURCES_JSON="{\"memory\":\"${final_mem}\"}"
+    fi
+
+    PATCHES+=("{\"name\":\"${cname}\",\"resources\":{\"requests\":${RESOURCES_JSON}}}")
+
+  done <<< "$CONTAINER_NAMES"
+
+  # Если нечего патчить — следующий деплоймент
+  if [[ ${#PATCHES[@]} -eq 0 ]]; then
+    echo "  → No changes for ${deploy}"
+    echo ""
+    continue
+  fi
+
+  # Подтверждение перед применением
+  read -rp "  Apply changes to deployment '${deploy}'? [y/N]: " confirm
+  echo ""
+  if [[ "${confirm,,}" != "y" ]]; then
+    echo "  → Skipped"
+    echo ""
+    continue
+  fi
+
+  # Собрать итоговый патч из массива
+  CONTAINERS_JSON=$(IFS=','; echo "${PATCHES[*]}")
+  PATCH="{\"spec\":{\"template\":{\"spec\":{\"containers\":[${CONTAINERS_JSON}]}}}}"
+
+  if $KUBECTL patch deployment "$deploy" -n "$NAMESPACE" \
+      --type=strategic -p "$PATCH" > /dev/null 2>&1; then
+    echo "  ✓ Patched: ${deploy}"
+  else
+    echo "  ✗ FAILED:  ${deploy}"
+  fi
+  echo ""
+
 done
 
-echo "==> Done. Found: ${found}, Patched: ${patched}"
+echo "==> Done"
