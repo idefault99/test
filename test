@@ -1,165 +1,471 @@
-#!/bin/bash
-# =============================================================
-# Helm — Redeploy all releases via kubectl apply
-# Совместим с MicroK8s
-#
-# Использование:
-#   ./helm-redeploy-all.sh                    # все неймспейсы
-#   ./helm-redeploy-all.sh my-namespace       # только один неймспейс
-# =============================================================
-set -euo pipefail
+#!/usr/bin/env bash
+# ================================================================
+#  microk8s-investigate.sh
+#  Глубокая диагностика MicroK8s — только встроенные средства Ubuntu
+#  Находит причину и даёт конкретные рекомендации
+# ================================================================
+set -uo pipefail
 
-# --- Аргументы ---
-FILTER_NAMESPACE="${1:-}"
+# ── цвета ────────────────────────────────────────────────────────
+RED='\033[0;31m'; YEL='\033[0;33m'; GRN='\033[0;32m'
+CYN='\033[0;36m'; WHT='\033[1;37m'; DIM='\033[2m'
+BOLD='\033[1m';   RST='\033[0m'
 
-# --- Определяем команды для microk8s ---
-if command -v microk8s.helm3 &>/dev/null; then
-  HELM="microk8s.helm3"
-  KUBECTL="microk8s.kubectl"
-elif command -v microk8s &>/dev/null; then
-  helm() { microk8s helm "$@"; }
-  kubectl() { microk8s kubectl "$@"; }
-  export -f helm kubectl
-  HELM="helm"
-  KUBECTL="kubectl"
-elif command -v helm &>/dev/null; then
-  HELM="helm"
-  KUBECTL="kubectl"
+# ── вывод ────────────────────────────────────────────────────────
+header() { echo -e "\n${CYN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  $1\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"; }
+section() { echo -e "\n${WHT}${BOLD}▶ $1${RST}\n${DIM}──────────────────────────────────────────────────────${RST}"; }
+ok()      { echo -e "  ${GRN}✔${RST}  $1"; }
+warn()    { echo -e "  ${YEL}⚠${RST}  $1"; WARNINGS+=("$1"); }
+bad()     { echo -e "  ${RED}✘${RST}  $1"; ISSUES+=("$1"); }
+info()    { echo -e "  ${DIM}·${RST}  $1"; }
+kv()      { printf "  ${WHT}%-36s${RST} %s\n" "$1" "$2"; }
+rec()     { RECOMMENDATIONS+=("$1"); }
+
+# ── глобальные массивы для итогового отчёта ──────────────────────
+declare -a ISSUES=()
+declare -a WARNINGS=()
+declare -a RECOMMENDATIONS=()
+
+# ── root check ───────────────────────────────────────────────────
+[[ $EUID -ne 0 ]] && { echo -e "${RED}Запустите с sudo${RST}"; exit 1; }
+
+LOG="/tmp/mk8s-investigate-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo -e "${BOLD}"
+cat << 'BANNER'
+  ╦╔╗╔╦  ╦╔═╔═╗╔═╗  ╔╦╗╦╔═╗╔═╗
+  ║║║║╚╗╔╝╠╩╗╠═╣╚═╗   ║║║╠═╣║ ╦
+  ╩╝╚╝ ╚╝ ╩ ╩╩ ╩╚═╝  ═╩╝╩╩ ╩╚═╝
+  MicroK8s — Диагностика и лечение
+BANNER
+echo -e "${RST}"
+echo -e "${DIM}  $(date '+%Y-%m-%d %H:%M:%S')  |  host: $(hostname)  |  лог: $LOG${RST}"
+
+# ════════════════════════════════════════════════════════════════
+header "1. ПАМЯТЬ"
+
+section "Текущее состояние RAM"
+mem_total=$(grep MemTotal   /proc/meminfo | awk '{print $2}')
+mem_avail=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+mem_free=$(grep  MemFree    /proc/meminfo | awk '{print $2}')
+mem_cached=$(grep "^Cached:" /proc/meminfo | awk '{print $2}')
+swap_total=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
+swap_free=$(grep  SwapFree  /proc/meminfo | awk '{print $2}')
+swap_used=$(( swap_total - swap_free ))
+
+mem_used=$(( mem_total - mem_avail ))
+mem_pct=$(( mem_used * 100 / mem_total ))
+mem_avail_pct=$(( mem_avail * 100 / mem_total ))
+
+kv "Total:"     "$(( mem_total  / 1024 )) MB"
+kv "Used:"      "$(( mem_used   / 1024 )) MB  (${mem_pct}%)"
+kv "Available:" "$(( mem_avail  / 1024 )) MB  (${mem_avail_pct}%)"
+kv "Cached:"    "$(( mem_cached / 1024 )) MB"
+
+(( mem_avail_pct < 5  )) && { bad  "КРИТИЧНО: доступно менее 5% RAM — система на грани OOM"; rec "СРОЧНО: sudo snap stop microk8s.daemon-kubelite — освободить RAM"; }
+(( mem_avail_pct < 15 )) && (( mem_avail_pct >= 5  )) && { warn "Мало доступной RAM (${mem_avail_pct}%)"; rec "Перезапустить kubelite: sudo snap restart microk8s.daemon-kubelite"; }
+(( mem_avail_pct >= 15 )) && ok "RAM в допустимых пределах (${mem_avail_pct}% доступно)"
+
+if (( swap_total > 0 )); then
+  swap_pct=$(( swap_used * 100 / swap_total ))
+  kv "Swap used:" "$(( swap_used / 1024 )) MB  (${swap_pct}%)"
+  (( swap_pct > 20 )) && { warn "Активный swap ${swap_pct}% — нехватка RAM"; rec "Добавить RAM или уменьшить нагрузку на кластер"; }
 else
-  echo "ERROR: helm не найден"
-  exit 1
+  warn "Swap не настроен — при нехватке RAM возможен OOM"
+  rec "Добавить swap: fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
 fi
 
-echo "Используем: $HELM / $KUBECTL"
+section "OOM killer"
+oom_count=$(dmesg 2>/dev/null | grep -c "Out of memory\|oom-kill" || true)
+if (( oom_count > 0 )); then
+  bad "OOM killer срабатывал $oom_count раз(а)!"
+  dmesg 2>/dev/null | grep "Out of memory\|oom-kill\|Killed process" | tail -5 | sed 's/^/  /'
+  rec "OOM зафиксирован — критически не хватает RAM. Добавить swap или RAM"
+else
+  ok "OOM killer не срабатывал"
+fi
+
+section "Топ процессов по RAM"
 echo ""
+# Используем /proc для чистого чтения без ps флагов
+printf "  ${DIM}%-8s %-12s %8s %8s %s${RST}\n" "PID" "USER" "RSS(MB)" "%MEM" "COMMAND"
+for pid in $(ls /proc | grep '^[0-9]' | sort -n); do
+  [[ -f /proc/$pid/status && -f /proc/$pid/cmdline ]] || continue
+  rss=$(grep VmRSS /proc/$pid/status 2>/dev/null | awk '{print $2}')
+  [[ -z "$rss" || "$rss" -lt 102400 ]] && continue  # показывать только > 100MB
+  user=$(stat -c%U /proc/$pid 2>/dev/null || echo "?")
+  cmd=$(cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ' | cut -c1-40)
+  rss_mb=$(( rss / 1024 ))
+  rss_pct=$(( rss * 100 / mem_total ))
+  printf "  %-8s %-12s %8s %8s %s\n" "$pid" "$user" "${rss_mb}MB" "${rss_pct}%" "$cmd"
+done | sort -k4 -rn | head -10
 
-if [[ -n "$FILTER_NAMESPACE" ]]; then
-  echo "Фильтр: только namespace '$FILTER_NAMESPACE'"
-else
-  echo "Режим: все неймспейсы"
-fi
+# ════════════════════════════════════════════════════════════════
+header "2. CPU И НАГРУЗКА"
+
+section "Load average"
+load=$(cat /proc/loadavg)
+load1=$(echo $load | awk '{print $1}')
+load5=$(echo $load | awk '{print $2}')
+load15=$(echo $load | awk '{print $3}')
+cpus=$(nproc)
+load1_int=$(echo $load1 | cut -d. -f1)
+
+kv "CPU cores:"       "$cpus"
+kv "Load 1/5/15 мин:" "$load1 / $load5 / $load15"
+
+(( load1_int > cpus * 3 )) && { bad  "Нагрузка критическая (load1=${load1} при ${cpus} CPU)"; rec "Найти тяжёлый процесс: cat /proc/\$(ls /proc|grep '^[0-9]'|xargs -I{} sh -c 'grep -l . /proc/{}/stat 2>/dev/null'|head -1)/cmdline"; }
+(( load1_int > cpus     )) && (( load1_int <= cpus * 3 )) && warn "Нагрузка выше нормы (load1=${load1})"
+(( load1_int <= cpus    )) && ok "Нагрузка в норме"
+
+section "Контекстные переключения и прерывания"
+ctx=$(grep ctxt /proc/stat | awk '{print $2}')
+intr=$(grep "^intr" /proc/stat | awk '{print $2}')
+kv "Context switches:" "$ctx"
+kv "Interrupts:"       "$intr"
+
+# ════════════════════════════════════════════════════════════════
+header "3. ДИСК"
+
+section "Использование разделов"
+while IFS= read -r line; do
+  pct=$(echo "$line" | awk '{print $5}' | tr -d '%')
+  mount=$(echo "$line" | awk '{print $6}')
+  [[ "$pct" =~ ^[0-9]+$ ]] || continue
+  fs=$(echo "$line" | awk '{print $1}')
+  size=$(echo "$line" | awk '{print $2}')
+  used=$(echo "$line" | awk '{print $3}')
+  if (( pct > 90 )); then
+    bad "Диск ${mount} заполнен на ${pct}% (${used}/${size})"
+    rec "Очистить диск ${mount}: journalctl --vacuum-size=500M && microk8s ctr images prune --all"
+  elif (( pct > 75 )); then
+    warn "Диск ${mount} заполнен на ${pct}%"
+  else
+    ok "${mount} — ${pct}% (${used}/${size})"
+  fi
+done < <(df -h --output=source,size,used,avail,pcent,target | grep -v tmpfs | grep -v udev | tail -n +2)
+
+section "I/O статистика (из /proc/diskstats)"
 echo ""
-
-# --- Цвета ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# --- Результаты ---
-DEPLOYED=()
-ERRORS=()
-
-BACKUP_ROOT="./helm-backup-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$BACKUP_ROOT"
-
-# --- Получаем неймспейсы ---
-if [[ -n "$FILTER_NAMESPACE" ]]; then
-  # Проверяем что неймспейс существует
-  if ! $KUBECTL get namespace "$FILTER_NAMESPACE" &>/dev/null; then
-    echo -e "${RED}ERROR: namespace '$FILTER_NAMESPACE' не найден${NC}"
-    exit 1
-  fi
-  NAMESPACES="$FILTER_NAMESPACE"
-else
-  NAMESPACES=$($KUBECTL get namespaces -o jsonpath='{.items[*].metadata.name}')
-fi
-
-for NS in $NAMESPACES; do
-  echo "--- Обрабатываем namespace: $NS ---"
-
-  # Получаем релизы в неймспейсе
-  RELEASES=$($HELM list -n "$NS" -q 2>/dev/null || true)
-
-  if [[ -z "$RELEASES" ]]; then
-    echo -e "  ${YELLOW}Релизов нет${NC}"
-    ERRORS+=("$NS|—|Нет helm релизов")
-    continue
-  fi
-
-  for RELEASE in $RELEASES; do
-    echo -e "  ${GREEN}Релиз: $RELEASE${NC}"
-
-    BACKUP_DIR="$BACKUP_ROOT/$NS/$RELEASE"
-    mkdir -p "$BACKUP_DIR"
-
-    # --- Info ---
-    RELEASE_JSON=$($HELM list -n "$NS" -o json 2>/dev/null | \
-      jq '.[] | select(.name=="'"$RELEASE"'")' || true)
-
-    if [[ -z "$RELEASE_JSON" ]]; then
-      echo -e "  ${RED}Не удалось получить info${NC}"
-      ERRORS+=("$NS|$RELEASE|Не удалось получить helm list -o json")
-      continue
-    fi
-
-    CHART_FULL=$(echo "$RELEASE_JSON" | jq -r '.chart')
-    REVISION=$(echo "$RELEASE_JSON" | jq -r '.revision')
-
-    # --- Manifest ---
-    if ! $HELM get manifest "$RELEASE" -n "$NS" > "$BACKUP_DIR/manifest.yaml" 2>/dev/null; then
-      echo -e "  ${RED}Не удалось получить manifest${NC}"
-      ERRORS+=("$NS|$RELEASE|Не удалось получить helm manifest")
-      continue
-    fi
-
-    # --- Values ---
-    $HELM get values "$RELEASE" -n "$NS" > "$BACKUP_DIR/values.yaml" 2>/dev/null || true
-
-    # --- kubectl apply ---
-    if $KUBECTL apply -f "$BACKUP_DIR/manifest.yaml" -n "$NS" > "$BACKUP_DIR/apply.log" 2>&1; then
-      echo -e "  ${GREEN}OK${NC}"
-      DEPLOYED+=("$NS|$RELEASE|$REVISION|$CHART_FULL")
-    else
-      ERROR_MSG=$(tail -3 "$BACKUP_DIR/apply.log" | tr '\n' ' ')
-      echo -e "  ${RED}ОШИБКА: $ERROR_MSG${NC}"
-      ERRORS+=("$NS|$RELEASE|$ERROR_MSG")
-    fi
-
-  done
+printf "  ${DIM}%-12s %12s %12s %12s %12s${RST}\n" "DEVICE" "reads" "read_sectors" "writes" "write_sectors"
+grep -E " (sd|nvme|vd)[a-z]+ " /proc/diskstats 2>/dev/null | while read -r line; do
+  dev=$(echo "$line" | awk '{print $3}')
+  reads=$(echo "$line" | awk '{print $4}')
+  rsect=$(echo "$line" | awk '{print $6}')
+  writes=$(echo "$line" | awk '{print $8}')
+  wsect=$(echo "$line" | awk '{print $10}')
+  printf "  %-12s %12s %12s %12s %12s\n" "$dev" "$reads" "$rsect" "$writes" "$wsect"
 done
 
-# =============================================================
-# --- Таблица 1: Успешно задеплоено ---
-# =============================================================
-echo ""
-echo "=========================================="
-echo "  ЗАДЕПЛОЕНО"
-echo "=========================================="
-printf "%-30s %-25s %-10s %-30s\n" "NAMESPACE" "RELEASE" "REVISION" "CHART"
-printf "%-30s %-25s %-10s %-30s\n" \
-  "------------------------------" "-------------------------" \
-  "----------" "------------------------------"
+section "Размеры ключевых каталогов MicroK8s"
+for dir in \
+  "/var/snap/microk8s/current/var/kubernetes/backend" \
+  "/var/snap/microk8s/common" \
+  "/var/lib/containerd" \
+  "/var/log"; do
+  [[ -d "$dir" ]] || continue
+  sz=$(du -sh "$dir" 2>/dev/null | cut -f1)
+  printf "  ${WHT}%-50s${RST} %s\n" "$dir" "$sz"
+done
 
-if [[ ${#DEPLOYED[@]} -eq 0 ]]; then
-  echo "  Нет успешных деплоев"
+# dqlite размер
+dqlite_dir="/var/snap/microk8s/current/var/kubernetes/backend"
+if [[ -d "$dqlite_dir" ]]; then
+  dqlite_kb=$(du -sk "$dqlite_dir" 2>/dev/null | cut -f1)
+  dqlite_mb=$(( dqlite_kb / 1024 ))
+  echo ""
+  (( dqlite_mb > 3000 )) && { bad  "dqlite база ${dqlite_mb} MB — критически большая"; rec "Принудительная compaction dqlite или пересоздание базы"; }
+  (( dqlite_mb > 1500 )) && (( dqlite_mb <= 3000 )) && { warn "dqlite база ${dqlite_mb} MB — выше нормы"; rec "Очистить мусор: kubectl delete pods -A --field-selector=status.phase=Succeeded"; }
+  (( dqlite_mb <= 1500 )) && ok "dqlite база ${dqlite_mb} MB — в норме"
+fi
+
+section "Большие файлы в /var/log (> 50MB)"
+found_large=0
+find /var/log -type f -size +50M 2>/dev/null | while read -r f; do
+  sz=$(du -sh "$f" 2>/dev/null | cut -f1)
+  warn "Большой лог: $sz  $f"
+  found_large=1
+done
+(( found_large == 0 )) && ok "Больших логов не найдено"
+
+# ════════════════════════════════════════════════════════════════
+header "4. MICROK8S СЕРВИСЫ"
+
+section "Статус демонов"
+declare -A SVC_NAMES=(
+  ["snap.microk8s.daemon-kubelite"]="kubelite (apiserver+kubelet)"
+  ["snap.microk8s.daemon-k8s-dqlite"]="k8s-dqlite (база данных)"
+  ["snap.microk8s.daemon-containerd"]="containerd (runtime)"
+  ["snap.microk8s.daemon-cluster-agent"]="cluster-agent"
+)
+
+for svc in "${!SVC_NAMES[@]}"; do
+  name="${SVC_NAMES[$svc]}"
+  if systemctl is-active --quiet "$svc" 2>/dev/null; then
+    # RSS процесса
+    main_pid=$(systemctl show -p MainPID --value "$svc" 2>/dev/null || echo "0")
+    if [[ "$main_pid" != "0" && -f "/proc/$main_pid/status" ]]; then
+      rss=$(grep VmRSS /proc/$main_pid/status 2>/dev/null | awk '{print $2}')
+      rss_mb=$(( ${rss:-0} / 1024 ))
+      rss_pct=$(( ${rss:-0} * 100 / mem_total ))
+      ok "${name}  [RSS: ${rss_mb} MB / ${rss_pct}%]"
+      (( rss_pct > 50 )) && { bad "${name} потребляет ${rss_pct}% RAM"; rec "Обновить microk8s: sudo snap refresh microk8s --channel=1.32/stable (фикс memory leak)"; }
+      (( rss_pct > 30 )) && (( rss_pct <= 50 )) && warn "${name} потребляет ${rss_pct}% RAM"
+    else
+      ok "${name}"
+    fi
+  else
+    bad "${name} — НЕ ЗАПУЩЕН"
+    rec "Запустить: sudo snap start ${svc##snap.microk8s.}"
+  fi
+done
+
+section "Версия MicroK8s"
+snap_info=$(snap info microk8s 2>/dev/null)
+installed_ver=$(echo "$snap_info" | grep "installed:" | awk '{print $2}')
+channel=$(echo "$snap_info" | grep "tracking:" | awk '{print $2}')
+kv "Версия:" "$installed_ver"
+kv "Channel:" "$channel"
+
+# Дата установки snap revision
+snap_rev=$(snap info microk8s 2>/dev/null | grep "installed:" | awk '{print $3}' | tr -d '()')
+kv "Snap revision:" "$snap_rev"
+
+# Проверить номер ревизии — фикс memory leak вошёл в ревизии после февраля 2025
+# Для 1.30: rev > ~7200, для 1.31: > ~7100, для 1.32: > ~7000
+warn "Проверь дату установки snap — фикс memory leak вошёл 13-14 февраля 2025"
+info "Команда: snap info microk8s | grep installed"
+rec "Обновить microk8s до последней ревизии: sudo snap refresh microk8s"
+
+# ════════════════════════════════════════════════════════════════
+header "5. АНАЛИЗ ЛОГОВ KUBELITE"
+
+section "Таймауты и ошибки (последние 10 минут)"
+echo ""
+
+# Читаем journald через /run/log/journal напрямую
+timeout_count=$(journalctl -u snap.microk8s.daemon-kubelite --since "10 minutes ago" --no-pager 2>/dev/null | grep -c "timeout\|Timeout" || true)
+deadline_count=$(journalctl -u snap.microk8s.daemon-kubelite --since "10 minutes ago" --no-pager 2>/dev/null | grep -c "deadline exceeded" || true)
+dqlite_fail_count=$(journalctl -u snap.microk8s.daemon-kubelite --since "10 minutes ago" --no-pager 2>/dev/null | grep -c "Write to database call failed" || true)
+watchcache_count=$(journalctl -u snap.microk8s.daemon-kubelite --since "10 minutes ago" --no-pager 2>/dev/null | grep -c "watchCache locked" || true)
+
+kv "Handler timeout:"           "$timeout_count"
+kv "context deadline exceeded:" "$deadline_count"
+kv "Write to database failed:"  "$dqlite_fail_count"
+kv "watchCache locked:"         "$watchcache_count"
+
+(( timeout_count > 10 )) && { bad "Массовые таймауты apiserver (${timeout_count} за 10 мин)"; }
+(( dqlite_fail_count > 5 )) && { bad "dqlite не успевает писать (${dqlite_fail_count} ошибок)"; rec "Проверить скорость диска: dd if=/dev/zero of=/tmp/test.img bs=1G count=1 oflag=dsync"; }
+(( watchcache_count > 5 )) && { bad "watchCache блокируется (${watchcache_count} раз) — тяжёлые LIST запросы"; }
+
+section "Самые тяжёлые запросы (total time > 5s)"
+echo ""
+journalctl -u snap.microk8s.daemon-kubelite --since "30 minutes ago" --no-pager 2>/dev/null \
+  | grep "total time:" \
+  | grep -oP 'total time: \K[0-9]+' \
+  | awk '$1 > 5000' \
+  | sort -rn \
+  | head -5 \
+  | while read -r ms; do
+      echo -e "  ${RED}${ms}ms${RST}"
+    done
+
+section "Клиенты создающие нагрузку"
+echo ""
+echo -e "  ${DIM}Топ user-agent по количеству запросов за 30 мин:${RST}"
+journalctl -u snap.microk8s.daemon-kubelite --since "30 minutes ago" --no-pager 2>/dev/null \
+  | grep -oP 'user-agent:\K[^,]+' \
+  | sort | uniq -c | sort -rn | head -10 \
+  | while read -r count agent; do
+      printf "  %6s  %s\n" "$count" "$agent"
+    done
+
+section "Dashboard — проверка"
+dashboard_hits=$(journalctl -u snap.microk8s.daemon-kubelite --since "30 minutes ago" --no-pager 2>/dev/null \
+  | grep -c "dashboard" || true)
+secrets_list=$(journalctl -u snap.microk8s.daemon-kubelite --since "30 minutes ago" --no-pager 2>/dev/null \
+  | grep -c "GET.*api/v1/secrets" || true)
+
+kv "Запросов от dashboard:" "$dashboard_hits"
+kv "LIST /api/v1/secrets:"  "$secrets_list"
+
+(( dashboard_hits > 0 )) && { bad "Dashboard активен и создаёт нагрузку"; rec "Отключить dashboard: sudo microk8s disable dashboard"; }
+(( secrets_list > 5 ))   && { bad "Массовые LIST secrets (${secrets_list}) — блокируют watchCache"; rec "Найти источник: grep 'api/v1/secrets' в логах kubelite"; }
+
+# ════════════════════════════════════════════════════════════════
+header "6. СЕТЬ И СОЕДИНЕНИЯ"
+
+section "Открытые соединения"
+# Читаем /proc/net напрямую
+tcp_total=$(wc -l < /proc/net/tcp 2>/dev/null || echo 0)
+tcp6_total=$(wc -l < /proc/net/tcp6 2>/dev/null || echo 0)
+total_conn=$(( tcp_total + tcp6_total - 2 ))  # минус заголовки
+
+kv "TCP соединений:" "$total_conn"
+(( total_conn > 10000 )) && { bad "Очень много соединений: $total_conn"; rec "Проверить утечки соединений в компонентах кластера"; }
+
+# CLOSE_WAIT через /proc/net/tcp (state 08 = CLOSE_WAIT)
+cw=$(grep -c " 08 " /proc/net/tcp 2>/dev/null || true)
+cw6=$(grep -c " 08 " /proc/net/tcp6 2>/dev/null || true)
+close_wait=$(( cw + cw6 ))
+kv "CLOSE_WAIT:" "$close_wait"
+(( close_wait > 100 )) && { warn "Много CLOSE_WAIT соединений ($close_wait)"; }
+
+section "Порты MicroK8s"
+for port in 6443 2380 19001 10250 10255; do
+  if grep -q ":$(printf '%04X' $port) " /proc/net/tcp6 2>/dev/null || \
+     grep -q ":$(printf '%04X' $port) " /proc/net/tcp 2>/dev/null; then
+    ok "Порт $port слушает"
+  else
+    bad "Порт $port не слушает"
+    [[ $port == 6443  ]] && rec "apiserver не отвечает — проверить: sudo snap logs microk8s.daemon-kubelite"
+    [[ $port == 19001 ]] && rec "dqlite не слушает — проверить: sudo snap start microk8s.daemon-k8s-dqlite"
+  fi
+done
+
+# ════════════════════════════════════════════════════════════════
+header "7. ЯДРО И СИСТЕМА"
+
+section "Kernel параметры влияющие на k8s"
+vm_swappiness=$(cat /proc/sys/vm/swappiness)
+vm_overcommit=$(cat /proc/sys/vm/overcommit_memory)
+net_somaxconn=$(cat /proc/sys/net/core/somaxconn)
+fs_inotify=$(cat /proc/sys/fs/inotify/max_user_watches)
+
+kv "vm.swappiness:"                "$vm_swappiness"
+kv "vm.overcommit_memory:"         "$vm_overcommit"
+kv "net.core.somaxconn:"           "$net_somaxconn"
+kv "fs.inotify.max_user_watches:"  "$fs_inotify"
+
+(( vm_swappiness > 10 )) && { warn "vm.swappiness=${vm_swappiness} — рекомендуется 0-10 для k8s"; rec "echo 'vm.swappiness=10' >> /etc/sysctl.conf && sysctl -p"; }
+(( net_somaxconn < 4096 )) && { warn "net.core.somaxconn слишком мало для k8s"; rec "echo 'net.core.somaxconn=4096' >> /etc/sysctl.conf && sysctl -p"; }
+(( fs_inotify < 524288 )) && { warn "fs.inotify.max_user_watches мало — возможны проблемы с watch"; rec "echo 'fs.inotify.max_user_watches=524288' >> /etc/sysctl.conf && sysctl -p"; }
+
+section "Дата последней загрузки"
+uptime_sec=$(cat /proc/uptime | awk '{print int($1)}')
+uptime_days=$(( uptime_sec / 86400 ))
+uptime_hours=$(( (uptime_sec % 86400) / 3600 ))
+kv "Uptime:" "${uptime_days}д ${uptime_hours}ч"
+(( uptime_days > 90 )) && warn "Нода работает ${uptime_days} дней без перезагрузки"
+
+section "Дисковый I/O — скорость записи"
+info "Тест записи 512MB (может занять 10-30 секунд)..."
+dd_result=$(dd if=/dev/zero of=/tmp/_mk8s_test.img bs=64M count=8 oflag=dsync 2>&1 | tail -1)
+rm -f /tmp/_mk8s_test.img
+write_speed=$(echo "$dd_result" | grep -oP '[0-9.]+ [MGk]B/s' | tail -1)
+kv "Скорость записи:" "$write_speed"
+
+# Извлечь МБ/с для сравнения
+speed_val=$(echo "$write_speed" | grep -oP '[0-9.]+')
+speed_unit=$(echo "$write_speed" | grep -oP '[MGk]B/s')
+if [[ "$speed_unit" == "MB/s" ]]; then
+  speed_int=${speed_val%.*}
+  (( speed_int < 50  )) && { bad  "Диск очень медленный (${write_speed}) — dqlite будет таймаутиться"; rec "Проверить диск: smartctl -a /dev/sda или перенести dqlite на SSD"; }
+  (( speed_int < 100 )) && (( speed_int >= 50 )) && { warn "Диск медленный (${write_speed}) — возможны таймауты dqlite"; }
+  (( speed_int >= 100 )) && ok "Скорость диска нормальная (${write_speed})"
+elif [[ "$speed_unit" == "kB/s" ]]; then
+  bad "Диск критически медленный (${write_speed}) — dqlite не может работать нормально"
+  rec "КРИТИЧНО: заменить диск или использовать SSD для /var/snap/microk8s"
+fi
+
+# ════════════════════════════════════════════════════════════════
+header "8. MICROK8S ОБЪЕКТЫ (если apiserver отвечает)"
+
+section "Попытка подключения к apiserver"
+api_ok=false
+if timeout 5 microk8s kubectl get nodes --request-timeout=5s &>/dev/null 2>&1; then
+  api_ok=true
+  ok "apiserver отвечает"
 else
-  for ROW in "${DEPLOYED[@]}"; do
-    IFS='|' read -r NS REL REV CHART <<< "$ROW"
-    printf "%-30s %-25s %-10s %-30s\n" "$NS" "$REL" "$REV" "$CHART"
+  warn "apiserver не отвечает — пропускаем проверку объектов"
+fi
+
+if $api_ok; then
+  section "Проблемные pods"
+  bad_pods=$(microk8s kubectl get pods -A --no-headers 2>/dev/null \
+    | grep -v "Running\|Completed" || true)
+  if [[ -n "$bad_pods" ]]; then
+    bad "Проблемные pods:"
+    echo "$bad_pods" | head -20 | sed 's/^/  /'
+    rec "Проверить проблемные pods: microk8s kubectl describe pod <name> -n <namespace>"
+  else
+    ok "Все pods Running/Completed"
+  fi
+
+  section "Secrets по namespace"
+  secret_total=$(microk8s kubectl get secrets -A --no-headers 2>/dev/null | wc -l || echo "?")
+  kv "Всего secrets:" "$secret_total"
+  (( secret_total > 2000 )) && { bad "Очень много secrets (${secret_total}) — тяжёлые LIST запросы"; rec "Проверить helm history: helm list -A | awk '{print \$1}' | xargs -I{} helm history {} --max 20"; }
+  (( secret_total > 1000 )) && (( secret_total <= 2000 )) && warn "Много secrets (${secret_total})"
+
+  echo ""
+  echo -e "  ${DIM}По namespace (топ-10):${RST}"
+  microk8s kubectl get secrets -A --no-headers 2>/dev/null \
+    | awk '{print $1}' | sort | uniq -c | sort -rn | head -10 \
+    | while read -r count ns; do
+        printf "  %6s  %s\n" "$count" "$ns"
+      done
+
+  section "Helm releases — история"
+  if command -v helm &>/dev/null; then
+    echo -e "  ${DIM}Ревизий на релиз (топ-10):${RST}"
+    helm list -A --no-headers 2>/dev/null \
+      | awk '{print $1, $2}' \
+      | while read -r rel ns; do
+          count=$(helm history "$rel" -n "$ns" --max 100 2>/dev/null | wc -l || echo 1)
+          echo "$count $rel ($ns)"
+        done | sort -rn | head -10 \
+        | while read -r count rel ns; do
+            (( count > 10 )) && printf "  ${YEL}⚠${RST}  %3s ревизий  %s\n" "$count" "$rel $ns" \
+                             || printf "  ${GRN}✔${RST}  %3s ревизий  %s\n" "$count" "$rel $ns"
+          done
+    rec "Ограничить helm history: helm upgrade <release> <chart> --history-max 3"
+  fi
+fi
+
+# ════════════════════════════════════════════════════════════════
+header "ИТОГОВЫЙ ОТЧЁТ"
+
+echo ""
+echo -e "${RED}${BOLD}ПРОБЛЕМЫ (${#ISSUES[@]}):${RST}"
+if (( ${#ISSUES[@]} == 0 )); then
+  echo -e "  ${GRN}Критических проблем не обнаружено${RST}"
+else
+  for i in "${!ISSUES[@]}"; do
+    echo -e "  ${RED}$((i+1)).${RST} ${ISSUES[$i]}"
   done
 fi
 
-# =============================================================
-# --- Таблица 2: Ошибки ---
-# =============================================================
 echo ""
-echo "=========================================="
-echo "  ОШИБКИ / ПРОПУЩЕНО"
-echo "=========================================="
-printf "%-30s %-25s %-50s\n" "NAMESPACE" "RELEASE" "ПРИЧИНА"
-printf "%-30s %-25s %-50s\n" \
-  "------------------------------" "-------------------------" \
-  "--------------------------------------------------"
-
-if [[ ${#ERRORS[@]} -eq 0 ]]; then
-  echo "  Ошибок нет"
+echo -e "${YEL}${BOLD}ПРЕДУПРЕЖДЕНИЯ (${#WARNINGS[@]}):${RST}"
+if (( ${#WARNINGS[@]} == 0 )); then
+  echo -e "  ${GRN}Предупреждений нет${RST}"
 else
-  for ROW in "${ERRORS[@]}"; do
-    IFS='|' read -r NS REL REASON <<< "$ROW"
-    printf "%-30s %-25s %-50s\n" "$NS" "$REL" "$REASON"
+  for i in "${!WARNINGS[@]}"; do
+    echo -e "  ${YEL}$((i+1)).${RST} ${WARNINGS[$i]}"
   done
 fi
 
 echo ""
-echo "Бэкапы манифестов: $BACKUP_ROOT/"
+echo -e "${CYN}${BOLD}РЕКОМЕНДАЦИИ (${#RECOMMENDATIONS[@]}):${RST}"
+if (( ${#RECOMMENDATIONS[@]} == 0 )); then
+  echo -e "  ${GRN}Система в норме, рекомендаций нет${RST}"
+else
+  # Убрать дубли
+  declare -A seen
+  idx=1
+  for rec_item in "${RECOMMENDATIONS[@]}"; do
+    if [[ -z "${seen[$rec_item]+x}" ]]; then
+      echo -e "  ${CYN}${idx}.${RST} ${rec_item}"
+      seen[$rec_item]=1
+      (( idx++ ))
+    fi
+  done
+fi
+
+echo ""
+echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+echo -e "  Полный лог: ${WHT}$LOG${RST}"
+echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+echo ""
