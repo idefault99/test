@@ -1,57 +1,26 @@
 #!/bin/bash
-# replace-image.sh — заменить registry/repo часть образа, сохранив тег
+# replace-registry.sh — заменить registry-хост во всех деплойментах всех неймспейсов
 
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <old-registry/repo> <new-registry/repo>"
-  echo "  Example: $0 test.def/repo/test harbor.test/repo/test"
+  echo "Usage: $0 <old-registry-host> <new-registry-host>"
+  echo "  Example: $0 test.def harbor.test"
   echo ""
-  echo "  Before: test.def/repo/test:tag.1"
-  echo "  After:  harbor.test/repo/test:tag.1"
+  echo "  Before: test.def/repo/project/test:tag.1"
+  echo "  After:  harbor.test/repo/project/test:tag.1"
   exit 1
 }
 
 [[ $# -ne 2 ]] && usage
 
-OLD_IMAGE="${1%/}"
-NEW_IMAGE="${2%/}"
+OLD_REGISTRY="${1%/}"
+NEW_REGISTRY="${2%/}"
 
 KUBECTL="${KUBECTL:-kubectl}"
 
-# Извлечь тег/digest из полного image url
-# Правило: тег — это то, что после последнего ':', НО только если
-# слева от ':' нет '/' после этого ':' (иначе это порт registry)
-parse_image() {
-  local full="$1"
-  local url tag suffix
-
-  if [[ "$full" == *"@"* ]]; then
-    # digest: image@sha256:abc123
-    url="${full%%@*}"
-    suffix="@${full#*@}"
-  else
-    # Проверяем есть ли тег: ищем последнее ':'
-    # Тег есть если после последнего ':' нет '/'
-    local last_colon_part="${full##*:}"
-    local before_last_colon="${full%:*}"
-
-    if [[ "$full" == *":"* && "$last_colon_part" != *"/"* ]]; then
-      # После последнего ':' нет '/' — это тег
-      url="$before_last_colon"
-      suffix=":${last_colon_part}"
-    else
-      # Нет тега (или двоеточие только в порту registry)
-      url="$full"
-      suffix=""
-    fi
-  fi
-
-  echo "${url}|${suffix}"
-}
-
-echo "==> Old image URL: ${OLD_IMAGE}"
-echo "==> New image URL: ${NEW_IMAGE}"
+echo "==> Old registry: ${OLD_REGISTRY}"
+echo "==> New registry: ${NEW_REGISTRY}"
 echo ""
 
 found=0
@@ -72,12 +41,13 @@ for ns in $NAMESPACES; do
     while IFS='=' read -r cname cimage; do
       [[ -z "$cname" || -z "$cimage" ]] && continue
 
-      parsed=$(parse_image "$cimage")
-      cur_url="${parsed%%|*}"
-      cur_suffix="${parsed##*|}"
+      # Хост — всё до первого '/'
+      cur_registry="${cimage%%/*}"
+      # Остаток — путь + тег
+      cur_rest="${cimage#*/}"
 
-      if [[ "$cur_url" == "$OLD_IMAGE" ]]; then
-        new_full="${NEW_IMAGE}${cur_suffix}"
+      if [[ "$cur_registry" == "$OLD_REGISTRY" ]]; then
+        new_full="${NEW_REGISTRY}/${cur_rest}"
         ((found++)) || true
 
         echo "[${ns}/${deploy}] ${cname}"
