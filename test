@@ -1,40 +1,19 @@
--rw-rw---- 1 root microk8s 1.9K Apr 10 13:12 cluster.crt
--rw-rw---- 1 root microk8s 3.2K Apr 10 13:12 cluster.key
--rw-rw---- 1 root microk8s   65 Apr 10 13:29 cluster.yaml
--rw-rw---- 1 root microk8s    0 Apr 10 13:12 dqlite-lock
--rw-rw-r-- 1 root microk8s    2 Apr 10 13:23 failure-domain
--rw-rw---- 1 root microk8s   59 Apr 10 13:23 info.yaml
-srw-rw---- 1 root microk8s    0 Apr 10 13:23 kine.sock:12379
--rw-rw---- 1 root microk8s   32 Apr 10 13:12 metadata1
--rw-rw---- 1 root microk8s 8.0M Apr 10 13:28 open-4
--rw-rw---- 1 root microk8s 8.0M Apr 10 13:28 open-5
--rw-rw---- 1 root microk8s 8.0M Apr 10 13:28 open-6
-microk8s.daemon-k8s-dqlite[78500]: + local SAVE_LD_LIBRARY_PATH=/var/lib/snapd/lib/gl:/var/lib/snapd/lib/gl32:/snap/microk8s/8566/lib:/snap/microk8s/8566/usr/lib:/snap/microk8s/8566/lib/x86_64-linux-gnu:/snap/microk8s/8566/usr/lib/x86_64-linux-gnu:/snap/microk8s/8566/usr/lib/x86_64-linux-gnu/ceph:
-microk8s.daemon-k8s-dqlite[78500]: + LD_LIBRARY_PATH=
-microk8s.daemon-k8s-dqlite[78500]: + sudo -E PATH=/snap/microk8s/8566/usr/bin:/snap/microk8s/8566/bin:/snap/microk8s/8566/usr/sbin:/snap/microk8s/8566/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin LD_LIBRARY_PATH=/var/lib/snapd/lib/gl:/var/lib/snapd/lib/gl32:/snap/microk8s/8566/lib:/snap/microk8s/8566/usr/lib:/snap/microk8s/8566/lib/x86_64-linux-gnu:/snap/microk8s/8566/usr/lib/x86_64-linux-gnu:/snap/microk8s/8566/usr/lib/x86_64-linux-gnu/ceph: PYTHONPATH=/snap/microk8s/8566/usr/lib/python3.8:/snap/microk8s/8566/lib/python3.8/site-packages:/snap/microk8s/8566/usr/lib/python3/dist-packages /snap/microk8s/8566/bin/grep -qr '^fs.inotify.max_user_watches=' /etc/sysctl.conf
-sudo[84388]:     root : PWD=/var/snap/microk8s/8566 ; USER=root ; ENV=PATH=/snap/microk8s/8566/usr/bin:/snap/microk8s/8566/bin:/snap/microk8s/8566/usr/sbin:/snap/microk8s/8566/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin LD_LIBRARY_PATH=/var/lib/snapd/lib/gl:/var/lib/snapd/lib/gl32:/snap/microk8s/8566/lib:/snap/microk8s/8566/usr/lib:/snap/microk8s/8566/lib/x86_64-linux-gnu:/snap/microk8s/8566/usr/lib/x86_64-linux-gnu:/snap/microk8s/8566/usr/lib/x86_64-linux-gnu/ceph: PYTHONPATH=/snap/microk8s/8566/usr/lib/python3.8:/snap/microk8s/8566/lib/python3.8/site-packages:/snap/microk8s/8566/usr/lib/python3/dist-packages ; COMMAND=/snap/microk8s/8566/bin/grep -qr ^fs.inotify.max_user_watches= /etc/sysctl.conf
-sudo[84388]: pam_unix(sudo:session): session opened for user root(uid=0) by (uid=0)
-sudo[84388]: pam_unix(sudo:session): session closed for user root
-microk8s.daemon-k8s-dqlite[78500]: + '[' 1048576 -lt 1048576 ']'
-microk8s.daemon-k8s-dqlite[78500]: + set -a
-microk8s.daemon-k8s-dqlite[78500]: + '[' -e /var/snap/microk8s/8566/args/k8s-dqlite-env ']'
-microk8s.daemon-k8s-dqlite[78500]: + . /var/snap/microk8s/8566/args/k8s-dqlite-env
-microk8s.daemon-k8s-dqlite[78500]: + set +a
-microk8s.daemon-k8s-dqlite[84550]: ++ cat /var/snap/microk8s/8566/args/k8s-dqlite
-microk8s.daemon-k8s-dqlite[78500]: + declare -a 'args=(--storage-dir=${SNAP_DATA}/var/kubernetes/backend/
-Apr 10 13:23:42 external-microk8s microk8s.daemon-k8s-dqlite[78500]: --listen=unix://${SNAP_DATA}/var/kubernetes/backend/kine.sock:12379)'
-microk8s.daemon-k8s-dqlite[78500]: + exec /snap/microk8s/8566/bin/k8s-dqlite --storage-dir=/var/snap/microk8s/8566/var/kubernetes/backend/ --listen=unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:42Z" level=info msg="Enable metrics endpoint" address="127.0.0.1:9042"
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:42Z" level=info msg="Will update address of dqlite node" new_address="11.93.4.645:19001" old_address="127.0.0.1:19001"
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:42Z" level=info msg="Configure dqlite failure domain" failure-domain=1
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:42Z" level=info msg="Disable TLS ClientSessionCache"
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:42Z" level=info msg="Enable TLS" min_tls_version=tls12
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:44Z" level=info msg="Started dqlite" address="11.93.4.645:19001" id=3297041220608546238
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:44Z" level=info msg="New kine for dqlite"
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:44Z" level=info msg="DriverName is dqlite-1."
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:44Z" level=info msg="Kine listening on unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379"
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:44Z" level=info msg="Started kine" address="unix:///var/snap/microk8s/8566/var/kubernetes/backend/kine.sock:12379" database="dqlite://k8s?admission-control-only-write-queries=false&admission-control-policy=allow-all&admission-control-policy-limit-max-concurrent-txn=300&driver-name=dqlite-1&watch-query-timeout=20s"
-microk8s.daemon-k8s-dqlite[78500]: time="2026-04-10T13:23:44Z" level=info msg="Enable periodic check for available disk size" dir=/var/snap/microk8s/8566/var/kubernetes/backend/ interval=5s
-- ID: 3297041220608546238
-  Address: 11.93.4.645:19001
-  Role: 0
+# 1. Текущий статус всех сервисов
+sudo snap services microk8s
+
+# 2. Что в cluster.yaml сейчас (сколько нод?)
+cat /var/snap/microk8s/current/var/kubernetes/backend/cluster.yaml
+
+# 3. Лог kubelite после join — ищем новую причину
+sudo journalctl -u snap.microk8s.daemon-kubelite -n 50 --no-pager | grep -iE "error|fatal|failed|refused|timeout" | tail -20
+
+# 4. CNI — есть ли конфиг?
+ls /var/snap/microk8s/current/args/cni-network/
+ls /var/snap/microk8s/current/opt/cni/bin/ | head -10
+
+
+# Какой CNI был до бэкапа?
+cat /var/snap/microk8s/current/args/cni-network/cni.yaml 2>/dev/null | head -10
+
+# Включён ли аддон?
+microk8s status 2>/dev/null | grep -E "calico|flannel|cilium"
