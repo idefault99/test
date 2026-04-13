@@ -4,40 +4,6 @@
 {{- if or (index $.Values.enableModules $module) (eq $module "")}}
 {{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ $.Values.labels.redis }}-waiter-sa
-  namespace: {{ $ns }}
-automountServiceAccountToken: true
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ $.Values.labels.redis }}-waiter-role
-  namespace: {{ $ns }}
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "pods/status"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["statefulsets"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ $.Values.labels.redis }}-waiter-rolebinding
-  namespace: {{ $ns }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ $.Values.labels.redis }}-waiter-sa
-    namespace: {{ $ns }}
-roleRef:
-  kind: Role
-  name: {{ $.Values.labels.redis }}-waiter-role
-  apiGroup: rbac.authorization.k8s.io
----
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -68,18 +34,12 @@ spec:
               NS="{{ $ns }}"
               PREFIX="{{ $.Values.labels.redis }}-deployment"
 
-              echo "==> Проверяем права..."
-              kubectl auth can-i get pods -n $NS
-
               echo "==> Ждём появления и готовности всех 3 подов..."
 
-              # StatefulSet создаёт поды по очереди: 0 → 1 → 2
-              # Поэтому сначала ждём появления пода, потом его Ready
               for INDEX in 0 1 2; do
                 POD="${PREFIX}-${INDEX}"
                 echo "--- Ожидаем появления ${POD}..."
 
-                # Ждём до 5 минут пока под появится
                 ATTEMPTS=0
                 until kubectl get pod $POD -n $NS > /dev/null 2>&1; do
                   ATTEMPTS=$((ATTEMPTS + 1))
@@ -93,8 +53,7 @@ spec:
 
                 echo "  ${POD} найден, ждём Ready..."
                 kubectl wait --for=condition=Ready \
-                  -n $NS \
-                  pod/$POD --timeout=300s
+                  -n $NS pod/$POD --timeout=300s
 
                 echo "  ${POD}: Ready ✓"
               done
@@ -113,23 +72,27 @@ spec:
               PORT="{{ $.Values.ports.internal.redis.client }}"
 
               echo "==> Проверяем состояние кластера..."
-              CLUSTER_STATE=$(redis-cli -h $POD0 -p $PORT cluster info 2>/dev/null \
-                | grep cluster_state | cut -d: -f2 | tr -d '[:space:]')
-              CLUSTER_NODES=$(redis-cli -h $POD0 -p $PORT cluster info 2>/dev/null \
-                | grep cluster_known_nodes | cut -d: -f2 | tr -d '[:space:]')
+              CLUSTER_INFO=$(redis-cli -h $POD0 -p $PORT cluster info 2>/dev/null)
+              CLUSTER_STATE=$(echo "$CLUSTER_INFO" | grep "^cluster_state" | cut -d: -f2 | tr -d '[:space:]')
+              CLUSTER_SLOTS_OK=$(echo "$CLUSTER_INFO" | grep "^cluster_slots_ok" | cut -d: -f2 | tr -d '[:space:]')
+              CLUSTER_NODES=$(echo "$CLUSTER_INFO" | grep "^cluster_known_nodes" | cut -d: -f2 | tr -d '[:space:]')
 
-              echo "  state=${CLUSTER_STATE} known_nodes=${CLUSTER_NODES}"
+              echo "  state=${CLUSTER_STATE} slots_ok=${CLUSTER_SLOTS_OK} known_nodes=${CLUSTER_NODES}"
 
-              if [ "$CLUSTER_STATE" = "ok" ] && [ "${CLUSTER_NODES:-0}" -ge "3" ]; then
-                echo "==> Кластер уже инициализирован. Пропускаем."
+              # Кластер считается здоровым только если:
+              # - state=ok
+              # - все 16384 слота обслуживаются
+              # - известно не менее 3 нод
+              # Одного cluster_state=ok недостаточно — ноды могут быть disconnected
+              if [ "$CLUSTER_STATE" = "ok" ] && \
+                 [ "${CLUSTER_SLOTS_OK:-0}" = "16384" ] && \
+                 [ "${CLUSTER_NODES:-0}" -ge "3" ]; then
+                echo "==> Кластер здоров. Пропускаем."
                 exit 0
               fi
 
-              echo "==> Кластер не инициализирован — выполняем сброс и создание"
+              echo "==> Кластер не инициализирован или нездоров — выполняем сброс и создание"
 
-              # Сбрасываем состояние на всех нодах
-              # Это необходимо при переключении single→cluster:
-              # поды могут содержать старый nodes.conf или данные
               for POD in $POD0 $POD1 $POD2; do
                 echo "  Сбрасываем ${POD}..."
                 redis-cli -h $POD -p $PORT flushall 2>/dev/null || true
@@ -153,7 +116,7 @@ spec:
                 exit 1
               fi
 
-              echo "==> Ждём стабилизации кластера..."
+              echo "==> Ждём стабилизации..."
               sleep 3
 
               echo "==> Итоговое состояние:"
