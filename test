@@ -1,9 +1,22 @@
-kubectl patch pv pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb \
-  -p '{"spec":{"claimRef":null}}'
-
-
-kubectl get pv pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb
-# Должно быть: Released → Available → Bound
-
-kubectl get pvc -n dev-dt kafka
-# Должно быть: Pending → Bound
+k describe pvc -n schedule-dev s3minio
+Name:          s3minio
+Namespace:     schedule-dev
+StorageClass:  nfs-csi-2
+Status:        Pending
+Volume:
+Labels:        app=s3minio
+               app.kubernetes.io/managed-by=Helm
+Annotations:   meta.helm.sh/release-name: infra
+               meta.helm.sh/release-namespace: schedule-dev
+               volume.beta.kubernetes.io/storage-provisioner: nfs.csi.k8s.io
+               volume.kubernetes.io/storage-provisioner: nfs.csi.k8s.io
+Finalizers:    [kubernetes.io/pvc-protection]
+Capacity:
+Access Modes:
+VolumeMode:    Filesystem
+Used By:       s3minio-deployment-0
+Events:
+  Type    Reason                Age                   From                                                            Message
+  ----    ------                ----                  ----                                                            -------
+  Normal  Provisioning          2m28s                 nfs.csi.k8s.io_microk8s-6_6f472737-a8ce-4c40-8baa-b14198be20b7  External provisioner is provisioning volume for claim "schedule-dev/s3minio"
+  Normal  ExternalProvisioning  11s (x12 over 2m28s)  persistentvolume-controller                                     Waiting for a volume to be created either by the external provisioner 'nfs.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
