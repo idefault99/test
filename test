@@ -97,6 +97,7 @@ log "Ищем последний пайплайн с джобой '${BOLD}${JOB_
 
 FOUND_PIPELINE_ID=""
 FOUND_JOB_ID=""
+FOUND_JOB_STATUS=""
 FOUND_BRANCH=""
 FOUND_PIPELINE_URL=""
 FOUND_COMMIT_SHORT=""
@@ -113,10 +114,10 @@ for page in $(seq 1 "$MAX_PAGES"); do
   pipeline_ids=$(echo "$pipelines_json" | python3 -c "
 import sys, json
 for p in json.load(sys.stdin):
-    print(p['id'], p['ref'], p['web_url'], p.get('sha',''))
+    print('|'.join([str(p['id']), p['ref'], p['web_url'], p.get('sha','')]))
 ")
 
-  while IFS=' ' read -r pid pref purl psha; do
+  while IFS='|' read -r pid pref purl psha; do
     # Получаем джобы пайплайна
     jobs_json=$(gl_get "${API}/projects/${PROJECT}/pipelines/${pid}/jobs?per_page=100" 2>/dev/null)
 
@@ -126,13 +127,14 @@ jobs = json.load(sys.stdin)
 RUN_STATUSES = {'success', 'failed', 'canceled'}
 for j in jobs:
     if j.get('name') == '${JOB_NAME}' and j.get('status') in RUN_STATUSES:
-        print(j['id'])
+        print(j['id'], j['status'])
         break
 " 2>/dev/null || true)
 
     if [[ -n "$match" ]]; then
+      FOUND_JOB_ID=$(echo "$match" | awk '{print $1}')
+      FOUND_JOB_STATUS=$(echo "$match" | awk '{print $2}')
       FOUND_PIPELINE_ID="$pid"
-      FOUND_JOB_ID="$match"
       FOUND_BRANCH="$pref"
       FOUND_PIPELINE_URL="$purl"
       FOUND_COMMIT_SHORT="${psha:0:8}"
@@ -153,7 +155,7 @@ echo -e "    ID:      ${BOLD}${FOUND_PIPELINE_ID}${RESET}"
 echo -e "    Ветка:   ${BOLD}${FOUND_BRANCH}${RESET}"
 echo -e "    Коммит:  ${BOLD}${FOUND_COMMIT_SHORT}${RESET}  ${FOUND_COMMIT_MSG}"
 echo -e "    URL:     ${CYAN}${FOUND_PIPELINE_URL}${RESET}"
-echo -e "    Джоба:   ${BOLD}${JOB_NAME}${RESET}  (job id: ${FOUND_JOB_ID})"
+echo -e "    Джоба:   ${BOLD}${JOB_NAME}${RESET}  (job id: ${FOUND_JOB_ID}, статус: ${FOUND_JOB_STATUS})"
 echo ""
 
 read -rp "$(echo -e "${YELLOW}Сделать retry этой джобы? [y/N]:${RESET} ")" confirm
