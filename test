@@ -1,126 +1,122 @@
 #!/bin/bash
-# ns-scale.sh
-# Использование: ./ns-scale.sh <namespaces-file> [dry-run]
+# node-bandwidth-matrix.sh — замер пропускной способности между всеми парами нод
 
 set -euo pipefail
 
-NS_FILE="${1:?Укажи файл с неймспейсами: $0 <namespaces-file> [dry-run]}"
-DRY_RUN="${2:-false}"
+NAMESPACE="${1:-default}"
+IMAGE="networkstatic/iperf3"
+DURATION="${2:-10}"
+PARALLEL="${3:-4}"
+LABEL="iperf3-test"
 
-[[ ! -f "$NS_FILE" ]] && { echo "Файл не найден: $NS_FILE"; exit 1; }
-
-KUBECTL_ARGS=""
-[[ "$DRY_RUN" == "true" ]] && KUBECTL_ARGS="--dry-run=client"
-
-# --- Меню ---
-echo ""
-echo "Выбери действие:"
-echo "  1) Scale в 0  (+ suspend CronJobs)"
-echo "  2) Scale в 1  (+ unsuspend CronJobs)"
-echo ""
-read -rp "Введи 1 или 2: " CHOICE
-
-case "$CHOICE" in
-  1) ACTION="down" ;;
-  2) ACTION="up"   ;;
-  *) echo "Неверный выбор: $CHOICE"; exit 1 ;;
-esac
-
-echo ""
-echo "=== Действие: scale-$ACTION | Файл: $NS_FILE | dry-run: $DRY_RUN ==="
-
-# --- Функции ---
-scale_resources() {
-  local kind="$1"
-  local ns="$2"
-  local replicas="$3"
-  local names
-
-  names=$(kubectl get "$kind" -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-  [[ -z "$names" ]] && return
-
-  for name in $names; do
-    echo "        → $kind/$name"
-    kubectl scale "$kind" "$name" -n "$ns" --replicas="$replicas" $KUBECTL_ARGS
-  done
-}
-
-patch_daemonsets() {
-  local ns="$1"
-  local names
-
-  names=$(kubectl get daemonsets -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-  [[ -z "$names" ]] && return
-
-  for name in $names; do
-    echo "        → daemonset/$name"
-    if [[ "$ACTION" == "down" ]]; then
-      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
-    else
-      # Убираем nodeSelector полностью
-      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'
-    fi
-  done
-}
-
-patch_cronjobs() {
-  local ns="$1"
-  local suspend="$2"
-  local names
-
-  names=$(kubectl get cronjobs -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-
-  [[ -z "$names" ]] && return
-
-  for name in $names; do
-    echo "        → cronjob/$name"
-    kubectl patch cronjob "$name" -n "$ns" $KUBECTL_ARGS \
-      -p "{\"spec\":{\"suspend\":$suspend}}"
-  done
-}
-
-process_namespace() {
-  local ns="$1"
+cleanup() {
   echo ""
-  echo "━━━ Namespace: $ns ━━━"
-
-  if [[ "$ACTION" == "down" ]]; then
-    echo "  [1/4] Deployments → replicas=0"
-    scale_resources deployments "$ns" 0
-    echo "  [2/4] StatefulSets → replicas=0"
-    scale_resources statefulsets "$ns" 0
-    echo "  [3/4] DaemonSets → nodeSelector patch"
-    patch_daemonsets "$ns"
-    echo "  [4/4] CronJobs → suspend=true"
-    patch_cronjobs "$ns" true
-  else
-    echo "  [1/4] Deployments → replicas=1"
-    scale_resources deployments "$ns" 1
-    echo "  [2/4] StatefulSets → replicas=1"
-    scale_resources statefulsets "$ns" 1
-    echo "  [3/4] DaemonSets → nodeSelector убран"
-    patch_daemonsets "$ns"
-    echo "  [4/4] CronJobs → suspend=false"
-    patch_cronjobs "$ns" false
-  fi
-
-  echo "  ✓ $ns — готово"
+  echo "=== Cleanup ==="
+  kubectl delete pods -n "$NAMESPACE" -l "app=$LABEL" --ignore-not-found --wait=false
+  echo "Поды удалены."
 }
+trap cleanup EXIT
 
-# Читаем файл через fd 3
-while IFS= read -r line <&3 || [[ -n "$line" ]]; do
-  line="${line// /}"
-  [[ -z "$line" ]] && continue
-  [[ "$line" == \#* ]] && continue
-  process_namespace "$line"
-done 3< "$NS_FILE"
+# Получаем список нод (только Ready, без master если не нужен)
+NODES=($(kubectl get nodes \
+  --field-selector='status.conditions[?(@.type=="Ready")].status=True' \
+  -o jsonpath='{.items[*].metadata.name}'))
+
+NODE_COUNT=${#NODES[@]}
+echo "=== Ноды в кластере ($NODE_COUNT): ${NODES[*]}"
+echo "=== Namespace: $NAMESPACE | duration: ${DURATION}s | parallel: $PARALLEL"
+echo ""
+
+# Запускаем сервер на каждой ноде заранее
+echo "--- Запускаем iperf3-серверы на всех нодах..."
+for node in "${NODES[@]}"; do
+  pod_name="iperf3-server-${node//\./-}"
+  kubectl run "$pod_name" \
+    -n "$NAMESPACE" \
+    --image="$IMAGE" \
+    --labels="app=$LABEL" \
+    --overrides="{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"$node\"},\"tolerations\":[{\"operator\":\"Exists\"}]}}" \
+    --restart=Never \
+    -- iperf3 -s 1>/dev/null
+done
+
+# Ждём пока все серверы поднимутся
+echo "--- Ожидаем Ready всех серверов..."
+for node in "${NODES[@]}"; do
+  pod_name="iperf3-server-${node//\./-}"
+  kubectl wait pod "$pod_name" \
+    -n "$NAMESPACE" \
+    --for=condition=Ready \
+    --timeout=60s 1>/dev/null
+  echo "    ✓ $pod_name"
+done
+
+# Собираем IP серверов
+declare -A NODE_IPS
+for node in "${NODES[@]}"; do
+  pod_name="iperf3-server-${node//\./-}"
+  ip=$(kubectl get pod "$pod_name" -n "$NAMESPACE" \
+    -o jsonpath='{.status.podIP}')
+  NODE_IPS[$node]="$ip"
+  echo "    $node → ${NODE_IPS[$node]}"
+done
 
 echo ""
-echo "=== Всё готово ==="
+echo "=== Матрица пропускной способности (Gbits/sec) ==="
+echo ""
+
+# Заголовок таблицы
+printf "%-30s" "FROM \\ TO"
+for dst in "${NODES[@]}"; do
+  printf "%-22s" "$dst"
+done
+echo ""
+printf "%-30s" ""
+for dst in "${NODES[@]}"; do
+  printf "%-22s" "--------------------"
+done
+echo ""
+
+# Прогоняем тесты по всем парам
+declare -A RESULTS
+
+for src in "${NODES[@]}"; do
+  printf "%-30s" "$src"
+
+  for dst in "${NODES[@]}"; do
+    if [[ "$src" == "$dst" ]]; then
+      printf "%-22s" "—"
+      continue
+    fi
+
+    server_ip="${NODE_IPS[$dst]}"
+    client_pod="iperf3-client-${src//\./-}-to-${dst//\./-}"
+
+    # Запускаем клиент и парсим результат
+    result=$(kubectl run "$client_pod" \
+      -n "$NAMESPACE" \
+      --image="$IMAGE" \
+      --labels="app=$LABEL" \
+      --overrides="{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"$src\"},\"tolerations\":[{\"operator\":\"Exists\"}]}}" \
+      --restart=Never \
+      --rm \
+      -it \
+      --quiet \
+      -- iperf3 -c "$server_ip" -t "$DURATION" -P "$PARALLEL" 2>/dev/null \
+      | grep -E '\[SUM\].*sender' \
+      | awk '{print $(NF-1), $NF}' || echo "ERR")
+
+    RESULTS["${src}-${dst}"]="$result"
+    printf "%-22s" "$result"
+  done
+  echo ""
+done
+
+echo ""
+echo "=== Детальные результаты ==="
+for src in "${NODES[@]}"; do
+  for dst in "${NODES[@]}"; do
+    [[ "$src" == "$dst" ]] && continue
+    echo "  $src → $dst : ${RESULTS[${src}-${dst}]:-N/A}"
+  done
+done
