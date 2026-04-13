@@ -123,8 +123,9 @@ for p in json.load(sys.stdin):
     match=$(echo "$jobs_json" | python3 -c "
 import sys, json
 jobs = json.load(sys.stdin)
+RUN_STATUSES = {'success', 'failed', 'canceled'}
 for j in jobs:
-    if j.get('name') == '${JOB_NAME}':
+    if j.get('name') == '${JOB_NAME}' and j.get('status') in RUN_STATUSES:
         print(j['id'])
         break
 " 2>/dev/null || true)
