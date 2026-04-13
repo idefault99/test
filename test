@@ -1,6 +1,6 @@
 #!/bin/bash
-# scale-to-zero.sh
-# Использование: ./scale-to-zero.sh <namespaces-file> [true]
+# ns-scale.sh
+# Использование: ./ns-scale.sh <namespaces-file> [dry-run]
 
 set -euo pipefail
 
@@ -12,11 +12,28 @@ DRY_RUN="${2:-false}"
 KUBECTL_ARGS=""
 [[ "$DRY_RUN" == "true" ]] && KUBECTL_ARGS="--dry-run=client"
 
-echo "=== Файл: $NS_FILE | dry-run: $DRY_RUN ==="
+# --- Меню ---
+echo ""
+echo "Выбери действие:"
+echo "  1) Scale в 0  (+ suspend CronJobs)"
+echo "  2) Scale в 1  (+ unsuspend CronJobs)"
+echo ""
+read -rp "Введи 1 или 2: " CHOICE
 
+case "$CHOICE" in
+  1) ACTION="down" ;;
+  2) ACTION="up"   ;;
+  *) echo "Неверный выбор: $CHOICE"; exit 1 ;;
+esac
+
+echo ""
+echo "=== Действие: scale-$ACTION | Файл: $NS_FILE | dry-run: $DRY_RUN ==="
+
+# --- Функции ---
 scale_resources() {
   local kind="$1"
   local ns="$2"
+  local replicas="$3"
   local names
 
   names=$(kubectl get "$kind" -n "$ns" \
@@ -25,22 +42,47 @@ scale_resources() {
   [[ -z "$names" ]] && return
 
   for name in $names; do
-    case "$kind" in
-      deployments|statefulsets)
-        echo "        → $kind/$name"
-        kubectl scale "$kind" "$name" -n "$ns" --replicas=0 $KUBECTL_ARGS
-        ;;
-      daemonsets)
-        echo "        → daemonset/$name"
-        kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
-          -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
-        ;;
-      cronjobs)
-        echo "        → cronjob/$name"
-        kubectl patch cronjob "$name" -n "$ns" $KUBECTL_ARGS \
-          -p '{"spec":{"suspend":true}}'
-        ;;
-    esac
+    echo "        → $kind/$name"
+    kubectl scale "$kind" "$name" -n "$ns" --replicas="$replicas" $KUBECTL_ARGS
+  done
+}
+
+patch_daemonsets() {
+  local ns="$1"
+  local names
+
+  names=$(kubectl get daemonsets -n "$ns" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+  [[ -z "$names" ]] && return
+
+  for name in $names; do
+    echo "        → daemonset/$name"
+    if [[ "$ACTION" == "down" ]]; then
+      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
+    else
+      # Убираем nodeSelector полностью
+      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'
+    fi
+  done
+}
+
+patch_cronjobs() {
+  local ns="$1"
+  local suspend="$2"
+  local names
+
+  names=$(kubectl get cronjobs -n "$ns" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+  [[ -z "$names" ]] && return
+
+  for name in $names; do
+    echo "        → cronjob/$name"
+    kubectl patch cronjob "$name" -n "$ns" $KUBECTL_ARGS \
+      -p "{\"spec\":{\"suspend\":$suspend}}"
   done
 }
 
@@ -48,18 +90,31 @@ process_namespace() {
   local ns="$1"
   echo ""
   echo "━━━ Namespace: $ns ━━━"
-  echo "  [1/4] Deployments → replicas=0"
-  scale_resources deployments "$ns"
-  echo "  [2/4] StatefulSets → replicas=0"
-  scale_resources statefulsets "$ns"
-  echo "  [3/4] DaemonSets → nodeSelector patch"
-  scale_resources daemonsets "$ns"
-  echo "  [4/4] CronJobs → suspend=true"
-  scale_resources cronjobs "$ns"
+
+  if [[ "$ACTION" == "down" ]]; then
+    echo "  [1/4] Deployments → replicas=0"
+    scale_resources deployments "$ns" 0
+    echo "  [2/4] StatefulSets → replicas=0"
+    scale_resources statefulsets "$ns" 0
+    echo "  [3/4] DaemonSets → nodeSelector patch"
+    patch_daemonsets "$ns"
+    echo "  [4/4] CronJobs → suspend=true"
+    patch_cronjobs "$ns" true
+  else
+    echo "  [1/4] Deployments → replicas=1"
+    scale_resources deployments "$ns" 1
+    echo "  [2/4] StatefulSets → replicas=1"
+    scale_resources statefulsets "$ns" 1
+    echo "  [3/4] DaemonSets → nodeSelector убран"
+    patch_daemonsets "$ns"
+    echo "  [4/4] CronJobs → suspend=false"
+    patch_cronjobs "$ns" false
+  fi
+
   echo "  ✓ $ns — готово"
 }
 
-# Читаем файл через fd 3 — stdin не трогаем
+# Читаем файл через fd 3
 while IFS= read -r line <&3 || [[ -n "$line" ]]; do
   line="${line// /}"
   [[ -z "$line" ]] && continue
