@@ -1,58 +1,69 @@
 #!/bin/bash
-# scale-to-zero.sh — Scale всех workload'ов в ноль и отключить CronJob'ы в неймспейсе
+# scale-to-zero.sh — Scale всех workload'ов в ноль и отключить CronJob'ы
+# Использование: ./scale-to-zero.sh <file-with-namespaces> [true|false]
 
 set -euo pipefail
 
-NAMESPACE="${1:?Укажи неймспейс: $0 <namespace>}"
-DRY_RUN="${2:-false}"  # передай "true" для dry-run
+NS_FILE="${1:?Укажи файл с неймспейсами: $0 <namespaces-file> [dry-run]}"
+DRY_RUN="${2:-false}"
+
+[[ ! -f "$NS_FILE" ]] && { echo "Файл не найден: $NS_FILE"; exit 1; }
 
 KUBECTL_ARGS=""
 [[ "$DRY_RUN" == "true" ]] && KUBECTL_ARGS="--dry-run=client"
 
-echo "=== Namespace: $NAMESPACE | dry-run: $DRY_RUN ==="
+echo "=== Файл: $NS_FILE | dry-run: $DRY_RUN ==="
 
-# --- Deployments ---
-echo ""
-echo "[1/4] Scaling Deployments to 0..."
-kubectl get deployments -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
-  [[ -z "$name" ]] && continue
-  echo "  → deployment/$name"
-  kubectl scale deployment "$name" -n "$NAMESPACE" --replicas=0 $KUBECTL_ARGS
-done
+process_namespace() {
+  local NAMESPACE="$1"
 
-# --- StatefulSets ---
-echo ""
-echo "[2/4] Scaling StatefulSets to 0..."
-kubectl get statefulsets -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
-  [[ -z "$name" ]] && continue
-  echo "  → statefulset/$name"
-  kubectl scale statefulset "$name" -n "$NAMESPACE" --replicas=0 $KUBECTL_ARGS
-done
+  echo ""
+  echo "━━━ Namespace: $NAMESPACE ━━━"
 
-# --- DaemonSets (через nodeSelector impossible → patch) ---
-echo ""
-echo "[3/4] Suspending DaemonSets (nodeSelector: non-existing-node)..."
-kubectl get daemonsets -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
-  [[ -z "$name" ]] && continue
-  echo "  → daemonset/$name"
-  kubectl patch daemonset "$name" -n "$NAMESPACE" $KUBECTL_ARGS \
-    -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
-done
+  # --- Deployments ---
+  echo "  [1/4] Deployments → replicas=0"
+  kubectl get deployments -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    | tr ' ' '\n' | grep -v '^$' | while read -r name; do
+      echo "        → deployment/$name"
+      kubectl scale deployment "$name" -n "$NAMESPACE" --replicas=0 $KUBECTL_ARGS
+  done
 
-# --- CronJobs (suspend: true) ---
-echo ""
-echo "[4/4] Suspending CronJobs..."
-kubectl get cronjobs -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
-  [[ -z "$name" ]] && continue
-  echo "  → cronjob/$name"
-  kubectl patch cronjob "$name" -n "$NAMESPACE" $KUBECTL_ARGS \
-    -p '{"spec":{"suspend":true}}'
-done
+  # --- StatefulSets ---
+  echo "  [2/4] StatefulSets → replicas=0"
+  kubectl get statefulsets -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    | tr ' ' '\n' | grep -v '^$' | while read -r name; do
+      echo "        → statefulset/$name"
+      kubectl scale statefulset "$name" -n "$NAMESPACE" --replicas=0 $KUBECTL_ARGS
+  done
+
+  # --- DaemonSets ---
+  echo "  [3/4] DaemonSets → nodeSelector patch"
+  kubectl get daemonsets -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    | tr ' ' '\n' | grep -v '^$' | while read -r name; do
+      echo "        → daemonset/$name"
+      kubectl patch daemonset "$name" -n "$NAMESPACE" $KUBECTL_ARGS \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
+  done
+
+  # --- CronJobs ---
+  echo "  [4/4] CronJobs → suspend=true"
+  kubectl get cronjobs -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    | tr ' ' '\n' | grep -v '^$' | while read -r name; do
+      echo "        → cronjob/$name"
+      kubectl patch cronjob "$name" -n "$NAMESPACE" $KUBECTL_ARGS \
+        -p '{"spec":{"suspend":true}}'
+  done
+
+  echo "  ✓ $NAMESPACE — готово"
+}
+
+# Читаем файл: пропускаем пустые строки и комментарии (#)
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line="${line// /}"          # trim пробелов
+  [[ -z "$line" ]] && continue
+  [[ "$line" == \#* ]] && continue
+  process_namespace "$line"
+done < "$NS_FILE"
 
 echo ""
-echo "=== Done ==="
-echo ""
-echo "Статус:"
-kubectl get deploy,sts,ds,cronjob -n "$NAMESPACE" \
-  -o custom-columns=\
-'KIND:.kind,NAME:.metadata.name,REPLICAS:.spec.replicas,SUSPENDED:.spec.suspend'
+echo "=== Всё готово ==="
