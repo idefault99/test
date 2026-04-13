@@ -1,129 +1,58 @@
-{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ $.Values.labels.redis }}-job-{{ $.Release.Revision }}
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 600
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      serviceAccountName: {{ $.Values.labels.redis }}-waiter-sa
-      restartPolicy: Never
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
-      initContainers:
-        - name: wait-for-redis-nodes
-          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
-          command: ['sh', '-c']
-          args:
-            - |
-              NS="{{ $ns }}"
-              PREFIX="{{ $.Values.labels.redis }}-deployment"
+#!/bin/bash
+# scale-to-zero.sh — Scale всех workload'ов в ноль и отключить CronJob'ы в неймспейсе
 
-              echo "==> Ждём появления и готовности всех 3 подов..."
+set -euo pipefail
 
-              for INDEX in 0 1 2; do
-                POD="${PREFIX}-${INDEX}"
-                echo "--- Ожидаем появления ${POD}..."
+NAMESPACE="${1:?Укажи неймспейс: $0 <namespace>}"
+DRY_RUN="${2:-false}"  # передай "true" для dry-run
 
-                ATTEMPTS=0
-                until kubectl get pod $POD -n $NS > /dev/null 2>&1; do
-                  ATTEMPTS=$((ATTEMPTS + 1))
-                  if [ $ATTEMPTS -ge 60 ]; then
-                    echo "ОШИБКА: ${POD} не появился за 5 минут"
-                    exit 1
-                  fi
-                  echo "  Попытка ${ATTEMPTS}/60: ${POD} ещё не создан, жду 5с..."
-                  sleep 5
-                done
+KUBECTL_ARGS=""
+[[ "$DRY_RUN" == "true" ]] && KUBECTL_ARGS="--dry-run=client"
 
-                echo "  ${POD} найден, ждём Ready..."
-                kubectl wait --for=condition=Ready \
-                  -n $NS pod/$POD --timeout=300s
+echo "=== Namespace: $NAMESPACE | dry-run: $DRY_RUN ==="
 
-                echo "  ${POD}: Ready ✓"
-              done
+# --- Deployments ---
+echo ""
+echo "[1/4] Scaling Deployments to 0..."
+kubectl get deployments -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
+  [[ -z "$name" ]] && continue
+  echo "  → deployment/$name"
+  kubectl scale deployment "$name" -n "$NAMESPACE" --replicas=0 $KUBECTL_ARGS
+done
 
-              echo "==> Все 3 пода готовы"
-      containers:
-        - name: {{ $.Values.labels.redis }}
-          image: {{ $.Values.images.redis }}
-          imagePullPolicy: "IfNotPresent"
-          command: ["sh", "-c"]
-          args:
-            - |
-              POD0="{{ $.Values.labels.redis }}-deployment-0.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD1="{{ $.Values.labels.redis }}-deployment-1.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD2="{{ $.Values.labels.redis }}-deployment-2.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              PORT="{{ $.Values.ports.internal.redis.client }}"
+# --- StatefulSets ---
+echo ""
+echo "[2/4] Scaling StatefulSets to 0..."
+kubectl get statefulsets -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
+  [[ -z "$name" ]] && continue
+  echo "  → statefulset/$name"
+  kubectl scale statefulset "$name" -n "$NAMESPACE" --replicas=0 $KUBECTL_ARGS
+done
 
-              echo "==> Проверяем состояние кластера..."
-              CLUSTER_INFO=$(redis-cli -h $POD0 -p $PORT cluster info 2>/dev/null)
-              CLUSTER_STATE=$(echo "$CLUSTER_INFO" | grep "^cluster_state" | cut -d: -f2 | tr -d '[:space:]')
-              CLUSTER_SLOTS_OK=$(echo "$CLUSTER_INFO" | grep "^cluster_slots_ok" | cut -d: -f2 | tr -d '[:space:]')
-              CLUSTER_NODES=$(echo "$CLUSTER_INFO" | grep "^cluster_known_nodes" | cut -d: -f2 | tr -d '[:space:]')
+# --- DaemonSets (через nodeSelector impossible → patch) ---
+echo ""
+echo "[3/4] Suspending DaemonSets (nodeSelector: non-existing-node)..."
+kubectl get daemonsets -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
+  [[ -z "$name" ]] && continue
+  echo "  → daemonset/$name"
+  kubectl patch daemonset "$name" -n "$NAMESPACE" $KUBECTL_ARGS \
+    -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
+done
 
-              echo "  state=${CLUSTER_STATE} slots_ok=${CLUSTER_SLOTS_OK} known_nodes=${CLUSTER_NODES}"
+# --- CronJobs (suspend: true) ---
+echo ""
+echo "[4/4] Suspending CronJobs..."
+kubectl get cronjobs -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r name; do
+  [[ -z "$name" ]] && continue
+  echo "  → cronjob/$name"
+  kubectl patch cronjob "$name" -n "$NAMESPACE" $KUBECTL_ARGS \
+    -p '{"spec":{"suspend":true}}'
+done
 
-              # Кластер считается здоровым только если:
-              # - state=ok
-              # - все 16384 слота обслуживаются
-              # - известно не менее 3 нод
-              # Одного cluster_state=ok недостаточно — ноды могут быть disconnected
-              if [ "$CLUSTER_STATE" = "ok" ] && \
-                 [ "${CLUSTER_SLOTS_OK:-0}" = "16384" ] && \
-                 [ "${CLUSTER_NODES:-0}" -ge "3" ]; then
-                echo "==> Кластер здоров. Пропускаем."
-                exit 0
-              fi
-
-              echo "==> Кластер не инициализирован или нездоров — выполняем сброс и создание"
-
-              for POD in $POD0 $POD1 $POD2; do
-                echo "  Сбрасываем ${POD}..."
-                redis-cli -h $POD -p $PORT flushall 2>/dev/null || true
-                redis-cli -h $POD -p $PORT cluster reset hard 2>/dev/null || true
-                echo "  OK"
-              done
-
-              echo "==> Пауза 3 секунды после сброса..."
-              sleep 3
-
-              echo "==> Создаём Redis Cluster..."
-              redis-cli --cluster create \
-                $POD0:$PORT \
-                $POD1:$PORT \
-                $POD2:$PORT \
-                --cluster-replicas 0 \
-                --cluster-yes
-
-              if [ $? -ne 0 ]; then
-                echo "==> ОШИБКА: не удалось создать кластер"
-                exit 1
-              fi
-
-              echo "==> Ждём стабилизации..."
-              sleep 3
-
-              echo "==> Итоговое состояние:"
-              redis-cli -h $POD0 -p $PORT cluster info
-              echo ""
-              redis-cli -h $POD0 -p $PORT cluster nodes
-              echo "==> Готово!"
-{{- end }}
-{{- end }}
-{{- end }}
+echo ""
+echo "=== Done ==="
+echo ""
+echo "Статус:"
+kubectl get deploy,sts,ds,cronjob -n "$NAMESPACE" \
+  -o custom-columns=\
+'KIND:.kind,NAME:.metadata.name,REPLICAS:.spec.replicas,SUSPENDED:.spec.suspend'
