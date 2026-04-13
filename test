@@ -124,9 +124,10 @@ for p in json.load(sys.stdin):
     match=$(echo "$jobs_json" | python3 -c "
 import sys, json
 jobs = json.load(sys.stdin)
-RUN_STATUSES = {'success', 'failed', 'canceled'}
 for j in jobs:
-    if j.get('name') == '${JOB_NAME}' and j.get('status') in RUN_STATUSES:
+    if (j.get('name') == '${JOB_NAME}'
+            and j.get('stage') == 'deploy'
+            and j.get('status') == 'success'):
         print(j['id'], j['status'])
         break
 " 2>/dev/null || true)
@@ -147,7 +148,7 @@ for j in jobs:
   done <<< "$pipeline_ids"
 done
 
-[[ -z "$FOUND_PIPELINE_ID" ]] && die "Пайплайн с джобой '${JOB_NAME}' не найден (проверено ${MAX_PAGES} страниц)."
+[[ -z "$FOUND_PIPELINE_ID" ]] && die "Пайплайн не найден: джоба '${JOB_NAME}' со stage=deploy и status=success отсутствует (проверено ${MAX_PAGES} страниц)."
 
 echo ""
 echo -e "  ${BOLD}Найден пайплайн:${RESET}"
