@@ -1,1 +1,67 @@
-kubectl get pvc <name> -n <ns> -o jsonpath='{.metadata.annotations}'
+k delete pvc -n dev-dt kafka
+persistentvolumeclaim "kafka" deleted
+
+ik.belykh@microk8s-master:~$
+ik.belykh@microk8s-master:~$ k delete pod -n dev-dt kafka-deployment-0 --force
+Warning: Immediate deletion does not wait for confirmation that the running resource has been terminated. The resource may continue to run on the cluster indefinitely.
+pod "kafka-deployment-0" force deleted
+ik.belykh@microk8s-master:~$
+ik.belykh@microk8s-master:~$
+ik.belykh@microk8s-master:~$ k describe pvc -n dev-dt kafka
+Name:          kafka
+Namespace:     dev-dt
+StorageClass:  nfs-csi-2
+Status:        Pending
+Volume:
+Labels:        app=kafka
+               app.kubernetes.io/managed-by=Helm
+Annotations:   meta.helm.sh/release-name: infra
+               meta.helm.sh/release-namespace: dev-dt
+               volume.beta.kubernetes.io/storage-provisioner: nfs.csi.k8s.io
+               volume.kubernetes.io/storage-provisioner: nfs.csi.k8s.io
+Finalizers:    [kubernetes.io/pvc-protection]
+Capacity:
+Access Modes:
+VolumeMode:    Filesystem
+Used By:       kafka-deployment-0
+Events:
+  Type    Reason                Age               From                                                            Message
+  ----    ------                ----              ----                                                            -------
+  Normal  Provisioning          68s               nfs.csi.k8s.io_microk8s-6_6f472737-a8ce-4c40-8baa-b14198be20b7  External provisioner is provisioning volume for claim "dev-dt/kafka"
+  Normal  ExternalProvisioning  6s (x7 over 68s)  persistentvolume-controller                                     Waiting for a volume to be created either by the external provisioner 'nfs.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+ik.belykh@microk8s-master:~$ k get pv -n dev-dt | grep dev-dt
+airport-security-dev-dt-dt-pv-volume                        5Gi        RWX            Retain           Bound      dev-dt-dt/airport-security-pv-claim                                            <unset>                          6d10h
+pvc-05bdc72d-4e65-4713-ba29-4b835bf859c2                    25Gi       RWO            Retain           Bound      dev-dt/s3minio                                             nfs-csi-2           <unset>                          6d10h
+pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb                    5Gi        RWO            Retain           Released   dev-dt/kafka                                               nfs-csi-2           <unset>                          6d10h
+terminal-infrastructure-load-dev-dt-dt-pv-volume            5Gi        RWX            Retain           Bound      dev-dt-dt/terminal-infrastructure-load-pv-claim                                <unset>                          6d10h
+ik.belykh@microk8s-master:~$ k describe pv -n dev-dt pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb
+Name:            pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb
+Labels:          velero.io/backup-name=microk8s-internal-20260405133932
+                 velero.io/restore-name=test
+Annotations:     pv.kubernetes.io/provisioned-by: nfs.csi.k8s.io
+                 volume.kubernetes.io/provisioner-deletion-secret-name:
+                 volume.kubernetes.io/provisioner-deletion-secret-namespace:
+Finalizers:      [kubernetes.io/pv-protection]
+StorageClass:    nfs-csi-2
+Status:          Released
+Claim:           dev-dt/kafka
+Reclaim Policy:  Retain
+Access Modes:    RWO
+VolumeMode:      Filesystem
+Capacity:        5Gi
+Node Affinity:   <none>
+Message:
+Source:
+    Type:              CSI (a Container Storage Interface (CSI) volume source)
+    Driver:            nfs.csi.k8s.io
+    FSType:
+    VolumeHandle:      192.168.0.214#var/k8s#dev-dt/kafka#pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb#
+    ReadOnly:          false
+    VolumeAttributes:      csi.storage.k8s.io/pv/name=pvc-d05a9a8d-8227-4df5-97b2-1949ced371bb
+                           csi.storage.k8s.io/pvc/name=kafka
+                           csi.storage.k8s.io/pvc/namespace=dev-dt
+                           server=192.168.0.214
+                           share=/var/k8s
+                           storage.kubernetes.io/csiProvisionerIdentity=1764553262599-5240-nfs.csi.k8s.io
+                           subDir=dev-dt/kafka
+Events:                <none>
