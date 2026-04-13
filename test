@@ -1,1 +1,9 @@
-update Pod redis-deployment-0 in StatefulSet redis-deployment failed error: Pod "redis-deployment-0" is invalid: spec: Forbidden: pod updates may not change fields other than `spec.containers[*].image`,`spec.initContainers[*].image`,`spec.activeDeadlineSeconds`,`spec.tolerations` (only additions to existing tolerations),`spec.terminationGracePeriodSeconds` (allow it to be set to 1 if it was previously negative)   core.PodSpec{    Volumes: []core.Volume{ +  { +  Name: "redis-data", +  VolumeSource: core.VolumeSource{ +  PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "redis-data-redis-deployment-0"}, +  }, +  },    {Name: "kube-api-access-74574", VolumeSource: {Projected: &{Sources: {{ServiceAccountToken: &{ExpirationSeconds: 3607, Path: "token"}}, {ConfigMap: &{LocalObjectReference: {Name: "kube-root-ca.crt"}, Items: {{Key: "ca.crt", Path: "ca.crt"}}}}, {DownwardAPI: &{Items: {{Path: "namespace", FieldRef: &{APIVersion: "v1", FieldPath: "metadata.namespace"}}}}}}, DefaultMode: &420}}},    },    InitContainers: nil,    Containers: {{Name: "redis", Image: "registry.test.model.svo.aero/dpm/iac/infra/redis/redis:8.4.0", Ports: {{Name: "client", ContainerPort: 6379, Protocol: "TCP"}}, Resources: {Limits: {s"cpu": {i: {...}, s: "200m", Format: "DecimalSI"}, s"memory": {i: {...}, s: "500Mi", Format: "BinarySI"}}, Requests: {s"cpu": {i: {...}, s: "100m", Format: "DecimalSI"}, s"memory": {i: {...}, s: "250Mi", Format: "BinarySI"}}}, ...}},    ... // 30 identical fields   }
+NS="<твой namespace>"
+
+# Статус джобы
+kubectl get jobs -n $NS | grep redis
+kubectl describe job redis-job-* -n $NS 2>/dev/null | tail -20
+
+# Логи джобы
+kubectl logs -n $NS -l app=redis-init 2>/dev/null
+kubectl logs -n $NS -l app=redis 2>/dev/null | grep -v "^$" | tail -30
