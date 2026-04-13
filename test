@@ -1,4 +1,16 @@
 #!/bin/bash
+# Запускаем сервер на ноде A
+ssh node-a "iperf3 -s -D"  # -D = daemon
+
+# Гоняем с ноды B
+ssh node-b "iperf3 -c node-a -t 10 -P 4"
+
+# Убиваем сервер
+ssh node-a "pkill iperf3"
+
+
+
+#!/bin/bash
 # node-bandwidth-matrix.sh — замер пропускной способности между всеми парами нод
 
 set -euo pipefail
