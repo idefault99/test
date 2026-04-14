@@ -8,10 +8,10 @@ set -euo pipefail
 # Настройки подключения
 # =========================
 
-PGHOST="10.96.75.231"   # Haproxy
-PGPORT="5432"
-PGUSER="postgres"
-PGPASSWORD="Pkwfowgfji77#!@oo1"
+PGHOST=""   # Haproxy
+PGPORT=""
+PGUSER=""
+PGPASSWORD=""
 export PGPASSWORD
 
 DEFAULT_DB="${DEFAULT_DB:-postgres}"
