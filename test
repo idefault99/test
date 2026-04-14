@@ -1,22 +1,202 @@
-k describe pvc -n schedule-dev s3minio
-Name:          s3minio
-Namespace:     schedule-dev
-StorageClass:  nfs-csi-2
-Status:        Pending
-Volume:
-Labels:        app=s3minio
-               app.kubernetes.io/managed-by=Helm
-Annotations:   meta.helm.sh/release-name: infra
-               meta.helm.sh/release-namespace: schedule-dev
-               volume.beta.kubernetes.io/storage-provisioner: nfs.csi.k8s.io
-               volume.kubernetes.io/storage-provisioner: nfs.csi.k8s.io
-Finalizers:    [kubernetes.io/pvc-protection]
-Capacity:
-Access Modes:
-VolumeMode:    Filesystem
-Used By:       s3minio-deployment-0
-Events:
-  Type    Reason                Age                   From                                                            Message
-  ----    ------                ----                  ----                                                            -------
-  Normal  Provisioning          2m28s                 nfs.csi.k8s.io_microk8s-6_6f472737-a8ce-4c40-8baa-b14198be20b7  External provisioner is provisioning volume for claim "schedule-dev/s3minio"
-  Normal  ExternalProvisioning  11s (x12 over 2m28s)  persistentvolume-controller                                     Waiting for a volume to be created either by the external provisioner 'nfs.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+#!/bin/bash
+# ns-scale.sh
+# Использование:
+#   ./ns-scale.sh <namespaces-file> [dry-run]   — из файла
+#   ./ns-scale.sh --ns <namespace> [dry-run]    — один неймспейс
+
+set -euo pipefail
+
+SINGLE_NS=""
+NS_FILE=""
+DRY_RUN="false"
+
+# --- Парсинг аргументов ---
+if [[ "${1:-}" == "--ns" ]]; then
+  SINGLE_NS="${2:?Укажи неймспейс после --ns}"
+  DRY_RUN="${3:-false}"
+else
+  NS_FILE="${1:?Укажи файл с неймспейсами или --ns <namespace>}"
+  DRY_RUN="${2:-false}"
+  [[ ! -f "$NS_FILE" ]] && { echo "Файл не найден: $NS_FILE"; exit 1; }
+fi
+
+KUBECTL_ARGS=""
+[[ "$DRY_RUN" == "true" ]] && KUBECTL_ARGS="--dry-run=client"
+
+WAIT_TIMEOUT=120  # секунд ожидания Ready
+
+# --- Меню ---
+echo ""
+echo "Выбери действие:"
+echo "  1) Scale в 0  (+ suspend CronJobs)"
+echo "  2) Scale в 1  (+ unsuspend CronJobs)"
+echo ""
+read -rp "Введи 1 или 2: " CHOICE
+
+case "$CHOICE" in
+  1) ACTION="down" ;;
+  2) ACTION="up"   ;;
+  *) echo "Неверный выбор: $CHOICE"; exit 1 ;;
+esac
+
+echo ""
+echo "=== Действие: scale-$ACTION | dry-run: $DRY_RUN ==="
+
+# --- Scale функции ---
+scale_resources() {
+  local kind="$1"
+  local ns="$2"
+  local replicas="$3"
+  local names
+
+  names=$(kubectl get "$kind" -n "$ns" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  [[ -z "$names" ]] && return
+
+  for name in $names; do
+    echo "        → $kind/$name"
+    kubectl scale "$kind" "$name" -n "$ns" --replicas="$replicas" $KUBECTL_ARGS
+  done
+}
+
+patch_daemonsets() {
+  local ns="$1"
+  local names
+
+  names=$(kubectl get daemonsets -n "$ns" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  [[ -z "$names" ]] && return
+
+  for name in $names; do
+    echo "        → daemonset/$name"
+    if [[ "$ACTION" == "down" ]]; then
+      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
+    else
+      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'
+    fi
+  done
+}
+
+patch_cronjobs() {
+  local ns="$1"
+  local suspend="$2"
+  local names
+
+  names=$(kubectl get cronjobs -n "$ns" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  [[ -z "$names" ]] && return
+
+  for name in $names; do
+    echo "        → cronjob/$name"
+    kubectl patch cronjob "$name" -n "$ns" $KUBECTL_ARGS \
+      -p "{\"spec\":{\"suspend\":$suspend}}"
+  done
+}
+
+# --- Ожидание и диагностика после scale-up ---
+wait_and_check() {
+  local ns="$1"
+  [[ "$DRY_RUN" == "true" ]] && return
+
+  echo ""
+  echo "  ⏳ Ожидаем Ready всех подов в $ns (timeout: ${WAIT_TIMEOUT}s)..."
+
+  local deadline=$(( $(date +%s) + WAIT_TIMEOUT ))
+  local all_ready=false
+
+  while [[ $(date +%s) -lt $deadline ]]; do
+    local total ready
+    total=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null | wc -l)
+    ready=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+      | awk '{print $2}' \
+      | awk -F'/' '$1==$2 {count++} END {print count+0}')
+
+    if [[ "$total" -gt 0 && "$ready" -eq "$total" ]]; then
+      all_ready=true
+      break
+    fi
+
+    echo "    готово: $ready / $total"
+    sleep 5
+  done
+
+  echo ""
+  if [[ "$all_ready" == "true" ]]; then
+    echo "  ✅ $ns — все поды Ready"
+  else
+    echo "  ❌ $ns — не все поды поднялись за ${WAIT_TIMEOUT}s"
+    echo ""
+    echo "  --- Проблемные поды ---"
+
+    # Поды не в Running/Completed
+    kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+      | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {print "    [" $3 "] " $1}' \
+      || true
+
+    echo ""
+    echo "  --- Причины (Events + LastState) ---"
+
+    # Для каждого не-Ready пода выводим describe с фильтром
+    kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+      | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {print $1}' \
+      | while read -r pod; do
+          echo ""
+          echo "  ┌── Pod: $pod"
+          kubectl describe pod "$pod" -n "$ns" 2>/dev/null \
+            | grep -A5 -E "^(Events|Reason|Message|State|Last State|Warning)" \
+            | sed 's/^/  │ /' || true
+          echo "  └──"
+
+          # Логи если есть
+          echo "  │ Logs (last 10 lines):"
+          kubectl logs "$pod" -n "$ns" --tail=10 2>/dev/null \
+            | sed 's/^/  │   /' || echo "  │   (логи недоступны)"
+        done
+  fi
+}
+
+# --- Обработка одного неймспейса ---
+process_namespace() {
+  local ns="$1"
+  echo ""
+  echo "━━━ Namespace: $ns ━━━"
+
+  if [[ "$ACTION" == "down" ]]; then
+    echo "  [1/4] Deployments → replicas=0"
+    scale_resources deployments "$ns" 0
+    echo "  [2/4] StatefulSets → replicas=0"
+    scale_resources statefulsets "$ns" 0
+    echo "  [3/4] DaemonSets → nodeSelector patch"
+    patch_daemonsets "$ns"
+    echo "  [4/4] CronJobs → suspend=true"
+    patch_cronjobs "$ns" true
+    echo "  ✓ $ns — готово"
+  else
+    echo "  [1/4] Deployments → replicas=1"
+    scale_resources deployments "$ns" 1
+    echo "  [2/4] StatefulSets → replicas=1"
+    scale_resources statefulsets "$ns" 1
+    echo "  [3/4] DaemonSets → nodeSelector убран"
+    patch_daemonsets "$ns"
+    echo "  [4/4] CronJobs → suspend=false"
+    patch_cronjobs "$ns" false
+    wait_and_check "$ns"
+  fi
+}
+
+# --- Точка входа ---
+if [[ -n "$SINGLE_NS" ]]; then
+  process_namespace "$SINGLE_NS"
+else
+  while IFS= read -r line <&3 || [[ -n "$line" ]]; do
+    line="${line// /}"
+    [[ -z "$line" ]] && continue
+    [[ "$line" == \#* ]] && continue
+    process_namespace "$line"
+  done 3< "$NS_FILE"
+fi
+
+echo ""
+echo "=== Всё готово ==="
