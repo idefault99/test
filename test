@@ -23,36 +23,38 @@ fi
 KUBECTL_ARGS=""
 [[ "$DRY_RUN" == "true" ]] && KUBECTL_ARGS="--dry-run=client"
 
-WAIT_TIMEOUT=120  # секунд ожидания Ready
+WAIT_TIMEOUT=120
+RESTART_THRESHOLD=3  # рестартов больше этого — считаем проблемой
 
 # --- Меню ---
 echo ""
 echo "Выбери действие:"
 echo "  1) Scale в 0  (+ suspend CronJobs)"
 echo "  2) Scale в 1  (+ unsuspend CronJobs)"
+echo "  3) Проверить статус NS из файла"
 echo ""
-read -rp "Введи 1 или 2: " CHOICE
+read -rp "Введи 1, 2 или 3: " CHOICE
 
 case "$CHOICE" in
-  1) ACTION="down" ;;
-  2) ACTION="up"   ;;
+  1) ACTION="down"  ;;
+  2) ACTION="up"    ;;
+  3) ACTION="check" ;;
   *) echo "Неверный выбор: $CHOICE"; exit 1 ;;
 esac
 
 echo ""
-echo "=== Действие: scale-$ACTION | dry-run: $DRY_RUN ==="
+echo "=== Действие: $ACTION | dry-run: $DRY_RUN ==="
 
-# --- Scale функции ---
+# ─────────────────────────────────────────────
+# SCALE функции
+# ─────────────────────────────────────────────
+
 scale_resources() {
-  local kind="$1"
-  local ns="$2"
-  local replicas="$3"
+  local kind="$1" ns="$2" replicas="$3"
   local names
-
   names=$(kubectl get "$kind" -n "$ns" \
     -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
   [[ -z "$names" ]] && return
-
   for name in $names; do
     echo "        → $kind/$name"
     kubectl scale "$kind" "$name" -n "$ns" --replicas="$replicas" $KUBECTL_ARGS
@@ -62,11 +64,9 @@ scale_resources() {
 patch_daemonsets() {
   local ns="$1"
   local names
-
   names=$(kubectl get daemonsets -n "$ns" \
     -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
   [[ -z "$names" ]] && return
-
   for name in $names; do
     echo "        → daemonset/$name"
     if [[ "$ACTION" == "down" ]]; then
@@ -80,14 +80,11 @@ patch_daemonsets() {
 }
 
 patch_cronjobs() {
-  local ns="$1"
-  local suspend="$2"
+  local ns="$1" suspend="$2"
   local names
-
   names=$(kubectl get cronjobs -n "$ns" \
     -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
   [[ -z "$names" ]] && return
-
   for name in $names; do
     echo "        → cronjob/$name"
     kubectl patch cronjob "$name" -n "$ns" $KUBECTL_ARGS \
@@ -95,7 +92,10 @@ patch_cronjobs() {
   done
 }
 
-# --- Ожидание и диагностика после scale-up ---
+# ─────────────────────────────────────────────
+# WAIT & DIAGNOSE после scale-up
+# ─────────────────────────────────────────────
+
 wait_and_check() {
   local ns="$1"
   [[ "$DRY_RUN" == "true" ]] && return
@@ -127,37 +127,155 @@ wait_and_check() {
     echo "  ✅ $ns — все поды Ready"
   else
     echo "  ❌ $ns — не все поды поднялись за ${WAIT_TIMEOUT}s"
-    echo ""
-    echo "  --- Проблемные поды ---"
-
-    # Поды не в Running/Completed
-    kubectl get pods -n "$ns" --no-headers 2>/dev/null \
-      | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {print "    [" $3 "] " $1}' \
-      || true
-
-    echo ""
-    echo "  --- Причины (Events + LastState) ---"
-
-    # Для каждого не-Ready пода выводим describe с фильтром
-    kubectl get pods -n "$ns" --no-headers 2>/dev/null \
-      | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {print $1}' \
-      | while read -r pod; do
-          echo ""
-          echo "  ┌── Pod: $pod"
-          kubectl describe pod "$pod" -n "$ns" 2>/dev/null \
-            | grep -A5 -E "^(Events|Reason|Message|State|Last State|Warning)" \
-            | sed 's/^/  │ /' || true
-          echo "  └──"
-
-          # Логи если есть
-          echo "  │ Logs (last 10 lines):"
-          kubectl logs "$pod" -n "$ns" --tail=10 2>/dev/null \
-            | sed 's/^/  │   /' || echo "  │   (логи недоступны)"
-        done
+    diagnose_pods "$ns"
   fi
 }
 
-# --- Обработка одного неймспейса ---
+# ─────────────────────────────────────────────
+# ДИАГНОСТИКА подов
+# ─────────────────────────────────────────────
+
+diagnose_pods() {
+  local ns="$1"
+
+  echo ""
+  echo "  --- Проблемные поды ---"
+  kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+    | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {
+        printf "    %-45s %-15s %s\n", $1, $3, $2
+      }' || true
+
+  echo ""
+  kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+    | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {print $1}' \
+    | while read -r pod; do
+        echo ""
+        echo "  ┌── Pod: $pod"
+
+        # Причина из state/lastState
+        local reason
+        reason=$(kubectl get pod "$pod" -n "$ns" \
+          -o jsonpath='{range .status.containerStatuses[*]}{.state}{.lastState}{end}' \
+          2>/dev/null || true)
+
+        # Events
+        echo "  │ Events:"
+        kubectl describe pod "$pod" -n "$ns" 2>/dev/null \
+          | awk '/^Events:/,0' \
+          | grep -v "^Events:" \
+          | grep -v "^$" \
+          | tail -5 \
+          | sed 's/^/  │   /' || true
+
+        # Логи
+        echo "  │ Logs (last 10):"
+        kubectl logs "$pod" -n "$ns" --tail=10 2>/dev/null \
+          | sed 's/^/  │   /' \
+          || kubectl logs "$pod" -n "$ns" --previous --tail=10 2>/dev/null \
+          | sed 's/^/  │   [prev] /' \
+          || echo "  │   (логи недоступны)"
+
+        echo "  └──"
+      done
+}
+
+# ─────────────────────────────────────────────
+# ПРОВЕРКА статуса NS (пункт 3)
+# ─────────────────────────────────────────────
+
+check_namespace() {
+  local ns="$1"
+  echo ""
+  echo "━━━ Namespace: $ns ━━━"
+
+  # Проверяем есть ли вообще workload'ы
+  local deploy_names sts_names
+  deploy_names=$(kubectl get deployments -n "$ns" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  sts_names=$(kubectl get statefulsets -n "$ns" \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+  if [[ -z "$deploy_names" && -z "$sts_names" ]]; then
+    echo "  ⚪ Нет Deployments и StatefulSets — пропускаем"
+    return
+  fi
+
+  local ns_ok=true
+
+  # --- Deployments ---
+  if [[ -n "$deploy_names" ]]; then
+    echo "  Deployments:"
+    for name in $deploy_names; do
+      local desired ready
+      desired=$(kubectl get deployment "$name" -n "$ns" \
+        -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+      ready=$(kubectl get deployment "$name" -n "$ns" \
+        -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+      ready="${ready:-0}"
+
+      if [[ "$desired" == "0" ]]; then
+        echo "    ⚪ $name — scaled to 0"
+      elif [[ "$ready" == "$desired" ]]; then
+        echo "    ✅ $name — $ready/$desired Running"
+      else
+        echo "    ❌ $name — $ready/$desired Running"
+        ns_ok=false
+      fi
+    done
+  fi
+
+  # --- StatefulSets ---
+  if [[ -n "$sts_names" ]]; then
+    echo "  StatefulSets:"
+    for name in $sts_names; do
+      local desired ready
+      desired=$(kubectl get statefulset "$name" -n "$ns" \
+        -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+      ready=$(kubectl get statefulset "$name" -n "$ns" \
+        -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+      ready="${ready:-0}"
+
+      if [[ "$desired" == "0" ]]; then
+        echo "    ⚪ $name — scaled to 0"
+      elif [[ "$ready" == "$desired" ]]; then
+        echo "    ✅ $name — $ready/$desired Running"
+      else
+        echo "    ❌ $name — $ready/$desired Running"
+        ns_ok=false
+      fi
+    done
+  fi
+
+  # --- Рестарты ---
+  echo "  Рестарты:"
+  local restart_issues=false
+  kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+    | while read -r pod_line; do
+        local pod_name restarts status
+        pod_name=$(echo "$pod_line" | awk '{print $1}')
+        status=$(echo "$pod_line"   | awk '{print $3}')
+        restarts=$(echo "$pod_line" | awk '{print $4}')
+
+        if [[ "$restarts" -gt "$RESTART_THRESHOLD" ]] 2>/dev/null; then
+          echo "    ⚠️  $pod_name — $restarts рестартов (статус: $status)"
+          restart_issues=true
+        fi
+      done
+
+  if [[ "$restart_issues" == "false" ]]; then
+    echo "    ✅ Рестартов сверх нормы нет (порог: $RESTART_THRESHOLD)"
+  fi
+
+  # --- Если есть проблемы — диагностика ---
+  if [[ "$ns_ok" == "false" ]]; then
+    diagnose_pods "$ns"
+  fi
+}
+
+# ─────────────────────────────────────────────
+# SCALE NS
+# ─────────────────────────────────────────────
+
 process_namespace() {
   local ns="$1"
   echo ""
@@ -186,15 +304,27 @@ process_namespace() {
   fi
 }
 
-# --- Точка входа ---
+# ─────────────────────────────────────────────
+# ТОЧКА ВХОДА
+# ─────────────────────────────────────────────
+
+run_for_ns() {
+  local ns="$1"
+  if [[ "$ACTION" == "check" ]]; then
+    check_namespace "$ns"
+  else
+    process_namespace "$ns"
+  fi
+}
+
 if [[ -n "$SINGLE_NS" ]]; then
-  process_namespace "$SINGLE_NS"
+  run_for_ns "$SINGLE_NS"
 else
   while IFS= read -r line <&3 || [[ -n "$line" ]]; do
     line="${line// /}"
     [[ -z "$line" ]] && continue
     [[ "$line" == \#* ]] && continue
-    process_namespace "$line"
+    run_for_ns "$line"
   done 3< "$NS_FILE"
 fi
 
