@@ -1,332 +1,371 @@
-#!/bin/bash
-# ns-scale.sh
-# Использование:
-#   ./ns-scale.sh <namespaces-file> [dry-run]   — из файла
-#   ./ns-scale.sh --ns <namespace> [dry-run]    — один неймспейс
-
+Добавь пункт где я могу подключиться к бд под определенным юзером, нужно для проверки корректности логина и пароля
+Также выводи какие права есть у пользователя
+Добавь пункт где я могу изменять добавлять и удалять права для пользователя
+#!/usr/bin/env bash
 set -euo pipefail
 
-SINGLE_NS=""
-NS_FILE=""
-DRY_RUN="false"
+# =========================
+# Настройки подключения
+# =========================
 
-# --- Парсинг аргументов ---
-if [[ "${1:-}" == "--ns" ]]; then
-  SINGLE_NS="${2:?Укажи неймспейс после --ns}"
-  DRY_RUN="${3:-false}"
-else
-  NS_FILE="${1:?Укажи файл с неймспейсами или --ns <namespace>}"
-  DRY_RUN="${2:-false}"
-  [[ ! -f "$NS_FILE" ]] && { echo "Файл не найден: $NS_FILE"; exit 1; }
-fi
+PGHOST="10.96.75.231"   # Haproxy
+PGPORT="5432"
+PGUSER="postgres"
+PGPASSWORD="Pkwfowgfji77#!@oo1"
+export PGPASSWORD
 
-KUBECTL_ARGS=""
-[[ "$DRY_RUN" == "true" ]] && KUBECTL_ARGS="--dry-run=client"
+DEFAULT_DB="${DEFAULT_DB:-postgres}"
+CURRENT_DB="$DEFAULT_DB"
+SAMPLE_ROWS="${SAMPLE_ROWS:-5}"
 
-WAIT_TIMEOUT=120
-RESTART_THRESHOLD=3  # рестартов больше этого — считаем проблемой
+PSQL_BASE=(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -X -v ON_ERROR_STOP=1 -P pager=off)
 
-# --- Меню ---
-echo ""
-echo "Выбери действие:"
-echo "  1) Scale в 0  (+ suspend CronJobs)"
-echo "  2) Scale в 1  (+ unsuspend CronJobs)"
-echo "  3) Проверить статус NS из файла"
-echo ""
-read -rp "Введи 1, 2 или 3: " CHOICE
-
-case "$CHOICE" in
-  1) ACTION="down"  ;;
-  2) ACTION="up"    ;;
-  3) ACTION="check" ;;
-  *) echo "Неверный выбор: $CHOICE"; exit 1 ;;
-esac
-
-echo ""
-echo "=== Действие: $ACTION | dry-run: $DRY_RUN ==="
-
-# ─────────────────────────────────────────────
-# SCALE функции
-# ─────────────────────────────────────────────
-
-scale_resources() {
-  local kind="$1" ns="$2" replicas="$3"
-  local names
-  names=$(kubectl get "$kind" -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-  [[ -z "$names" ]] && return
-  for name in $names; do
-    echo "        → $kind/$name"
-    kubectl scale "$kind" "$name" -n "$ns" --replicas="$replicas" $KUBECTL_ARGS
-  done
+header() {
+  echo
+  echo "============================================================"
+  echo "$1"
+  echo "============================================================"
 }
 
-patch_daemonsets() {
-  local ns="$1"
-  local names
-  names=$(kubectl get daemonsets -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-  [[ -z "$names" ]] && return
-  for name in $names; do
-    echo "        → daemonset/$name"
-    if [[ "$ACTION" == "down" ]]; then
-      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}'
-    else
-      kubectl patch daemonset "$name" -n "$ns" $KUBECTL_ARGS \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'
-    fi
-  done
+run_sql() {
+  local db="$1"
+  local sql="$2"
+  "${PSQL_BASE[@]}" -d "$db" -c "$sql"
 }
 
-patch_cronjobs() {
-  local ns="$1" suspend="$2"
-  local names
-  names=$(kubectl get cronjobs -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-  [[ -z "$names" ]] && return
-  for name in $names; do
-    echo "        → cronjob/$name"
-    kubectl patch cronjob "$name" -n "$ns" $KUBECTL_ARGS \
-      -p "{\"spec\":{\"suspend\":$suspend}}"
-  done
+run_sql_quiet() {
+  local db="$1"
+  local sql="$2"
+  "${PSQL_BASE[@]}" -d "$db" -A -t -c "$sql"
 }
 
-# ─────────────────────────────────────────────
-# WAIT & DIAGNOSE после scale-up
-# ─────────────────────────────────────────────
-
-wait_and_check() {
-  local ns="$1"
-  [[ "$DRY_RUN" == "true" ]] && return
-
-  echo ""
-  echo "  ⏳ Ожидаем Ready всех подов в $ns (timeout: ${WAIT_TIMEOUT}s)..."
-
-  local deadline=$(( $(date +%s) + WAIT_TIMEOUT ))
-  local all_ready=false
-
-  while [[ $(date +%s) -lt $deadline ]]; do
-    local total ready
-    total=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null | wc -l)
-    ready=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null \
-      | awk '{print $2}' \
-      | awk -F'/' '$1==$2 {count++} END {print count+0}')
-
-    if [[ "$total" -gt 0 && "$ready" -eq "$total" ]]; then
-      all_ready=true
-      break
-    fi
-
-    echo "    готово: $ready / $total"
-    sleep 5
-  done
-
-  echo ""
-  if [[ "$all_ready" == "true" ]]; then
-    echo "  ✅ $ns — все поды Ready"
-  else
-    echo "  ❌ $ns — не все поды поднялись за ${WAIT_TIMEOUT}s"
-    diagnose_pods "$ns"
-  fi
+pause() {
+  echo
+  read -r -p "Нажми Enter для продолжения..." _
 }
 
-# ─────────────────────────────────────────────
-# ДИАГНОСТИКА подов
-# ─────────────────────────────────────────────
-
-diagnose_pods() {
-  local ns="$1"
-
-  echo ""
-  echo "  --- Проблемные поды ---"
-  kubectl get pods -n "$ns" --no-headers 2>/dev/null \
-    | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {
-        printf "    %-45s %-15s %s\n", $1, $3, $2
-      }' || true
-
-  echo ""
-  kubectl get pods -n "$ns" --no-headers 2>/dev/null \
-    | awk '$3 != "Running" && $3 != "Completed" && $3 != "Succeeded" {print $1}' \
-    | while read -r pod; do
-        echo ""
-        echo "  ┌── Pod: $pod"
-
-        # Причина из state/lastState
-        local reason
-        reason=$(kubectl get pod "$pod" -n "$ns" \
-          -o jsonpath='{range .status.containerStatuses[*]}{.state}{.lastState}{end}' \
-          2>/dev/null || true)
-
-        # Events
-        echo "  │ Events:"
-        kubectl describe pod "$pod" -n "$ns" 2>/dev/null \
-          | awk '/^Events:/,0' \
-          | grep -v "^Events:" \
-          | grep -v "^$" \
-          | tail -5 \
-          | sed 's/^/  │   /' || true
-
-        # Логи
-        echo "  │ Logs (last 10):"
-        kubectl logs "$pod" -n "$ns" --tail=10 2>/dev/null \
-          | sed 's/^/  │   /' \
-          || kubectl logs "$pod" -n "$ns" --previous --tail=10 2>/dev/null \
-          | sed 's/^/  │   [prev] /' \
-          || echo "  │   (логи недоступны)"
-
-        echo "  └──"
-      done
+check_connection() {
+  header "Проверка подключения"
+  run_sql "$DEFAULT_DB" "
+    select
+      current_user as current_user,
+      current_database() as current_database,
+      inet_server_addr() as server_ip,
+      inet_server_port() as server_port,
+      version() as postgres_version;
+  "
 }
 
-# ─────────────────────────────────────────────
-# ПРОВЕРКА статуса NS (пункт 3)
-# ─────────────────────────────────────────────
+list_databases() {
+  header "Список БД"
+  run_sql "$DEFAULT_DB" "
+    select
+      datname as database_name,
+      pg_size_pretty(pg_database_size(datname)) as size
+    from pg_database
+    where datistemplate = false
+    order by datname;
+  "
+}
 
-check_namespace() {
-  local ns="$1"
-  echo ""
-  echo "━━━ Namespace: $ns ━━━"
+select_database() {
+  header "Выбор БД"
 
-  # Проверяем есть ли вообще workload'ы
-  local deploy_names sts_names
-  deploy_names=$(kubectl get deployments -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-  sts_names=$(kubectl get statefulsets -n "$ns" \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  mapfile -t DBS < <(run_sql_quiet "$DEFAULT_DB" "
+    select datname
+    from pg_database
+    where datistemplate = false
+    order by datname;
+  ")
 
-  if [[ -z "$deploy_names" && -z "$sts_names" ]]; then
-    echo "  ⚪ Нет Deployments и StatefulSets — пропускаем"
+  if [[ ${#DBS[@]} -eq 0 ]]; then
+    echo "Базы данных не найдены."
     return
   fi
 
-  local ns_ok=true
+  echo "Доступные БД:"
+  local i=1
+  for db in "${DBS[@]}"; do
+    echo "  $i) $db"
+    ((i++))
+  done
 
-  # --- Deployments ---
-  if [[ -n "$deploy_names" ]]; then
-    echo "  Deployments:"
-    for name in $deploy_names; do
-      local desired ready
-      desired=$(kubectl get deployment "$name" -n "$ns" \
-        -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-      ready=$(kubectl get deployment "$name" -n "$ns" \
-        -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-      ready="${ready:-0}"
+  echo
+  read -r -p "Введи номер БД: " db_num
 
-      if [[ "$desired" == "0" ]]; then
-        echo "    ⚪ $name — scaled to 0"
-      elif [[ "$ready" == "$desired" ]]; then
-        echo "    ✅ $name — $ready/$desired Running"
-      else
-        echo "    ❌ $name — $ready/$desired Running"
-        ns_ok=false
-      fi
-    done
+  if [[ ! "$db_num" =~ ^[0-9]+$ ]]; then
+    echo "Некорректный ввод."
+    return
   fi
 
-  # --- StatefulSets ---
-  if [[ -n "$sts_names" ]]; then
-    echo "  StatefulSets:"
-    for name in $sts_names; do
-      local desired ready
-      desired=$(kubectl get statefulset "$name" -n "$ns" \
-        -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-      ready=$(kubectl get statefulset "$name" -n "$ns" \
-        -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-      ready="${ready:-0}"
-
-      if [[ "$desired" == "0" ]]; then
-        echo "    ⚪ $name — scaled to 0"
-      elif [[ "$ready" == "$desired" ]]; then
-        echo "    ✅ $name — $ready/$desired Running"
-      else
-        echo "    ❌ $name — $ready/$desired Running"
-        ns_ok=false
-      fi
-    done
+  if (( db_num < 1 || db_num > ${#DBS[@]} )); then
+    echo "Нет такого номера."
+    return
   fi
 
-  # --- Рестарты ---
-  echo "  Рестарты:"
-  local restart_issues=false
-  kubectl get pods -n "$ns" --no-headers 2>/dev/null \
-    | while read -r pod_line; do
-        local pod_name restarts status
-        pod_name=$(echo "$pod_line" | awk '{print $1}')
-        status=$(echo "$pod_line"   | awk '{print $3}')
-        restarts=$(echo "$pod_line" | awk '{print $4}')
-
-        if [[ "$restarts" -gt "$RESTART_THRESHOLD" ]] 2>/dev/null; then
-          echo "    ⚠️  $pod_name — $restarts рестартов (статус: $status)"
-          restart_issues=true
-        fi
-      done
-
-  if [[ "$restart_issues" == "false" ]]; then
-    echo "    ✅ Рестартов сверх нормы нет (порог: $RESTART_THRESHOLD)"
-  fi
-
-  # --- Если есть проблемы — диагностика ---
-  if [[ "$ns_ok" == "false" ]]; then
-    diagnose_pods "$ns"
-  fi
+  CURRENT_DB="${DBS[$((db_num-1))]}"
+  echo "Выбрана БД: $CURRENT_DB"
 }
 
-# ─────────────────────────────────────────────
-# SCALE NS
-# ─────────────────────────────────────────────
+show_current_db() {
+  header "Текущая БД"
+  echo "Сейчас выбрана: $CURRENT_DB"
+}
 
-process_namespace() {
-  local ns="$1"
-  echo ""
-  echo "━━━ Namespace: $ns ━━━"
+list_schemas() {
+  header "Схемы в БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select schema_name
+    from information_schema.schemata
+    where schema_name not in ('pg_catalog', 'information_schema')
+    order by schema_name;
+  "
+}
 
-  if [[ "$ACTION" == "down" ]]; then
-    echo "  [1/4] Deployments → replicas=0"
-    scale_resources deployments "$ns" 0
-    echo "  [2/4] StatefulSets → replicas=0"
-    scale_resources statefulsets "$ns" 0
-    echo "  [3/4] DaemonSets → nodeSelector patch"
-    patch_daemonsets "$ns"
-    echo "  [4/4] CronJobs → suspend=true"
-    patch_cronjobs "$ns" true
-    echo "  ✓ $ns — готово"
+list_tables() {
+  header "Таблицы в БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      table_schema,
+      table_name
+    from information_schema.tables
+    where table_type = 'BASE TABLE'
+      and table_schema not in ('pg_catalog', 'information_schema')
+    order by table_schema, table_name;
+  "
+}
+
+table_sizes() {
+  header "Размеры таблиц в БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      n.nspname as schema_name,
+      c.relname as table_name,
+      pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
+      c.reltuples::bigint as estimated_rows
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where c.relkind = 'r'
+      and n.nspname not in ('pg_catalog', 'information_schema')
+    order by pg_total_relation_size(c.oid) desc
+    limit 100;
+  "
+}
+
+pick_table() {
+  mapfile -t TABLES < <(run_sql_quiet "$CURRENT_DB" "
+    select n.nspname || '|' || c.relname
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where c.relkind = 'r'
+      and n.nspname not in ('pg_catalog', 'information_schema')
+    order by n.nspname, c.relname;
+  ")
+
+  if [[ ${#TABLES[@]} -eq 0 ]]; then
+    echo "В БД $CURRENT_DB нет пользовательских таблиц."
+    return 1
+  fi
+
+  echo "Доступные таблицы:"
+  local i=1
+  local item schema table
+  for item in "${TABLES[@]}"; do
+    schema="${item%%|*}"
+    table="${item##*|}"
+    echo "  $i) ${schema}.${table}"
+    ((i++))
+  done
+
+  echo
+  read -r -p "Введи номер таблицы: " tbl_num
+
+  if [[ ! "$tbl_num" =~ ^[0-9]+$ ]]; then
+    echo "Некорректный ввод."
+    return 1
+  fi
+
+  if (( tbl_num < 1 || tbl_num > ${#TABLES[@]} )); then
+    echo "Нет такого номера."
+    return 1
+  fi
+
+  SELECTED_ITEM="${TABLES[$((tbl_num-1))]}"
+  SELECTED_SCHEMA="${SELECTED_ITEM%%|*}"
+  SELECTED_TABLE="${SELECTED_ITEM##*|}"
+  return 0
+}
+
+table_columns() {
+  header "Выбор таблицы для просмотра колонок"
+  pick_table || return
+
+  header "Колонки таблицы ${SELECTED_SCHEMA}.${SELECTED_TABLE}"
+  run_sql "$CURRENT_DB" "
+    select
+      ordinal_position,
+      column_name,
+      data_type,
+      is_nullable,
+      coalesce(character_maximum_length::text, '') as max_length,
+      coalesce(column_default, '') as default_value
+    from information_schema.columns
+    where table_schema = '${SELECTED_SCHEMA}'
+      and table_name = '${SELECTED_TABLE}'
+    order by ordinal_position;
+  "
+}
+
+table_sample() {
+  header "Выбор таблицы для просмотра строк"
+  pick_table || return
+
+  header "Первые ${SAMPLE_ROWS} строк из ${SELECTED_SCHEMA}.${SELECTED_TABLE}"
+  run_sql "$CURRENT_DB" "
+    select *
+    from \"${SELECTED_SCHEMA}\".\"${SELECTED_TABLE}\"
+    limit ${SAMPLE_ROWS};
+  "
+}
+
+database_size() {
+  header "Размер БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      current_database() as database_name,
+      pg_size_pretty(pg_database_size(current_database())) as size,
+      pg_database_size(current_database()) as size_bytes;
+  "
+}
+
+connections() {
+  header "Активные подключения"
+  run_sql "$DEFAULT_DB" "
+    select
+      datname,
+      usename,
+      state,
+      count(*) as connections
+    from pg_stat_activity
+    where datname is not null
+    group by datname, usename, state
+    order by connections desc, datname, usename, state;
+  "
+}
+
+long_queries() {
+  header "Долгие запросы"
+  run_sql "$DEFAULT_DB" "
+    select
+      pid,
+      usename,
+      datname,
+      state,
+      now() - query_start as duration,
+      left(query, 300) as query
+    from pg_stat_activity
+    where state <> 'idle'
+      and query not ilike '%pg_stat_activity%'
+    order by query_start asc;
+  "
+}
+
+vacuum_stats() {
+  header "Vacuum/Analyze статистика по БД: $CURRENT_DB"
+  run_sql "$CURRENT_DB" "
+    select
+      schemaname,
+      relname,
+      n_live_tup,
+      n_dead_tup,
+      last_vacuum,
+      last_autovacuum,
+      last_analyze,
+      last_autoanalyze
+    from pg_stat_user_tables
+    order by n_dead_tup desc
+    limit 50;
+  "
+}
+
+change_sample_rows() {
+  echo
+  read -r -p "Сколько строк показывать (текущее значение: $SAMPLE_ROWS): " new_rows
+  if [[ "$new_rows" =~ ^[0-9]+$ ]] && (( new_rows > 0 )); then
+    SAMPLE_ROWS="$new_rows"
+    echo "Новое значение SAMPLE_ROWS: $SAMPLE_ROWS"
   else
-    echo "  [1/4] Deployments → replicas=1"
-    scale_resources deployments "$ns" 1
-    echo "  [2/4] StatefulSets → replicas=1"
-    scale_resources statefulsets "$ns" 1
-    echo "  [3/4] DaemonSets → nodeSelector убран"
-    patch_daemonsets "$ns"
-    echo "  [4/4] CronJobs → suspend=false"
-    patch_cronjobs "$ns" false
-    wait_and_check "$ns"
+    echo "Некорректное число."
   fi
 }
 
-# ─────────────────────────────────────────────
-# ТОЧКА ВХОДА
-# ─────────────────────────────────────────────
+run_custom_sql() {
+  header "Выполнить SQL в БД: $CURRENT_DB"
+  echo "Введи SQL-запрос одной строкой."
+  echo "Пример:"
+  echo "  select now();"
+  echo "  select * from public.my_table limit 10;"
+  echo
 
-run_for_ns() {
-  local ns="$1"
-  if [[ "$ACTION" == "check" ]]; then
-    check_namespace "$ns"
-  else
-    process_namespace "$ns"
+  read -r -p "SQL> " user_sql
+
+  if [[ -z "${user_sql// }" ]]; then
+    echo "Пустой запрос."
+    return
   fi
+
+  echo
+  echo "Будет выполнено в БД: $CURRENT_DB"
+  echo "Запрос:"
+  echo "$user_sql"
+  echo
+
+  run_sql "$CURRENT_DB" "$user_sql"
 }
 
-if [[ -n "$SINGLE_NS" ]]; then
-  run_for_ns "$SINGLE_NS"
-else
-  while IFS= read -r line <&3 || [[ -n "$line" ]]; do
-    line="${line// /}"
-    [[ -z "$line" ]] && continue
-    [[ "$line" == \#* ]] && continue
-    run_for_ns "$line"
-  done 3< "$NS_FILE"
-fi
+main_menu() {
+  while true; do
+    header "Postgres menu | host=$PGHOST port=$PGPORT user=$PGUSER current_db=$CURRENT_DB sample_rows=$SAMPLE_ROWS"
+    echo "1) Проверить подключение"
+    echo "2) Показать список БД"
+    echo "3) Выбрать БД"
+    echo "4) Показать текущую БД"
+    echo "5) Показать схемы"
+    echo "6) Показать таблицы"
+    echo "7) Показать размеры таблиц"
+    echo "8) Показать колонки таблицы"
+    echo "9) Показать первые N строк таблицы"
+    echo "10) Показать размер текущей БД"
+    echo "11) Показать активные подключения"
+    echo "12) Показать долгие запросы"
+    echo "13) Показать vacuum/analyze статистику"
+    echo "14) Изменить лимит строк sample"
+    echo "15) Выполнить SQL-запрос"
+    echo "0) Выход"
+    echo
 
-echo ""
-echo "=== Всё готово ==="
+    read -r -p "Выбери пункт меню: " choice
+
+    case "$choice" in
+      1) check_connection; pause ;;
+      2) list_databases; pause ;;
+      3) select_database; pause ;;
+      4) show_current_db; pause ;;
+      5) list_schemas; pause ;;
+      6) list_tables; pause ;;
+      7) table_sizes; pause ;;
+      8) table_columns; pause ;;
+      9) table_sample; pause ;;
+      10) database_size; pause ;;
+      11) connections; pause ;;
+      12) long_queries; pause ;;
+      13) vacuum_stats; pause ;;
+      14) change_sample_rows; pause ;;
+      15) run_custom_sql; pause ;;
+      0) echo "Выход."; exit 0 ;;
+      *) echo "Неизвестный пункт меню."; pause ;;
+    esac
+  done
+}
+
+main_menu
