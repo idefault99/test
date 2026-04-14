@@ -1,6 +1,3 @@
-Добавь пункт где я могу подключиться к бд под определенным юзером, нужно для проверки корректности логина и пароля
-Также выводи какие права есть у пользователя
-Добавь пункт где я могу изменять добавлять и удалять права для пользователя
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -323,47 +320,451 @@ run_custom_sql() {
   run_sql "$CURRENT_DB" "$user_sql"
 }
 
+# =========================
+# Показать права пользователя
+# =========================
+
+show_user_privileges() {
+  local target_user="$1"
+  local target_db="$2"
+
+  header "Права пользователя: $target_user"
+
+  echo
+  echo "--- Атрибуты роли ---"
+  run_sql "$DEFAULT_DB" "
+    select
+      rolname,
+      rolsuper        as superuser,
+      rolinherit      as inherit,
+      rolcreaterole   as createrole,
+      rolcreatedb     as createdb,
+      rolcanlogin     as canlogin,
+      rolreplication  as replication,
+      rolbypassrls    as bypassrls,
+      rolconnlimit    as connlimit
+    from pg_roles
+    where rolname = '${target_user}';
+  "
+
+  echo
+  echo "--- Членство в ролях ---"
+  run_sql "$DEFAULT_DB" "
+    select
+      r.rolname  as role,
+      m.rolname  as member_of,
+      g.admin_option
+    from pg_auth_members g
+    join pg_roles r on r.oid = g.member
+    join pg_roles m on m.oid = g.roleid
+    where r.rolname = '${target_user}'
+    order by m.rolname;
+  "
+
+  echo
+  echo "--- Права на базы данных ---"
+  run_sql "$DEFAULT_DB" "
+    select
+      datname as database,
+      array_to_string(
+        array(
+          select case
+            when has_database_privilege('${target_user}', datname, 'CONNECT')  then 'CONNECT'  end
+          union all select case
+            when has_database_privilege('${target_user}', datname, 'CREATE')   then 'CREATE'   end
+          union all select case
+            when has_database_privilege('${target_user}', datname, 'TEMP')     then 'TEMP'     end
+        ), ', '
+      ) as privileges
+    from pg_database
+    where datistemplate = false
+    order by datname;
+  "
+
+  echo
+  echo "--- Права на схемы в БД: $target_db ---"
+  run_sql "$target_db" "
+    select
+      nspname as schema,
+      array_to_string(
+        array(
+          select case when has_schema_privilege('${target_user}', nspname, 'USAGE')  then 'USAGE'  end
+          union all select case when has_schema_privilege('${target_user}', nspname, 'CREATE') then 'CREATE' end
+        ), ', '
+      ) as privileges
+    from pg_namespace
+    where nspname not in ('pg_catalog', 'information_schema', 'pg_toast')
+    order by nspname;
+  "
+
+  echo
+  echo "--- Права на таблицы в БД: $target_db ---"
+  run_sql "$target_db" "
+    select
+      table_schema,
+      table_name,
+      string_agg(privilege_type, ', ' order by privilege_type) as privileges
+    from information_schema.role_table_grants
+    where grantee = '${target_user}'
+    group by table_schema, table_name
+    order by table_schema, table_name;
+  "
+
+  echo
+  echo "--- Права на sequences в БД: $target_db ---"
+  run_sql "$target_db" "
+    select
+      sequence_schema,
+      sequence_name,
+      string_agg(privilege_type, ', ' order by privilege_type) as privileges
+    from information_schema.role_usage_grants
+    where object_type = 'SEQUENCE'
+      and grantee = '${target_user}'
+    group by sequence_schema, sequence_name
+    order by sequence_schema, sequence_name;
+  "
+}
+
+# =========================
+# Подключение под пользователем (проверка логина/пароля)
+# =========================
+
+test_user_connection() {
+  header "Проверка подключения под пользователем"
+
+  read -r -p "Имя пользователя: " test_user
+  if [[ -z "${test_user// }" ]]; then
+    echo "Пустое имя пользователя."
+    return
+  fi
+
+  # Читаем пароль без echo
+  local test_password
+  read -r -s -p "Пароль: " test_password
+  echo
+
+  # Выбор БД для подключения
+  mapfile -t DBS < <(run_sql_quiet "$DEFAULT_DB" "
+    select datname
+    from pg_database
+    where datistemplate = false
+    order by datname;
+  ")
+
+  echo
+  echo "Выбери БД для подключения:"
+  local i=1
+  for db in "${DBS[@]}"; do
+    echo "  $i) $db"
+    ((i++))
+  done
+  echo "  0) Использовать текущую ($CURRENT_DB)"
+  echo
+
+  read -r -p "Номер БД (или 0): " db_choice
+
+  local target_db="$CURRENT_DB"
+  if [[ "$db_choice" =~ ^[1-9][0-9]*$ ]] && (( db_choice >= 1 && db_choice <= ${#DBS[@]} )); then
+    target_db="${DBS[$((db_choice-1))]}"
+  fi
+
+  echo
+  echo "Подключение: user=$test_user db=$target_db host=$PGHOST port=$PGPORT"
+  echo
+
+  # Пробуем подключиться от имени test_user
+  local connect_result
+  if PGPASSWORD="$test_password" psql \
+      -h "$PGHOST" -p "$PGPORT" \
+      -U "$test_user" \
+      -d "$target_db" \
+      -X -v ON_ERROR_STOP=1 -P pager=off \
+      -c "select current_user, current_database(), inet_server_addr() as server_ip, inet_server_port() as server_port;" \
+      2>&1; then
+    echo
+    echo "✔ Подключение успешно!"
+  else
+    echo
+    echo "✘ Подключение не удалось. Проверь логин, пароль или права на подключение к БД."
+    return
+  fi
+
+  # Показываем права этого пользователя через основное подключение (с правами admin)
+  show_user_privileges "$test_user" "$target_db"
+}
+
+# =========================
+# Управление правами пользователя
+# =========================
+
+pick_user() {
+  mapfile -t USERS < <(run_sql_quiet "$DEFAULT_DB" "
+    select rolname
+    from pg_roles
+    where rolcanlogin = true
+    order by rolname;
+  ")
+
+  if [[ ${#USERS[@]} -eq 0 ]]; then
+    echo "Пользователи не найдены."
+    return 1
+  fi
+
+  echo "Пользователи с правом входа:"
+  local i=1
+  for u in "${USERS[@]}"; do
+    echo "  $i) $u"
+    ((i++))
+  done
+  echo
+
+  read -r -p "Введи номер пользователя: " u_num
+  if [[ ! "$u_num" =~ ^[0-9]+$ ]] || (( u_num < 1 || u_num > ${#USERS[@]} )); then
+    echo "Некорректный ввод."
+    return 1
+  fi
+
+  SELECTED_USER="${USERS[$((u_num-1))]}"
+  return 0
+}
+
+manage_user_privileges() {
+  header "Управление правами пользователя"
+
+  pick_user || return
+  local target_user="$SELECTED_USER"
+
+  # Показываем текущие права сразу
+  show_user_privileges "$target_user" "$CURRENT_DB"
+
+  while true; do
+    header "Управление правами: $target_user | БД: $CURRENT_DB"
+    echo "1)  GRANT  — права на БД (CONNECT/CREATE/TEMP)"
+    echo "2)  REVOKE — права на БД"
+    echo "3)  GRANT  — права на схему (USAGE/CREATE)"
+    echo "4)  REVOKE — права на схему"
+    echo "5)  GRANT  — права на таблицу (SELECT/INSERT/UPDATE/DELETE/ALL)"
+    echo "6)  REVOKE — права на таблицу"
+    echo "7)  GRANT  — права на все таблицы схемы"
+    echo "8)  REVOKE — права на все таблицы схемы"
+    echo "9)  GRANT  — роль пользователю"
+    echo "10) REVOKE — роль у пользователя"
+    echo "11) ALTER ROLE — атрибуты (SUPERUSER/CREATEDB/CREATEROLE/LOGIN и др.)"
+    echo "12) Показать текущие права"
+    echo "0)  Назад"
+    echo
+
+    read -r -p "Выбери действие: " priv_choice
+
+    case "$priv_choice" in
+
+      1)
+        echo "Привилегии: CONNECT, CREATE, TEMP (через запятую или ALL)"
+        read -r -p "Привилегии: " privs
+        local db_for_grant
+        read -r -p "На БД (Enter = $CURRENT_DB): " db_for_grant
+        db_for_grant="${db_for_grant:-$CURRENT_DB}"
+        run_sql "$DEFAULT_DB" "GRANT ${privs} ON DATABASE \"${db_for_grant}\" TO \"${target_user}\";"
+        echo "✔ GRANT выполнен."
+        ;;
+
+      2)
+        echo "Привилегии: CONNECT, CREATE, TEMP (через запятую или ALL)"
+        read -r -p "Привилегии: " privs
+        local db_for_revoke
+        read -r -p "На БД (Enter = $CURRENT_DB): " db_for_revoke
+        db_for_revoke="${db_for_revoke:-$CURRENT_DB}"
+        run_sql "$DEFAULT_DB" "REVOKE ${privs} ON DATABASE \"${db_for_revoke}\" FROM \"${target_user}\";"
+        echo "✔ REVOKE выполнен."
+        ;;
+
+      3)
+        echo "Схемы в БД $CURRENT_DB:"
+        run_sql_quiet "$CURRENT_DB" "
+          select nspname from pg_namespace
+          where nspname not in ('pg_catalog','information_schema','pg_toast')
+          order by nspname;
+        " | nl -ba
+        echo "Привилегии: USAGE, CREATE (через запятую или ALL)"
+        read -r -p "Схема: " schema_name
+        read -r -p "Привилегии: " privs
+        run_sql "$CURRENT_DB" "GRANT ${privs} ON SCHEMA \"${schema_name}\" TO \"${target_user}\";"
+        echo "✔ GRANT выполнен."
+        ;;
+
+      4)
+        echo "Схемы в БД $CURRENT_DB:"
+        run_sql_quiet "$CURRENT_DB" "
+          select nspname from pg_namespace
+          where nspname not in ('pg_catalog','information_schema','pg_toast')
+          order by nspname;
+        " | nl -ba
+        read -r -p "Схема: " schema_name
+        echo "Привилегии: USAGE, CREATE (через запятую или ALL)"
+        read -r -p "Привилегии: " privs
+        run_sql "$CURRENT_DB" "REVOKE ${privs} ON SCHEMA \"${schema_name}\" FROM \"${target_user}\";"
+        echo "✔ REVOKE выполнен."
+        ;;
+
+      5)
+        pick_table || continue
+        echo "Привилегии: SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, ALL"
+        read -r -p "Привилегии: " privs
+        run_sql "$CURRENT_DB" "GRANT ${privs} ON TABLE \"${SELECTED_SCHEMA}\".\"${SELECTED_TABLE}\" TO \"${target_user}\";"
+        echo "✔ GRANT выполнен."
+        ;;
+
+      6)
+        pick_table || continue
+        echo "Привилегии: SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, ALL"
+        read -r -p "Привилегии: " privs
+        run_sql "$CURRENT_DB" "REVOKE ${privs} ON TABLE \"${SELECTED_SCHEMA}\".\"${SELECTED_TABLE}\" FROM \"${target_user}\";"
+        echo "✔ REVOKE выполнен."
+        ;;
+
+      7)
+        echo "Схемы в БД $CURRENT_DB:"
+        run_sql_quiet "$CURRENT_DB" "
+          select nspname from pg_namespace
+          where nspname not in ('pg_catalog','information_schema','pg_toast')
+          order by nspname;
+        " | nl -ba
+        read -r -p "Схема: " schema_name
+        echo "Привилегии: SELECT, INSERT, UPDATE, DELETE, ALL"
+        read -r -p "Привилегии: " privs
+        run_sql "$CURRENT_DB" "GRANT ${privs} ON ALL TABLES IN SCHEMA \"${schema_name}\" TO \"${target_user}\";"
+        echo
+        read -r -p "Установить DEFAULT PRIVILEGES для новых таблиц? (y/N): " set_default
+        if [[ "${set_default,,}" == "y" ]]; then
+          run_sql "$CURRENT_DB" "ALTER DEFAULT PRIVILEGES IN SCHEMA \"${schema_name}\" GRANT ${privs} ON TABLES TO \"${target_user}\";"
+        fi
+        echo "✔ GRANT выполнен."
+        ;;
+
+      8)
+        echo "Схемы в БД $CURRENT_DB:"
+        run_sql_quiet "$CURRENT_DB" "
+          select nspname from pg_namespace
+          where nspname not in ('pg_catalog','information_schema','pg_toast')
+          order by nspname;
+        " | nl -ba
+        read -r -p "Схема: " schema_name
+        echo "Привилегии: SELECT, INSERT, UPDATE, DELETE, ALL"
+        read -r -p "Привилегии: " privs
+        run_sql "$CURRENT_DB" "REVOKE ${privs} ON ALL TABLES IN SCHEMA \"${schema_name}\" FROM \"${target_user}\";"
+        echo "✔ REVOKE выполнен."
+        ;;
+
+      9)
+        echo "Доступные роли:"
+        run_sql_quiet "$DEFAULT_DB" "
+          select rolname from pg_roles
+          where rolname <> '${target_user}'
+          order by rolname;
+        " | nl -ba
+        read -r -p "Имя роли: " role_name
+        read -r -p "WITH ADMIN OPTION? (y/N): " with_admin
+        local admin_opt=""
+        [[ "${with_admin,,}" == "y" ]] && admin_opt=" WITH ADMIN OPTION"
+        run_sql "$DEFAULT_DB" "GRANT \"${role_name}\" TO \"${target_user}\"${admin_opt};"
+        echo "✔ GRANT роли выполнен."
+        ;;
+
+      10)
+        echo "Текущие роли пользователя $target_user:"
+        run_sql "$DEFAULT_DB" "
+          select m.rolname as role
+          from pg_auth_members g
+          join pg_roles r on r.oid = g.member
+          join pg_roles m on m.oid = g.roleid
+          where r.rolname = '${target_user}'
+          order by m.rolname;
+        "
+        read -r -p "Имя роли для отзыва: " role_name
+        run_sql "$DEFAULT_DB" "REVOKE \"${role_name}\" FROM \"${target_user}\";"
+        echo "✔ REVOKE роли выполнен."
+        ;;
+
+      11)
+        echo "Изменить атрибуты роли $target_user."
+        echo "Доступные флаги (пример: SUPERUSER, NOSUPERUSER, CREATEDB, NOCREATEDB,"
+        echo "  CREATEROLE, NOCREATEROLE, LOGIN, NOLOGIN, REPLICATION, NOREPLICATION,"
+        echo "  BYPASSRLS, NOBYPASSRLS, CONNECTION LIMIT N, PASSWORD 'xxx', VALID UNTIL 'date')"
+        read -r -p "Атрибуты: " role_attrs
+        if [[ -z "${role_attrs// }" ]]; then
+          echo "Пустой ввод."
+        else
+          run_sql "$DEFAULT_DB" "ALTER ROLE \"${target_user}\" ${role_attrs};"
+          echo "✔ ALTER ROLE выполнен."
+        fi
+        ;;
+
+      12)
+        show_user_privileges "$target_user" "$CURRENT_DB"
+        ;;
+
+      0)
+        return
+        ;;
+
+      *)
+        echo "Неизвестный пункт."
+        ;;
+    esac
+
+    pause
+  done
+}
+
+# =========================
+# Главное меню
+# =========================
+
 main_menu() {
   while true; do
     header "Postgres menu | host=$PGHOST port=$PGPORT user=$PGUSER current_db=$CURRENT_DB sample_rows=$SAMPLE_ROWS"
-    echo "1) Проверить подключение"
-    echo "2) Показать список БД"
-    echo "3) Выбрать БД"
-    echo "4) Показать текущую БД"
-    echo "5) Показать схемы"
-    echo "6) Показать таблицы"
-    echo "7) Показать размеры таблиц"
-    echo "8) Показать колонки таблицы"
-    echo "9) Показать первые N строк таблицы"
+    echo "1)  Проверить подключение"
+    echo "2)  Показать список БД"
+    echo "3)  Выбрать БД"
+    echo "4)  Показать текущую БД"
+    echo "5)  Показать схемы"
+    echo "6)  Показать таблицы"
+    echo "7)  Показать размеры таблиц"
+    echo "8)  Показать колонки таблицы"
+    echo "9)  Показать первые N строк таблицы"
     echo "10) Показать размер текущей БД"
     echo "11) Показать активные подключения"
     echo "12) Показать долгие запросы"
     echo "13) Показать vacuum/analyze статистику"
     echo "14) Изменить лимит строк sample"
     echo "15) Выполнить SQL-запрос"
-    echo "0) Выход"
+    echo "16) Проверить подключение под пользователем"
+    echo "17) Управление правами пользователя"
+    echo "0)  Выход"
     echo
 
     read -r -p "Выбери пункт меню: " choice
 
     case "$choice" in
-      1) check_connection; pause ;;
-      2) list_databases; pause ;;
-      3) select_database; pause ;;
-      4) show_current_db; pause ;;
-      5) list_schemas; pause ;;
-      6) list_tables; pause ;;
-      7) table_sizes; pause ;;
-      8) table_columns; pause ;;
-      9) table_sample; pause ;;
+      1)  check_connection; pause ;;
+      2)  list_databases; pause ;;
+      3)  select_database; pause ;;
+      4)  show_current_db; pause ;;
+      5)  list_schemas; pause ;;
+      6)  list_tables; pause ;;
+      7)  table_sizes; pause ;;
+      8)  table_columns; pause ;;
+      9)  table_sample; pause ;;
       10) database_size; pause ;;
       11) connections; pause ;;
       12) long_queries; pause ;;
       13) vacuum_stats; pause ;;
       14) change_sample_rows; pause ;;
       15) run_custom_sql; pause ;;
-      0) echo "Выход."; exit 0 ;;
-      *) echo "Неизвестный пункт меню."; pause ;;
+      16) test_user_connection; pause ;;
+      17) manage_user_privileges; pause ;;
+      0)  echo "Выход."; exit 0 ;;
+      *)  echo "Неизвестный пункт меню."; pause ;;
     esac
   done
 }
