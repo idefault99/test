@@ -1,16 +1,9 @@
-# Добавь эту функцию и пункт 18 в меню
-
-interactive_psql() {
-  header "Интерактивный psql | БД: $CURRENT_DB"
-  echo "Запускается интерактивная сессия psql."
-  echo "Для выхода введи \\q или нажми Ctrl+D"
-  echo
-
-  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$CURRENT_DB"
-}
-
-
-18) interactive_psql; pause ;;
-
-
-echo "18) Интерактивный psql"
+Нужен скрипт который будет ходить в харбор, делать pull образа с нужным тэгом, перетэгировать его в соответствии правилам Gitlaba (Чтобы чистильщик в Gitlab registry его не затерал) и пушить в мой registry
+Например у меня есть образ в проекте gis
+registry.test/rb/system/m/proxy:0.4.0-2.bin
+я параметром передаю - gis proxy 0.4.0-2.bin registry.newtest/new/system/map/proxy:0.4.2.bin (Последний параметр это новый тэг для моего registry)
+В харборе структура примерно такая
+Имя проекта/репозиторий/тэги
+Например - gis/proxy/0.4.0-2.bin
+Скрипт идет в харбор ищет этот тэг, если не нашел - так и пишет, если нашел - делает docker pull
+Дальше перетэгирует через docker tag и пушит в мой registry
