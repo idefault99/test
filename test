@@ -24,6 +24,8 @@ set -euo pipefail
 # ──────────────────────────────────────────────────────────────────────────────
 HARBOR_HOST="registry.test:8901"     # Хост Harbor с портом, без схемы и слеша
 HARBOR_SCHEME="https"                # https или http
+HARBOR_USER="${HARBOR_USER:-admin}"  # Логин — можно задать через env: export HARBOR_USER=...
+HARBOR_PASSWORD="${HARBOR_PASSWORD:-}"  # Пароль — обязательно задать через env: export HARBOR_PASSWORD=...
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Вспомогательные функции
@@ -161,13 +163,19 @@ HARBOR_API_URL="${HARBOR_SCHEME}://${HARBOR_HOST}/api/v2.0/projects/${HARBOR_PRO
 
 log_info "Запрос к Harbor API: ${HARBOR_API_URL}"
 
+# Проверяем что пароль задан
+[[ -z "$HARBOR_PASSWORD" ]] && die "HARBOR_PASSWORD не задан. Укажите его в переменных скрипта или: export HARBOR_PASSWORD=..."
+
+USERPASS="${HARBOR_USER}:${HARBOR_PASSWORD}"
+
 HTTP_RESPONSE=$(curl -sf \
     --write-out "\n%{http_code}" \
     -H "Accept: application/json" \
+    -u "$USERPASS" \
     "$HARBOR_API_URL" 2>&1) || {
     log_error "Не удалось подключиться к Harbor API."
     log_error "URL: ${HARBOR_API_URL}"
-    log_error "Проверьте HARBOR_HOST, доступность сети и ~/.docker/config.json"
+    log_error "Проверьте HARBOR_HOST, доступность сети и наличие credentials."
     exit 1
 }
 
