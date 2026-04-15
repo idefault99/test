@@ -1,1 +1,259 @@
-Репозиторий в харборе может быть со знаком _ или -, например я передаю test_l_bd - Тогда в харборе нужно искать как есть и еще test-l-bd
+#!/usr/bin/env bash
+# ==============================================================================
+# harbor_pull_retag_push.sh
+#
+# Ищет образ в Harbor по project/repo/tag, делает pull,
+# перетегирует в новый registry и пушит.
+#
+# Использование:
+#   ./harbor_pull_retag_push.sh <project> <repo> <src_tag> <dst_full_ref>
+#
+# Пример:
+#   ./harbor_pull_retag_push.sh gis proxy 0.4.0-2.bin registry.newtest/new/system/map/proxy:0.4.2.bin
+#
+# Требования:
+#   - docker (уже залогинен в Harbor и в destination registry)
+#   - curl
+#   - jq
+# ==============================================================================
+
+set -euo pipefail
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Конфигурация — измените под своё окружение
+# ──────────────────────────────────────────────────────────────────────────────
+HARBOR_HOST="registry.test:8901"     # Хост Harbor с портом, без схемы и слеша
+HARBOR_SCHEME="https"                # https или http
+HARBOR_USER="${HARBOR_USER:-admin}"  # Логин — можно задать через env: export HARBOR_USER=...
+HARBOR_PASSWORD="${HARBOR_PASSWORD:-}"  # Пароль — обязательно задать через env: export HARBOR_PASSWORD=...
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Вспомогательные функции
+# ──────────────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+die()       { log_error "$*"; exit 1; }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Валидация нового тега по правилам GitLab Container Registry
+#
+# Тег будет удалён cleanup-политикой если:
+#   - совпадает с name_regex (по умолчанию .*)
+#   - НЕ совпадает с name_regex_keep
+#   - не является одним из N свежих
+#   - старше older_than порога
+#
+# Скрипт проверяет только то, что можно проверить статически:
+#   1. Тег валиден (Docker spec)
+#   2. Тег НЕ является потенциально «мусорным» (только хеши/числа без версии)
+#   3. Предупреждает если тег выглядит как временный (sha256:..., ветка без версии)
+# ──────────────────────────────────────────────────────────────────────────────
+validate_gitlab_tag() {
+    local tag="$1"
+
+    # Docker tag spec: разрешены [a-zA-Z0-9_.-], максимум 128 символов,
+    # не может начинаться с точки или дефиса
+    if [[ ! "$tag" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.+-]{0,127}$ ]]; then
+        die "Тег '${tag}' не соответствует Docker tag spec ([a-zA-Z0-9_][a-zA-Z0-9_.+-]{0,127})"
+    fi
+
+    # Предупреждение: тег выглядит как git short SHA (8-12 hex символов) —
+    # такие теги обычно зачищаются cleanup-политикой GitLab т.к. не имеют
+    # semver-паттерна и не попадают в name_regex_keep
+    if [[ "$tag" =~ ^[0-9a-f]{7,12}$ ]]; then
+        log_warn "Тег '${tag}' похож на git SHA и скорее всего будет удалён"
+        log_warn "cleanup-политикой GitLab. Рекомендуется semver (1.2.3) или"
+        log_warn "паттерн типа 'release-1.2.3' / 'v1.2.3'."
+    fi
+
+    # Предупреждение: только цифры (без точек) — нет semver-структуры
+    if [[ "$tag" =~ ^[0-9]+$ ]]; then
+        log_warn "Тег '${tag}' — просто число без semver-структуры."
+        log_warn "Убедитесь, что он покрыт name_regex_keep в cleanup-политике."
+    fi
+
+    # Семантический тег (semver или с суффиксами вроде .bin, -rc1) — OK
+    if [[ "$tag" =~ ^v?[0-9]+\.[0-9]+(\.[0-9]+)?([._-][a-zA-Z0-9]+)*$ ]]; then
+        log_info "Тег '${tag}' имеет semver-структуру — безопасен для GitLab registry."
+        return 0
+    fi
+
+    # latest — всегда защищён GitLab (hardcoded в cleanup-алгоритме)
+    if [[ "$tag" == "latest" ]]; then
+        log_info "Тег 'latest' защищён GitLab cleanup-политикой безусловно."
+        return 0
+    fi
+
+    # Паттерны с явными ключевыми словами — как правило в name_regex_keep
+    if [[ "$tag" =~ (release|stable|prod|main|master|lts|hotfix) ]]; then
+        log_info "Тег '${tag}' содержит защитное ключевое слово."
+        log_info "Убедитесь, что оно покрыто name_regex_keep в cleanup-политике."
+        return 0
+    fi
+
+    # Всё остальное — предупреждаем
+    log_warn "Тег '${tag}' не распознан как явно безопасный."
+    log_warn "Проверьте, покрыт ли он name_regex_keep в настройках cleanup."
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Парсинг аргументов
+# ──────────────────────────────────────────────────────────────────────────────
+usage() {
+    echo "Использование: $0 <project> <repo> <src_tag> <dst_full_ref>"
+    echo ""
+    echo "  project      — имя проекта в Harbor (например: gis)"
+    echo "  repo         — имя репозитория в Harbor (например: proxy)"
+    echo "  src_tag      — тег источника в Harbor (например: 0.4.0-2.bin)"
+    echo "  dst_full_ref — полная ссылка в destination registry (например:"
+    echo "                 registry.newtest/new/system/map/proxy:0.4.2.bin)"
+    echo ""
+    echo "Пример:"
+    echo "  $0 gis proxy 0.4.0-2.bin registry.newtest/new/system/map/proxy:0.4.2.bin"
+    exit 1
+}
+
+[[ $# -ne 4 ]] && usage
+
+HARBOR_PROJECT="$1"
+HARBOR_REPO="$2"
+SRC_TAG="$3"
+DST_REF="$4"
+
+# Проверяем что DST_REF содержит тег
+if [[ "$DST_REF" != *":"* ]]; then
+    die "dst_full_ref должен содержать тег после ':' (получено: '${DST_REF}')"
+fi
+
+DST_TAG="${DST_REF##*:}"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Зависимости
+# ──────────────────────────────────────────────────────────────────────────────
+for cmd in docker curl jq; do
+    command -v "$cmd" &>/dev/null || die "Не найден '${cmd}'. Установите его и повторите."
+done
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Шаг 1: Валидация destination тега
+# ──────────────────────────────────────────────────────────────────────────────
+log_info "=== Валидация destination тега ==="
+validate_gitlab_tag "$DST_TAG"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Шаг 2: Проверка наличия тега в Harbor через API v2
+# ──────────────────────────────────────────────────────────────────────────────
+log_info "=== Поиск тега в Harbor ==="
+log_info "Проект: ${HARBOR_PROJECT}"
+log_info "Репозиторий: ${HARBOR_REPO}"
+log_info "Тег: ${SRC_TAG}"
+
+# Проверяем что пароль задан
+[[ -z "$HARBOR_PASSWORD" ]] && die "HARBOR_PASSWORD не задан. Укажите его в переменных скрипта или: export HARBOR_PASSWORD=..."
+
+USERPASS="${HARBOR_USER}:${HARBOR_PASSWORD}"
+
+# harbor_curl <repo_name> — делает запрос к Harbor API и возвращает тело+код
+harbor_curl() {
+    local repo_name="$1"
+    local encoded
+    encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${repo_name}', safe=''))" 2>/dev/null         || python -c "import urllib; print(urllib.quote('${repo_name}', safe=''))")
+    local url="${HARBOR_SCHEME}://${HARBOR_HOST}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${encoded}/artifacts?with_tag=true&page_size=100"
+    log_info "Запрос к Harbor API: ${url}"
+    curl -sf --write-out "\n%{http_code}"         -H "Accept: application/json"         -u "$USERPASS"         "$url" 2>&1
+}
+
+# Генерируем список вариантов имени репозитория: оригинал + замена _ на - и наоборот
+REPO_VARIANTS=("$HARBOR_REPO")
+if [[ "$HARBOR_REPO" == *"_"* ]]; then
+    REPO_VARIANTS+=("${HARBOR_REPO//_/-}")
+elif [[ "$HARBOR_REPO" == *"-"* ]]; then
+    REPO_VARIANTS+=("${HARBOR_REPO//-/_}")
+fi
+
+ACTUAL_REPO=""
+HTTP_BODY=""
+
+for REPO_CANDIDATE in "${REPO_VARIANTS[@]}"; do
+    log_info "Пробуем репозиторий: ${REPO_CANDIDATE}"
+    RESPONSE=$(harbor_curl "$REPO_CANDIDATE") || {
+        log_warn "Не удалось подключиться к Harbor API для репо '${REPO_CANDIDATE}', пробуем следующий вариант..."
+        continue
+    }
+
+    HTTP_BODY=$(echo "$RESPONSE" | head -n -1)
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+
+    if [[ "$HTTP_CODE" == "401" ]]; then
+        die "Harbor вернул 401. Проверьте HARBOR_USER / HARBOR_PASSWORD."
+    elif [[ "$HTTP_CODE" == "404" ]]; then
+        log_warn "Репозиторий '${REPO_CANDIDATE}' не найден (404), пробуем следующий вариант..."
+        HTTP_BODY=""
+        continue
+    elif [[ "$HTTP_CODE" != "200" ]]; then
+        die "Harbor API вернул HTTP ${HTTP_CODE} для репо '${REPO_CANDIDATE}'. Тело: ${HTTP_BODY}"
+    fi
+
+    # Репо найден — проверяем наличие нужного тега
+    TAG_FOUND=$(echo "$HTTP_BODY" | jq -r         --arg tag "$SRC_TAG"         '[.[].tags // [] | .[] | select(.name == $tag)] | length')
+
+    if [[ "$TAG_FOUND" -gt 0 ]]; then
+        ACTUAL_REPO="$REPO_CANDIDATE"
+        log_info "Тег '${SRC_TAG}' найден в репозитории '${ACTUAL_REPO}'."
+        break
+    else
+        log_warn "Репозиторий '${REPO_CANDIDATE}' найден, но тег '${SRC_TAG}' в нём отсутствует."
+        log_info "Доступные теги в '${REPO_CANDIDATE}':"
+        echo "$HTTP_BODY" | jq -r '.[].tags // [] | .[].name' | sort | sed 's/^/  /'
+        HTTP_BODY=""
+    fi
+done
+
+if [[ -z "$ACTUAL_REPO" ]]; then
+    log_error "Тег '${SRC_TAG}' не найден ни в одном из вариантов репозитория:"
+    for v in "${REPO_VARIANTS[@]}"; do echo "  - ${HARBOR_PROJECT}/${v}"; done
+    exit 1
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Шаг 3: docker pull
+# ──────────────────────────────────────────────────────────────────────────────
+SRC_REF="${HARBOR_HOST}/${HARBOR_PROJECT}/${ACTUAL_REPO}:${SRC_TAG}"
+
+log_info "=== Docker pull ==="
+log_info "Источник: ${SRC_REF}"
+
+docker pull "$SRC_REF" || die "docker pull завершился с ошибкой: ${SRC_REF}"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Шаг 4: docker tag
+# ──────────────────────────────────────────────────────────────────────────────
+log_info "=== Docker tag ==="
+log_info "${SRC_REF} → ${DST_REF}"
+
+docker tag "$SRC_REF" "$DST_REF" || die "docker tag завершился с ошибкой"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Шаг 5: docker push
+# ──────────────────────────────────────────────────────────────────────────────
+log_info "=== Docker push ==="
+log_info "Назначение: ${DST_REF}"
+
+docker push "$DST_REF" || die "docker push завершился с ошибкой: ${DST_REF}"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Шаг 6: Cleanup локальных образов (опционально — раскомментировать)
+# ──────────────────────────────────────────────────────────────────────────────
+# log_info "=== Cleanup локальных образов ==="
+# docker rmi "$SRC_REF" "$DST_REF" || true
+
+log_info "=== Готово ==="
+log_info "Образ успешно перенесён:"
+log_info "  ${SRC_REF}"
+log_info "  → ${DST_REF}"
