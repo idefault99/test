@@ -64,10 +64,66 @@ PATH_PART="${ORIGINAL_REF#${DST_REGISTRY}/}"
 EXTERNAL_REF="${SRC_REGISTRY}/${PATH_PART}"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Pull → Tag → Push
+# Проверка наличия тега через GitLab Registry API (Docker Registry HTTP API v2)
 # ──────────────────────────────────────────────────────────────────────────────
+# Из EXTERNAL_REF вытаскиваем: хост, путь к репо, тег
+# Формат: host/path/to/repo:tag
+REPO_WITH_TAG="${EXTERNAL_REF#${SRC_REGISTRY}/}"   # db/system/m/service:0.4.1-0.bin
+REPO_PATH="${REPO_WITH_TAG%:*}"                     # db/system/m/service
+WANTED_TAG="${REPO_WITH_TAG##*:}"                   # 0.4.1-0.bin
+
 log_info "Источник:    ${EXTERNAL_REF}"
 log_info "Назначение:  ${ORIGINAL_REF}"
+echo ""
+
+log_info "=== Проверка тега в ${SRC_REGISTRY} ==="
+
+# GitLab Registry реализует Docker Registry HTTP API v2
+# GET /v2/<repo>/tags/list — возвращает {"name":"...","tags":["tag1","tag2",...]}
+# Авторизация берётся из ~/.docker/config.json автоматически через --netrc-optional,
+# но надёжнее получить токен через www-authenticate challenge.
+
+# Получаем токен: сначала пробуем без auth — registry вернёт 401 с WWW-Authenticate
+AUTH_HEADER=""
+CHALLENGE=$(curl -si "https://${SRC_REGISTRY}/v2/" 2>/dev/null | grep -i "www-authenticate" || true)
+
+if [[ -n "$CHALLENGE" ]]; then
+    # Парсим realm и service из: Bearer realm="https://...",service="...",scope="..."
+    REALM=$(echo "$CHALLENGE" | grep -oP '(?<=realm=")[^"]+')
+    SERVICE=$(echo "$CHALLENGE" | grep -oP '(?<=service=")[^"]+')
+    SCOPE="repository:${REPO_PATH}:pull"
+
+    # Берём credentials из ~/.docker/config.json
+    DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+    DOCKER_AUTH_B64=$(jq -r --arg host "$SRC_REGISTRY" '.auths[$host].auth // empty' "$DOCKER_CONFIG" 2>/dev/null || true)
+
+    if [[ -n "$DOCKER_AUTH_B64" ]]; then
+        TOKEN=$(curl -sf -u "$(echo "$DOCKER_AUTH_B64" | base64 -d)"             "${REALM}?service=${SERVICE}&scope=${SCOPE}" 2>/dev/null             | jq -r '.token // .access_token // empty')
+        [[ -n "$TOKEN" ]] && AUTH_HEADER="Authorization: Bearer ${TOKEN}"
+    fi
+fi
+
+# Запрашиваем список тегов
+TAGS_RESPONSE=$(curl -sf     ${AUTH_HEADER:+-H "$AUTH_HEADER"}     "https://${SRC_REGISTRY}/v2/${REPO_PATH}/tags/list" 2>/dev/null || true)
+
+if [[ -z "$TAGS_RESPONSE" ]]; then
+    log_error "Не удалось получить список тегов для ${REPO_PATH} из ${SRC_REGISTRY}"
+    log_error "Проверьте доступность registry и выполните: docker login ${SRC_REGISTRY}"
+    exit 1
+fi
+
+# Проверяем наличие нужного тега
+TAG_EXISTS=$(echo "$TAGS_RESPONSE" | jq -r --arg tag "$WANTED_TAG"     'if .tags then (.tags | map(select(. == $tag)) | length) else 0 end')
+
+if [[ "$TAG_EXISTS" -eq 0 ]]; then
+    log_error "Тег '${WANTED_TAG}' не найден в ${SRC_REGISTRY}/${REPO_PATH}"
+    echo ""
+    log_info "Доступные теги:"
+    echo "$TAGS_RESPONSE" | jq -r '.tags // [] | sort | .[]' | sed 's/^/  /'
+    exit 1
+fi
+
+log_info "Тег '${WANTED_TAG}' найден."
 echo ""
 
 log_info "=== docker pull ==="
