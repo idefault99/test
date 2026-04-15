@@ -22,7 +22,7 @@ set -euo pipefail
 # ──────────────────────────────────────────────────────────────────────────────
 # Конфигурация — измените под своё окружение
 # ──────────────────────────────────────────────────────────────────────────────
-HARBOR_HOST="registry.test"          # Хост Harbor без схемы и без слеша
+HARBOR_HOST="registry.test:8901"     # Хост Harbor с портом, без схемы и слеша
 HARBOR_SCHEME="https"                # https или http
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -232,9 +232,3 @@ log_info "=== Готово ==="
 log_info "Образ успешно перенесён:"
 log_info "  ${SRC_REF}"
 log_info "  → ${DST_REF}"
-
-
-chmod +x harbor_pull_retag_push.sh
-
-# Отредактируй HARBOR_HOST в начале скрипта, затем:
-./harbor_pull_retag_push.sh gis proxy 0.4.0-2.bin registry.newtest/new/system/map/proxy:0.4.2.bin
