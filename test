@@ -159,14 +159,20 @@ log_info "Тег: ${SRC_TAG}"
 
 USERPASS="${HARBOR_USER}:${HARBOR_PASSWORD}"
 
-# harbor_curl <repo_name> — делает запрос к Harbor API и возвращает тело+код
-harbor_curl() {
+# harbor_api_call <repo_name> — запрос к Harbor API, пишет тело в HARBOR_BODY и код в HARBOR_CODE
+harbor_api_call() {
     local repo_name="$1"
     local encoded
-    encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${repo_name}', safe=''))" 2>/dev/null         || python -c "import urllib; print(urllib.quote('${repo_name}', safe=''))")
+    # URL-encode репозитория через printf+sed (без зависимости от python)
+    encoded=$(printf '%s' "$repo_name" | od -An -tx1 | tr ' ' '
+' | grep -v '^$' | while read -r h; do printf '%%%s' "$h"; done)
     local url="${HARBOR_SCHEME}://${HARBOR_HOST}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${encoded}/artifacts?with_tag=true&page_size=100"
     log_info "Запрос к Harbor API: ${url}"
-    curl -sf --write-out "\n%{http_code}"         -H "Accept: application/json"         -u "$USERPASS"         "$url" 2>&1
+    local tmpfile
+    tmpfile=$(mktemp)
+    HARBOR_CODE=$(curl -s --write-out "%{http_code}"         -H "Accept: application/json"         -u "$USERPASS"         -o "$tmpfile"         "$url")
+    HARBOR_BODY=$(cat "$tmpfile")
+    rm -f "$tmpfile"
 }
 
 # Генерируем список вариантов имени репозитория: оригинал + замена _ на - и наоборот
@@ -178,30 +184,27 @@ elif [[ "$HARBOR_REPO" == *"-"* ]]; then
 fi
 
 ACTUAL_REPO=""
-HTTP_BODY=""
+HARBOR_BODY=""
+HARBOR_CODE=""
 
 for REPO_CANDIDATE in "${REPO_VARIANTS[@]}"; do
     log_info "Пробуем репозиторий: ${REPO_CANDIDATE}"
-    RESPONSE=$(harbor_curl "$REPO_CANDIDATE") || {
-        log_warn "Не удалось подключиться к Harbor API для репо '${REPO_CANDIDATE}', пробуем следующий вариант..."
+    harbor_api_call "$REPO_CANDIDATE" || {
+        log_warn "curl завершился с ошибкой для '${REPO_CANDIDATE}', пробуем следующий вариант..."
         continue
     }
 
-    HTTP_BODY=$(echo "$RESPONSE" | head -n -1)
-    HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-
-    if [[ "$HTTP_CODE" == "401" ]]; then
+    if [[ "$HARBOR_CODE" == "401" ]]; then
         die "Harbor вернул 401. Проверьте HARBOR_USER / HARBOR_PASSWORD."
-    elif [[ "$HTTP_CODE" == "404" ]]; then
+    elif [[ "$HARBOR_CODE" == "404" ]]; then
         log_warn "Репозиторий '${REPO_CANDIDATE}' не найден (404), пробуем следующий вариант..."
-        HTTP_BODY=""
         continue
-    elif [[ "$HTTP_CODE" != "200" ]]; then
-        die "Harbor API вернул HTTP ${HTTP_CODE} для репо '${REPO_CANDIDATE}'. Тело: ${HTTP_BODY}"
+    elif [[ "$HARBOR_CODE" != "200" ]]; then
+        die "Harbor API вернул HTTP ${HARBOR_CODE} для репо '${REPO_CANDIDATE}'. Тело: ${HARBOR_BODY}"
     fi
 
     # Репо найден — проверяем наличие нужного тега
-    TAG_FOUND=$(echo "$HTTP_BODY" | jq -r         --arg tag "$SRC_TAG"         '[.[].tags // [] | .[] | select(.name == $tag)] | length')
+    TAG_FOUND=$(echo "$HARBOR_BODY" | jq -r --arg tag "$SRC_TAG"         '[.[].tags // [] | .[] | select(.name == $tag)] | length')
 
     if [[ "$TAG_FOUND" -gt 0 ]]; then
         ACTUAL_REPO="$REPO_CANDIDATE"
@@ -210,8 +213,7 @@ for REPO_CANDIDATE in "${REPO_VARIANTS[@]}"; do
     else
         log_warn "Репозиторий '${REPO_CANDIDATE}' найден, но тег '${SRC_TAG}' в нём отсутствует."
         log_info "Доступные теги в '${REPO_CANDIDATE}':"
-        echo "$HTTP_BODY" | jq -r '.[].tags // [] | .[].name' | sort | sed 's/^/  /'
-        HTTP_BODY=""
+        echo "$HARBOR_BODY" | jq -r '.[].tags // [] | .[].name' | sort | sed 's/^/  /'
     fi
 done
 
