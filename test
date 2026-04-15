@@ -1,4 +1,87 @@
-./tags.sh gis omnicomm_connector 0.4.0-2.bin registry.test.model.svo.aero/dpm/airport_digital_ecosystem/map_objects/omnicomm_connector:0.4.2.bin
-Нужен скрипт который делает pull из нужного мне gitlab registry и пушит в мой registry
-Например я передаю параметром registry.test/db/system/m/service:0.4.1-0.bin - Меняем registry.test на registry.external:443 - Делаем pull из этого registry, перетегируем обратно в registry.test/db/system/m/service:0.4.1-0.bin и делаем push
-В оба registry я уже залогинен
+#!/usr/bin/env bash
+# ==============================================================================
+# pull_external_push_internal.sh
+#
+# Делает pull образа из внешнего registry (с заменой хоста),
+# перетегирует обратно в оригинальный ref и пушит в свой registry.
+#
+# Использование:
+#   ./pull_external_push_internal.sh <image_ref>
+#
+# Пример:
+#   ./pull_external_push_internal.sh registry.test/db/system/m/service:0.4.1-0.bin
+#
+# Что происходит:
+#   1. Берём ref: registry.test/db/system/m/service:0.4.1-0.bin
+#   2. Заменяем хост: registry.external:443/db/system/m/service:0.4.1-0.bin
+#   3. docker pull registry.external:443/db/system/m/service:0.4.1-0.bin
+#   4. docker tag  registry.external:443/...  registry.test/db/system/m/service:0.4.1-0.bin
+#   5. docker push registry.test/db/system/m/service:0.4.1-0.bin
+#
+# Требования:
+#   - docker (залогинен в оба registry)
+# ==============================================================================
+
+set -euo pipefail
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Конфигурация
+# ──────────────────────────────────────────────────────────────────────────────
+SRC_REGISTRY="registry.external:443"   # Откуда тянем
+DST_REGISTRY="registry.test"           # Куда пушим (он же в оригинальном ref)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Цвета
+# ──────────────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+die()       { log_error "$*"; exit 1; }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Аргументы
+# ──────────────────────────────────────────────────────────────────────────────
+usage() {
+    echo "Использование: $0 <image_ref>"
+    echo "Пример: $0 registry.test/db/system/m/service:0.4.1-0.bin"
+    exit 1
+}
+
+[[ $# -ne 1 ]] && usage
+
+ORIGINAL_REF="$1"
+
+# Проверяем что ref начинается с DST_REGISTRY
+if [[ "$ORIGINAL_REF" != "${DST_REGISTRY}/"* ]]; then
+    die "Переданный ref '${ORIGINAL_REF}' не начинается с '${DST_REGISTRY}/'"
+fi
+
+# Строим ref для внешнего registry: заменяем только первый компонент (хост)
+PATH_PART="${ORIGINAL_REF#${DST_REGISTRY}/}"
+EXTERNAL_REF="${SRC_REGISTRY}/${PATH_PART}"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pull → Tag → Push
+# ──────────────────────────────────────────────────────────────────────────────
+log_info "Источник:    ${EXTERNAL_REF}"
+log_info "Назначение:  ${ORIGINAL_REF}"
+echo ""
+
+log_info "=== docker pull ==="
+docker pull "$EXTERNAL_REF" || die "docker pull завершился с ошибкой: ${EXTERNAL_REF}"
+
+log_info "=== docker tag ==="
+docker tag "$EXTERNAL_REF" "$ORIGINAL_REF" || die "docker tag завершился с ошибкой"
+
+log_info "=== docker push ==="
+docker push "$ORIGINAL_REF" || die "docker push завершился с ошибкой: ${ORIGINAL_REF}"
+
+# Опционально: убрать локальные образы (раскомментировать если нужно)
+# docker rmi "$EXTERNAL_REF" "$ORIGINAL_REF" || true
+
+log_info "=== Готово ==="
+log_info "  ${EXTERNAL_REF}"
+log_info "  → ${ORIGINAL_REF}"
