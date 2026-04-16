@@ -1,6 +1,6 @@
 # Привет
 
-_Экспортировано: 16.04.2026, 13:54:49 MSK_
+_Экспортировано: 16.04.2026, 13:55:20 MSK_
 
 ---
 
@@ -8,12 +8,13 @@ _Экспортировано: 16.04.2026, 13:54:49 MSK_
 
 Я готов помочь тебе с вопросами по DevOps и SRE. Могу помочь с:
 
-CI/CD: Jenkins, GitLab CI, GitHub Actions, ArgoCD
-Контейнеризация: Docker, Kubernetes, Helm
-IaC: Terraform, Ansible, CloudFormation
-Мониторинг: Prometheus, Grafana, ELK, Loki
-Облака: AWS, GCP, Azure
-Скриптинг: Bash, Python, Go
-Сети и безопасность: Nginx, HAProxy, SSL/TLS, Security best practices
-Какая задача или проблема у тебя есть?
+Kubernetes и оркестрацией контейнеров
+CI/CD (GitLab CI, GitHub Actions, Jenkins и т.д.)
+Terraform, Ansible и другими IaC инструментами
+Мониторингом (Prometheus, Grafana, ELK)
+Docker и контейнеризацией
+Облачными платформами (AWS, GCP, Azure)
+Linux системным администрированием
+Сетями, безопасностью, производительностью
+Какой у тебя вопрос или задача?
 
