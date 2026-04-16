@@ -1,9 +1,22 @@
-Ошибка при пересоздании redis-deployment-0 при изменении из single на cluster
-1:M 16 Apr 2026 12:19:39.329 * Server initialized
-1:M 16 Apr 2026 12:19:39.331 * Reading RDB base file on AOF loading...
-1:M 16 Apr 2026 12:19:39.331 * Loading RDB produced by version 8.4.0
-1:M 16 Apr 2026 12:19:39.331 * RDB age 1854 seconds
-1:M 16 Apr 2026 12:19:39.331 * RDB memory usage when created 16.02 Mb
-1:M 16 Apr 2026 12:19:39.331 * RDB is base AOF
-1:M 16 Apr 2026 12:19:39.825 # FATAL: Data file was created with a Redis server configured to handle more than 1 databases. Exiting
-Джоба пишет Не удалось со0дать кластер и падает
+{{- if eq $.Values.enableService.redis.type "cluster" }}
+initContainers:
+  - name: clear-data-for-cluster
+    image: busybox
+    command: ['sh', '-c']
+    args:
+      - |
+        echo "Проверяем совместимость данных с cluster mode..."
+        # Если есть RDB/AOF от single mode — удаляем
+        # В cluster mode допустима только 1 БД, single по умолчанию создаёт 16
+        if [ -f /data/dump.rdb ] || [ -d /data/appendonlydir ]; then
+          echo "Найдены данные от single mode — очищаем /data/"
+          rm -rf /data/*
+          rm -rf /data/.*  2>/dev/null || true
+          echo "Очищено"
+        else
+          echo "/data/ пуста — пропускаем"
+        fi
+    volumeMounts:
+      - name: {{ $.Values.labels.redis }}-data
+        mountPath: /data
+{{- end }}
