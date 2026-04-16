@@ -1,22 +1,33 @@
-{{- if eq $.Values.enableService.redis.type "cluster" }}
 initContainers:
-  - name: clear-data-for-cluster
+  - name: init-data-dir
     image: busybox
     command: ['sh', '-c']
     args:
       - |
-        echo "Проверяем совместимость данных с cluster mode..."
-        # Если есть RDB/AOF от single mode — удаляем
-        # В cluster mode допустима только 1 БД, single по умолчанию создаёт 16
-        if [ -f /data/dump.rdb ] || [ -d /data/appendonlydir ]; then
-          echo "Найдены данные от single mode — очищаем /data/"
-          rm -rf /data/*
-          rm -rf /data/.*  2>/dev/null || true
-          echo "Очищено"
+        CLUSTER_MODE="{{ $.Values.enableService.redis.type }}"
+        NODES_CONF="/data/nodes.conf"
+        DUMP_RDB="/data/dump.rdb"
+
+        echo "Режим: $CLUSTER_MODE"
+
+        if [ "$CLUSTER_MODE" = "cluster" ]; then
+          # Переключаемся на cluster — очищаем данные от single
+          # В single mode нет nodes.conf, но есть dump.rdb с databases>1
+          if [ -f "$DUMP_RDB" ] && [ ! -f "$NODES_CONF" ]; then
+            echo "Обнаружены данные от single mode — очищаем для cluster"
+            rm -rf /data/* /data/.* 2>/dev/null || true
+          else
+            echo "Данные совместимы с cluster mode — пропускаем"
+          fi
         else
-          echo "/data/ пуста — пропускаем"
+          # Переключаемся на single — очищаем данные от cluster
+          if [ -f "$NODES_CONF" ]; then
+            echo "Обнаружен nodes.conf от cluster mode — очищаем для single"
+            rm -rf /data/* /data/.* 2>/dev/null || true
+          else
+            echo "Данные совместимы с single mode — пропускаем"
+          fi
         fi
     volumeMounts:
       - name: {{ $.Values.labels.redis }}-data
         mountPath: /data
-{{- end }}
