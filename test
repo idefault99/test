@@ -1,25 +1,8 @@
-1:C 16 Apr 2026 13:34:01.196 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
-1:C 16 Apr 2026 13:34:01.196 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
-1:C 16 Apr 2026 13:34:01.196 * Redis version=8.4.0, bits=64, commit=00000000, modified=1, pid=1, just started
-1:C 16 Apr 2026 13:34:01.196 * Configuration loaded
-1:M 16 Apr 2026 13:34:01.196 * monotonic clock: POSIX clock_gettime
-1:M 16 Apr 2026 13:34:01.197 * Running mode=cluster, port=6379.
-1:M 16 Apr 2026 13:34:01.202 * Node configuration loaded, I'm de292f18e13425e8c2b94379576205823c193532
-1:M 16 Apr 2026 13:34:01.202 * Server initialized
-1:M 16 Apr 2026 13:34:01.204 * Reading RDB base file on AOF loading...
-1:M 16 Apr 2026 13:34:01.204 * Loading RDB produced by version 8.4.0
-1:M 16 Apr 2026 13:34:01.204 * RDB age 6316 seconds
-1:M 16 Apr 2026 13:34:01.204 * RDB memory usage when created 16.02 Mb
-1:M 16 Apr 2026 13:34:01.204 * RDB is base AOF
-1:M 16 Apr 2026 13:34:01.686 # FATAL: Data file was created with a Redis server configured to handle more than 1 databases. Exiting
----
-initContainer logs
-Режим: cluster
----
 {{- if eq .Values.enableService.redis.enable true }}
 {{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
 {{- range $module := $modules.main }}
 {{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -28,7 +11,7 @@ metadata:
   labels:
     app: {{ $.Values.labels.redis }}
     app.kubernetes.io/managed-by: Helm
-  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+  namespace: {{ $ns }}
 spec:
   serviceName: {{ $.Values.labels.redis }}-headless
   {{- if eq $.Values.enableService.redis.type "cluster" }}
@@ -65,30 +48,46 @@ spec:
               topologyKey: kubernetes.io/hostname
       {{- end }}
       initContainers:
-        - name: wait-for-redis-nodes
-          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
+        - name: init-data-dir
+          image: {{ $.Values.images.redis }}
           command: ['sh', '-c']
           args:
             - |
               CLUSTER_MODE="{{ $.Values.enableService.redis.type }}"
               NODES_CONF="/data/nodes.conf"
-              DUMP_RDB="/data/dump.rdb"
-              
-              echo "Режим: $CLUSTER_MODE"
-              
+
+              echo "==> Redis data init | Режим: $CLUSTER_MODE"
+              echo "==> Содержимое /data/:"
+              ls -la /data/ 2>/dev/null || echo "  (пусто)"
+
               if [ "$CLUSTER_MODE" = "cluster" ]; then
+                # Переключаемся на cluster
+                # nodes.conf нет = либо первый старт, либо данные от single
+                # В обоих случаях нужна чистка — single RDB несовместим с cluster
                 if [ ! -f "$NODES_CONF" ]; then
-                  rm -rf /data/* /data/.* 2>/dev/null || true
+                  echo "==> nodes.conf отсутствует — очищаем /data/ для cluster mode"
+                  find /data -mindepth 1 -delete 2>/dev/null || true
+                  echo "==> Очищено"
                 else
-                  echo "Данные совместимы"
+                  echo "==> nodes.conf найден — данные от cluster mode, пропускаем очистку"
                 fi
               else
+                # Переключаемся на single
+                # nodes.conf есть = данные от cluster, несовместимы с single
                 if [ -f "$NODES_CONF" ]; then
-                  rm -rf /data/* /data/.* 2>/dev/null || true
+                  echo "==> nodes.conf найден — очищаем /data/ для single mode"
+                  find /data -mindepth 1 -delete 2>/dev/null || true
+                  echo "==> Очищено"
                 else
-                  echo "Данные совместимы"
+                  echo "==> Данные совместимы с single mode — пропускаем очистку"
                 fi
               fi
+
+              echo "==> /data/ после инициализации:"
+              ls -la /data/ 2>/dev/null || echo "  (пусто)"
+          volumeMounts:
+            - name: {{ $.Values.labels.redis }}-data
+              mountPath: /data
       containers:
         - name: {{ $.Values.labels.redis }}
           image: {{ $.Values.images.redis }}
@@ -105,7 +104,7 @@ spec:
               cluster-node-timeout 5000
               appendonly yes
               dir /data
-              cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}.svc.{{ $.Values.localK8sDomain }}
+              cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}
               EOF
               exec redis-server /tmp/redis.conf
           env:
@@ -169,6 +168,58 @@ spec:
 {{- end }}
 {{- end }}
 {{- end }}
+
+---
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.labels.redis }}-headless
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $ns }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: client
+      port: {{ $.Values.ports.internal.redis.client }}
+      targetPort: {{ $.Values.ports.internal.redis.client }}
+      protocol: TCP
+  {{- if eq $.Values.enableService.redis.type "cluster" }}
+    - name: bus
+      port: {{ $.Values.ports.internal.redis.bus }}
+      targetPort: {{ $.Values.ports.internal.redis.bus }}
+      protocol: TCP
+  {{- end }}
+  selector:
+    app: {{ $.Values.labels.redis }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.labels.redis }}-service
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $ns }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: client
+      port: {{ $.Values.ports.internal.redis.client }}
+      targetPort: {{ $.Values.ports.internal.redis.client }}
+      protocol: TCP
+  selector:
+    app: {{ $.Values.labels.redis }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 ---
 {{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
 {{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
@@ -206,16 +257,20 @@ spec:
               NS="{{ $ns }}"
               PREFIX="{{ $.Values.labels.redis }}-deployment"
 
+              echo "==> Ждём появления и готовности всех 3 подов..."
+
               for INDEX in 0 1 2; do
                 POD="${PREFIX}-${INDEX}"
+                echo "--- Ожидаем появления ${POD}..."
 
                 ATTEMPTS=0
                 until kubectl get pod $POD -n $NS > /dev/null 2>&1; do
                   ATTEMPTS=$((ATTEMPTS + 1))
                   if [ $ATTEMPTS -ge 60 ]; then
-                    echo "error: ${POD} не появился"
+                    echo "ОШИБКА: ${POD} не появился за 5 минут"
                     exit 1
                   fi
+                  echo "  Попытка ${ATTEMPTS}/60: ${POD} ещё не создан, жду 5с..."
                   sleep 5
                 done
 
@@ -250,16 +305,21 @@ spec:
               if [ "$CLUSTER_STATE" = "ok" ] && \
                  [ "${CLUSTER_SLOTS_OK:-0}" = "16384" ] && \
                  [ "${CLUSTER_NODES:-0}" -ge "3" ]; then
+                echo "==> Кластер здоров. Пропускаем."
                 exit 0
               fi
 
+              echo "==> Кластер не инициализирован — сбрасываем и создаём"
+
               for POD in $POD0 $POD1 $POD2; do
+                echo "  Сбрасываем ${POD}..."
                 redis-cli -h $POD -p $PORT flushall 2>/dev/null || true
                 redis-cli -h $POD -p $PORT cluster reset hard 2>/dev/null || true
               done
+
               sleep 3
 
-              echo "Создаём Redis Cluster"
+              echo "==> Создаём Redis Cluster..."
               redis-cli --cluster create \
                 $POD0:$PORT \
                 $POD1:$PORT \
@@ -268,40 +328,16 @@ spec:
                 --cluster-yes
 
               if [ $? -ne 0 ]; then
-                echo "==> error: не удалось создать кластер"
+                echo "==> ОШИБКА: не удалось создать кластер"
                 exit 1
               fi
 
               sleep 3
+              echo "==> Итоговое состояние:"
               redis-cli -h $POD0 -p $PORT cluster info
               echo ""
               redis-cli -h $POD0 -p $PORT cluster nodes
-{{- end }}
-{{- end }}
-{{- end }}
----
-{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ $.Values.labels.redis }}-config
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
-data:
-  redis-stack.conf: |
-    port {{ $.Values.ports.internal.redis.client }}
-    cluster-enabled yes
-    cluster-config-file /data/nodes.conf
-    cluster-node-timeout 5000
-    appendonly yes
-    dir /data
-    # При рестарте нода восстанавливает своё место в кластере из nodes.conf
-    cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}.svc.{{ $.Values.localK8sDomain }}
+              echo "==> Готово!"
 {{- end }}
 {{- end }}
 {{- end }}
