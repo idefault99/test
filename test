@@ -1,313 +1,790 @@
-#!/usr/bin/env bash
-# ==============================================================================
-# gitlab_migrate.sh — полная миграция GitLab проекта (без registry и variables)
+#!/bin/bash
+# =============================================================
+# stand-backup.sh — Бэкап и восстановление стенда
+# Совместим с MicroK8s
 #
 # Использование:
-#   ./gitlab_migrate.sh \
-#     --host https://gitlab.example.com \
-#     --token glpat-xxxxxxxxxxxx \
-#     --source my-group/my-project \
-#     --target-namespace "Projects/Development/sys" \
-#     --target-name newrepo
-#
-# Опционально:
-#   --export-file /path/to/existing.tar.gz   (пропустить экспорт, использовать файл)
-#   --keep-export                             (не удалять скачанный архив после импорта)
-# ==============================================================================
-
+#   ./stand-backup.sh                         # меню
+#   ./stand-backup.sh backup                  # бэкап всех test-stand* неймспейсов
+#   ./stand-backup.sh backup test-stand-app   # бэкап одного неймспейса
+#   ./stand-backup.sh restore ./backup-dir    # восстановление всего стенда
+#   ./stand-backup.sh restore ./backup-dir test-stand-app  # восстановление одного ns
+# =============================================================
 set -euo pipefail
 
-# ──────────────────────────────────────────────
-# Цвета
-# ──────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+# --- Конфиг ---
+NS_PREFIX="test-stand"
+BACKUP_BASE="/opt/stand-backups"
 
-log()     { echo -e "${CYAN}[$(date '+%H:%M:%S')]${RESET} $*"; }
-ok()      { echo -e "${GREEN}[✓]${RESET} $*"; }
-warn()    { echo -e "${YELLOW}[!]${RESET} $*"; }
-error()   { echo -e "${RED}[✗]${RESET} $*" >&2; exit 1; }
-section() { echo -e "\n${BOLD}${CYAN}══ $* ══${RESET}"; }
+# --- Определяем команды для microk8s ---
+if command -v microk8s.helm3 &>/dev/null; then
+  HELM="microk8s.helm3"
+  KUBECTL="microk8s.kubectl"
+elif command -v microk8s &>/dev/null; then
+  helm() { microk8s helm "$@"; }
+  kubectl() { microk8s kubectl "$@"; }
+  export -f helm kubectl
+  HELM="helm"
+  KUBECTL="kubectl"
+elif command -v helm &>/dev/null; then
+  HELM="helm"
+  KUBECTL="kubectl"
+else
+  echo "ERROR: helm не найден"
+  exit 1
+fi
 
-# ──────────────────────────────────────────────
-# Парсинг аргументов
-# ──────────────────────────────────────────────
-GITLAB_HOST=""
-TOKEN=""
-SOURCE=""          # path или numeric ID исходного проекта
-TARGET_NS=""       # namespace целевого проекта (группа / подгруппа)
-TARGET_NAME=""     # slug нового проекта
-EXPORT_FILE=""     # если указан — пропускаем экспорт
-KEEP_EXPORT=false
+# --- Цвета ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m'
 
-usage() {
-  grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,3\}//'
-  exit 0
+# --- Порядок восстановления ресурсов ---
+RESTORE_ORDER=(
+  "namespaces"
+  "storageclasses"
+  "persistentvolumes"
+  "persistentvolumeclaims"
+  "secrets"
+  "configmaps"
+  "serviceaccounts"
+  "roles"
+  "rolebindings"
+  "clusterroles"
+  "clusterrolebindings"
+  "services"
+  "deployments"
+  "statefulsets"
+  "daemonsets"
+  "horizontalpodautoscalers"
+  "poddisruptionbudgets"
+  "ingresses"
+  "networkpolicies"
+)
+
+# --- Типы ресурсов для бэкапа ---
+RESOURCE_TYPES=(
+  "namespaces"
+  "storageclasses"
+  "persistentvolumes"
+  "persistentvolumeclaims"
+  "secrets"
+  "configmaps"
+  "serviceaccounts"
+  "roles"
+  "rolebindings"
+  "clusterroles"
+  "clusterrolebindings"
+  "services"
+  "deployments"
+  "statefulsets"
+  "daemonsets"
+  "replicasets"
+  "horizontalpodautoscalers"
+  "poddisruptionbudgets"
+  "ingresses"
+  "networkpolicies"
+  "resourcequotas"
+  "limitranges"
+)
+
+# =============================================================
+# --- ФУНКЦИИ ---
+# =============================================================
+
+# --- Получить все неймспейсы по префиксу ---
+get_namespaces() {
+  local prefix="${1:-$NS_PREFIX}"
+  $KUBECTL get namespaces -o jsonpath='{.items[*].metadata.name}' | \
+    tr ' ' '\n' | grep "^${prefix}" || true
 }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --host)            GITLAB_HOST="${2%/}"; shift 2 ;;
-    --token)           TOKEN="$2"; shift 2 ;;
-    --source)          SOURCE="$2"; shift 2 ;;
-    --target-namespace) TARGET_NS="$2"; shift 2 ;;
-    --target-name)     TARGET_NAME="$2"; shift 2 ;;
-    --export-file)     EXPORT_FILE="$2"; shift 2 ;;
-    --keep-export)     KEEP_EXPORT=true; shift ;;
-    --help|-h)         usage ;;
-    *) error "Неизвестный аргумент: $1" ;;
-  esac
-done
-
-# ──────────────────────────────────────────────
-# Проверка обязательных параметров
-# ──────────────────────────────────────────────
-[[ -z "$GITLAB_HOST" ]]  && error "--host обязателен"
-[[ -z "$TOKEN" ]]        && error "--token обязателен"
-[[ -z "$SOURCE" ]]       && error "--source обязателен"
-[[ -z "$TARGET_NS" ]]    && error "--target-namespace обязателен"
-[[ -z "$TARGET_NAME" ]]  && error "--target-name обязателен"
-
-# ──────────────────────────────────────────────
-# Зависимости
-# ──────────────────────────────────────────────
-for cmd in curl jq; do
-  command -v "$cmd" &>/dev/null || error "Требуется '$cmd', установите его."
-done
-
-# ──────────────────────────────────────────────
-# Вспомогательные функции
-# ──────────────────────────────────────────────
-api_get() {
-  # api_get <path> [extra curl args...]
-  local path="$1"; shift
-  curl -fsSL --header "PRIVATE-TOKEN: $TOKEN" "$@" "${GITLAB_HOST}/api/v4${path}"
+# --- Очистка метаданных через jq ---
+clean_metadata() {
+  jq '
+    del(
+      .metadata.resourceVersion,
+      .metadata.uid,
+      .metadata.generation,
+      .metadata.creationTimestamp,
+      .metadata.managedFields,
+      .metadata.annotations."kubectl.kubernetes.io/last-applied-configuration",
+      .metadata.annotations."deployment.kubernetes.io/revision",
+      .status
+    ) |
+    if .metadata.ownerReferences then
+      del(.metadata.ownerReferences)
+    else . end
+  '
 }
 
-api_post() {
-  # api_post <path> [extra curl args...]
-  local path="$1"; shift
-  curl -fsSL --request POST --header "PRIVATE-TOKEN: $TOKEN" "$@" "${GITLAB_HOST}/api/v4${path}"
-}
+# --- Бэкап одного неймспейса ---
+backup_namespace() {
+  local NS=$1
+  local BACKUP_DIR=$2
 
-# URL-кодирование пути проекта
-urlencode() {
-  python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
-}
+  echo -e "  ${CYAN}Бэкапим namespace: $NS${NC}"
+  local NS_DIR="$BACKUP_DIR/namespaces/$NS"
+  mkdir -p "$NS_DIR"
 
-# Получить числовой ID проекта по пути или ID
-resolve_project_id() {
-  local ref="$1"
-  if [[ "$ref" =~ ^[0-9]+$ ]]; then
-    echo "$ref"
-  else
-    local encoded
-    encoded=$(urlencode "$ref")
-    api_get "/projects/${encoded}" | jq -r '.id'
-  fi
-}
+  local backed_up=0
+  local skipped=0
 
-# Получить ID namespace по пути
-resolve_namespace_id() {
-  local ns="$1"
-  local encoded
-  encoded=$(urlencode "$ns")
-  # Попробовать как группу
-  local result
-  result=$(api_get "/groups/${encoded}" 2>/dev/null | jq -r '.id // empty') || true
-  if [[ -z "$result" ]]; then
-    # Попробовать как user namespace
-    result=$(api_get "/namespaces?search=${encoded}" 2>/dev/null | jq -r '.[0].id // empty') || true
-  fi
-  echo "$result"
-}
-
-# Polling с таймаутом
-poll() {
-  local label="$1"
-  local check_cmd="$2"      # команда, которая выводит текущий статус
-  local ok_val="$3"         # значение = успех
-  local fail_val="$4"       # значение = ошибка
-  local timeout="${5:-3600}" # секунды (дефолт 1 час)
-  local interval="${6:-10}"
-
-  local elapsed=0
-  local status
-
-  while true; do
-    status=$(eval "$check_cmd" 2>/dev/null || echo "error")
-    log "${label}: ${status}"
-
-    [[ "$status" == "$ok_val" ]]   && return 0
-    [[ "$status" == "$fail_val" ]] && return 1
-    [[ "$status" == "error" ]]     && return 1
-
-    if [[ $elapsed -ge $timeout ]]; then
-      warn "Таймаут ожидания (${timeout}s)"
-      return 1
+  # --- Бэкап каждого типа ресурса ---
+  for RESOURCE in "${RESOURCE_TYPES[@]}"; do
+    # Кластерные ресурсы — не привязаны к namespace
+    if [[ "$RESOURCE" == "namespaces" || \
+          "$RESOURCE" == "storageclasses" || \
+          "$RESOURCE" == "persistentvolumes" || \
+          "$RESOURCE" == "clusterroles" || \
+          "$RESOURCE" == "clusterrolebindings" ]]; then
+      continue  # сохраняем отдельно
     fi
 
-    sleep "$interval"
-    elapsed=$((elapsed + interval))
+    # Получаем ресурсы в неймспейсе
+    ITEMS=$($KUBECTL get "$RESOURCE" -n "$NS" -o json 2>/dev/null || true)
+    COUNT=$(echo "$ITEMS" | jq '.items | length' 2>/dev/null || echo 0)
+
+    if [[ "$COUNT" -eq 0 ]]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    mkdir -p "$NS_DIR/$RESOURCE"
+
+    # Сохраняем каждый ресурс в отдельный файл
+    echo "$ITEMS" | jq -c '.items[]' 2>/dev/null | while IFS= read -r ITEM; do
+      NAME=$(echo "$ITEM" | jq -r '.metadata.name')
+      echo "$ITEM" | clean_metadata > "$NS_DIR/$RESOURCE/${NAME}.json"
+      backed_up=$((backed_up + 1))
+    done
+
+    echo -e "    ${RESOURCE}: ${COUNT} объектов"
   done
+
+  # --- Helm releases в неймспейсе ---
+  local HELM_DIR="$BACKUP_DIR/helm/$NS"
+  mkdir -p "$HELM_DIR"
+
+  RELEASES=$($HELM list -n "$NS" -q 2>/dev/null || true)
+  if [[ -n "$RELEASES" ]]; then
+    echo -e "    ${CYAN}Helm releases:${NC}"
+    while IFS= read -r RELEASE; do
+      [[ -z "$RELEASE" ]] && continue
+      mkdir -p "$HELM_DIR/$RELEASE"
+
+      # Values
+      $HELM get values "$RELEASE" -n "$NS" \
+        > "$HELM_DIR/$RELEASE/values.yaml" 2>/dev/null || true
+
+      # History
+      $HELM history "$RELEASE" -n "$NS" \
+        > "$HELM_DIR/$RELEASE/history.txt" 2>/dev/null || true
+
+      # Info (chart name, version)
+      $HELM list -n "$NS" -o json | \
+        jq '.[] | select(.name=="'"$RELEASE"'")' \
+        > "$HELM_DIR/$RELEASE/info.json" 2>/dev/null || true
+
+      echo -e "      $RELEASE — OK"
+    done <<< "$RELEASES"
+  fi
 }
 
-# ══════════════════════════════════════════════
-# ШАГ 0: Проверка подключения и прав
-# ══════════════════════════════════════════════
-section "Проверка"
+# --- Бэкап кластерных ресурсов ---
+backup_cluster_resources() {
+  local BACKUP_DIR=$1
+  local NAMESPACES=$2
 
-user_info=$(api_get "/user") || error "Не удалось подключиться к GitLab или неверный токен"
-username=$(echo "$user_info" | jq -r '.username')
-ok "Авторизован как: ${username}"
+  echo -e "  ${CYAN}Бэкапим кластерные ресурсы...${NC}"
+  local CLUSTER_DIR="$BACKUP_DIR/cluster"
+  mkdir -p "$CLUSTER_DIR"
 
-# Разрешить source → ID
-log "Определяем ID исходного проекта: $SOURCE"
-SOURCE_ID=$(resolve_project_id "$SOURCE") || true
-[[ -z "$SOURCE_ID" || "$SOURCE_ID" == "null" ]] && error "Проект '${SOURCE}' не найден"
-ok "Исходный проект ID: ${SOURCE_ID}"
+  # Namespace объекты
+  mkdir -p "$CLUSTER_DIR/namespaces"
+  for NS in $NAMESPACES; do
+    $KUBECTL get namespace "$NS" -o json 2>/dev/null | \
+      clean_metadata > "$CLUSTER_DIR/namespaces/${NS}.json" || true
+    echo -e "    namespace/$NS"
+  done
 
-# Получить имя исходного проекта для информации
-src_info=$(api_get "/projects/${SOURCE_ID}")
-src_path=$(echo "$src_info" | jq -r '.path_with_namespace')
-ok "Путь источника: ${src_path}"
+  # StorageClasses
+  mkdir -p "$CLUSTER_DIR/storageclasses"
+  $KUBECTL get storageclasses -o json 2>/dev/null | \
+    jq -c '.items[]' | while IFS= read -r ITEM; do
+      NAME=$(echo "$ITEM" | jq -r '.metadata.name')
+      echo "$ITEM" | clean_metadata > "$CLUSTER_DIR/storageclasses/${NAME}.json"
+    done
 
-# Разрешить namespace
-log "Определяем namespace: $TARGET_NS"
-NS_ID=$(resolve_namespace_id "$TARGET_NS") || true
-[[ -z "$NS_ID" || "$NS_ID" == "null" ]] && error "Namespace '${TARGET_NS}' не найден или нет доступа"
-ok "Namespace ID: ${NS_ID}"
+  # PersistentVolumes связанные с нашими неймспейсами
+  mkdir -p "$CLUSTER_DIR/persistentvolumes"
+  $KUBECTL get pv -o json 2>/dev/null | \
+    jq -c '.items[]' | while IFS= read -r ITEM; do
+      CLAIM_NS=$(echo "$ITEM" | jq -r '.spec.claimRef.namespace // ""')
+      for NS in $NAMESPACES; do
+        if [[ "$CLAIM_NS" == "$NS" ]]; then
+          NAME=$(echo "$ITEM" | jq -r '.metadata.name')
+          echo "$ITEM" | clean_metadata > "$CLUSTER_DIR/persistentvolumes/${NAME}.json"
+          echo -e "    pv/$NAME (ns: $CLAIM_NS)"
+          break
+        fi
+      done
+    done
 
-# ══════════════════════════════════════════════
-# ШАГ 1: Экспорт
-# ══════════════════════════════════════════════
+  # ClusterRoles и ClusterRoleBindings связанные с нашими SA
+  mkdir -p "$CLUSTER_DIR/clusterroles"
+  mkdir -p "$CLUSTER_DIR/clusterrolebindings"
 
-if [[ -n "$EXPORT_FILE" ]]; then
-  [[ -f "$EXPORT_FILE" ]] || error "Файл экспорта не найден: $EXPORT_FILE"
-  ok "Используем готовый файл экспорта: $EXPORT_FILE"
-else
-  section "Экспорт проекта"
-  EXPORT_FILE="gitlab_export_${SOURCE_ID}_$(date +%Y%m%d_%H%M%S).tar.gz"
+  $KUBECTL get clusterrolebindings -o json 2>/dev/null | \
+    jq -c '.items[]' | while IFS= read -r ITEM; do
+      for NS in $NAMESPACES; do
+        if echo "$ITEM" | jq -e ".subjects[]? | select(.namespace == \"$NS\")" &>/dev/null; then
+          NAME=$(echo "$ITEM" | jq -r '.metadata.name')
+          echo "$ITEM" | clean_metadata > "$CLUSTER_DIR/clusterrolebindings/${NAME}.json"
+          break
+        fi
+      done
+    done
+}
 
-  log "Запускаем экспорт..."
-  export_resp=$(api_post "/projects/${SOURCE_ID}/export")
-  export_msg=$(echo "$export_resp" | jq -r '.message // .error // "ok"')
-  ok "Экспорт запущен: ${export_msg}"
+# --- Сохранить метаданные бэкапа ---
+save_backup_meta() {
+  local BACKUP_DIR=$1
+  local NAMESPACES=$2
 
-  log "Ожидаем завершения экспорта (может занять несколько минут)..."
-  poll \
-    "Статус экспорта" \
-    "api_get /projects/${SOURCE_ID}/export | jq -r '.export_status'" \
-    "finished" \
-    "error" \
-    3600 15 \
-    || error "Экспорт завершился с ошибкой"
+  cat > "$BACKUP_DIR/backup-meta.json" << EOF
+{
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "date": "$(date '+%Y-%m-%d %H:%M:%S')",
+  "ns_prefix": "$NS_PREFIX",
+  "namespaces": $(echo "$NAMESPACES" | tr ' ' '\n' | jq -R . | jq -s .),
+  "k8s_version": "$($KUBECTL version --short 2>/dev/null | head -2 | tr '\n' '|' || true)",
+  "helm_version": "$($HELM version --short 2>/dev/null || true)"
+}
+EOF
+  echo -e "  Метаданные сохранены: $BACKUP_DIR/backup-meta.json"
+}
 
-  ok "Экспорт завершён"
+# =============================================================
+# --- БЭКАП ---
+# =============================================================
+do_backup() {
+  local FILTER_NS="${1:-}"
+  local TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+  local BACKUP_DIR="$BACKUP_BASE/backup-${TIMESTAMP}"
+  mkdir -p "$BACKUP_DIR"
 
-  log "Скачиваем архив → ${EXPORT_FILE} ..."
-  curl -fL --header "PRIVATE-TOKEN: $TOKEN" \
-    -o "$EXPORT_FILE" \
-    "${GITLAB_HOST}/api/v4/projects/${SOURCE_ID}/export/download"
+  echo ""
+  echo -e "${BLUE}=========================================="
+  echo "  БЭКАП СТЕНДА"
+  echo "  Директория: $BACKUP_DIR"
+  echo -e "==========================================${NC}"
 
-  FILESIZE=$(du -sh "$EXPORT_FILE" | cut -f1)
-  ok "Архив скачан: ${EXPORT_FILE} (${FILESIZE})"
-fi
+  # Получаем неймспейсы
+  if [[ -n "$FILTER_NS" ]]; then
+    if ! $KUBECTL get namespace "$FILTER_NS" &>/dev/null; then
+      echo -e "${RED}ERROR: namespace '$FILTER_NS' не найден${NC}"
+      exit 1
+    fi
+    NAMESPACES="$FILTER_NS"
+    echo -e "Режим: один namespace '$FILTER_NS'"
+  else
+    NAMESPACES=$(get_namespaces)
+    echo -e "Режим: все namespace с префиксом '${NS_PREFIX}*'"
+  fi
 
-# ══════════════════════════════════════════════
-# ШАГ 2: Импорт
-# ══════════════════════════════════════════════
-section "Импорт проекта"
+  if [[ -z "$NAMESPACES" ]]; then
+    echo -e "${RED}ERROR: неймспейсов не найдено${NC}"
+    exit 1
+  fi
 
-log "Отправляем импорт: namespace='${TARGET_NS}', name='${TARGET_NAME}'"
+  echo ""
+  echo "Найдены неймспейсы:"
+  echo "$NAMESPACES" | tr ' ' '\n' | while read -r NS; do
+    echo -e "  - $NS"
+  done
+  echo ""
 
-import_resp=$(api_post "/projects/import" \
-  --form "path=${TARGET_NAME}" \
-  --form "namespace=${TARGET_NS}" \
-  --form "overwrite=false" \
-  --form "file=@${EXPORT_FILE}")
+  # --- Кластерные ресурсы ---
+  backup_cluster_resources "$BACKUP_DIR" "$NAMESPACES"
 
-import_id=$(echo "$import_resp" | jq -r '.id // empty')
-import_err=$(echo "$import_resp" | jq -r '.message // .error // empty')
+  # --- Бэкап каждого неймспейса ---
+  echo ""
+  echo -e "${CYAN}Бэкапим неймспейсы...${NC}"
+  for NS in $NAMESPACES; do
+    backup_namespace "$NS" "$BACKUP_DIR"
+  done
 
-if [[ -z "$import_id" || "$import_id" == "null" ]]; then
-  echo "$import_resp" | jq . >&2
-  error "Импорт не стартовал: ${import_err}"
-fi
+  # --- Метаданные ---
+  save_backup_meta "$BACKUP_DIR" "$NAMESPACES"
 
-ok "Проект создан с ID: ${import_id}"
-log "Ожидаем завершения импорта..."
+  # --- Архивируем ---
+  echo ""
+  echo -e "${CYAN}Создаём архив...${NC}"
+  tar -czf "${BACKUP_DIR}.tar.gz" -C "$BACKUP_BASE" "backup-${TIMESTAMP}"
+  rm -rf "$BACKUP_DIR"
+  echo -e "${GREEN}Архив: ${BACKUP_DIR}.tar.gz${NC}"
 
-poll \
-  "Статус импорта" \
-  "api_get /projects/${import_id}/import | jq -r '.import_status'" \
-  "finished" \
-  "failed" \
-  7200 15 \
-  || {
-    # Показать детали ошибки
-    details=$(api_get "/projects/${import_id}/import" 2>/dev/null | jq -r '.import_error // "нет деталей"')
-    error "Импорт завершился с ошибкой: ${details}"
-  }
+  echo ""
+  echo -e "${GREEN}=== БЭКАП ЗАВЕРШЁН ===${NC}"
+  echo "Путь: ${BACKUP_DIR}.tar.gz"
+  du -sh "${BACKUP_DIR}.tar.gz"
+}
 
-ok "Импорт завершён успешно"
+# =============================================================
+# --- ВОССТАНОВЛЕНИЕ ---
+# =============================================================
 
-# ══════════════════════════════════════════════
-# ШАГ 3: Активация pipeline schedules
-# ══════════════════════════════════════════════
-section "Pipeline Schedules"
+# --- Применить ресурс с очисткой ---
+apply_resource() {
+  local FILE=$1
+  local NS=${2:-}
 
-log "Проверяем расписания (они импортируются как inactive)..."
-schedules=$(api_get "/projects/${import_id}/pipeline_schedules" 2>/dev/null || echo "[]")
-count=$(echo "$schedules" | jq 'length')
+  if [[ ! -f "$FILE" ]]; then
+    return 0
+  fi
 
-if [[ "$count" -gt 0 ]]; then
-  warn "Найдено ${count} pipeline schedule(s) — они inactive после импорта."
-  echo "$schedules" | jq -r '.[] | "  - [\(.id)] \(.description) | cron: \(.cron) | active: \(.active)"'
-  warn "Активируйте нужные вручную: Settings → CI/CD → Pipeline schedules"
-  warn "Или через API: POST /api/v4/projects/${import_id}/pipeline_schedules/<id>"
-else
-  ok "Pipeline schedules не найдены"
-fi
+  # Дополнительная очистка перед apply
+  local CLEANED
+  CLEANED=$(cat "$FILE" | jq '
+    del(
+      .metadata.resourceVersion,
+      .metadata.uid,
+      .metadata.generation,
+      .metadata.creationTimestamp,
+      .metadata.managedFields,
+      .metadata.ownerReferences,
+      .status,
+      .metadata.annotations."kubectl.kubernetes.io/last-applied-configuration"
+    )
+  ')
 
-# ══════════════════════════════════════════════
-# ШАГ 4: Итог
-# ══════════════════════════════════════════════
-section "Результат"
+  if [[ -n "$NS" ]]; then
+    echo "$CLEANED" | $KUBECTL apply -n "$NS" -f - 2>/dev/null || \
+    echo "$CLEANED" | $KUBECTL create -n "$NS" -f - 2>/dev/null || true
+  else
+    echo "$CLEANED" | $KUBECTL apply -f - 2>/dev/null || \
+    echo "$CLEANED" | $KUBECTL create -f - 2>/dev/null || true
+  fi
+}
 
-new_proj=$(api_get "/projects/${import_id}" 2>/dev/null)
-new_url=$(echo "$new_proj" | jq -r '.web_url // "—"')
-new_path=$(echo "$new_proj" | jq -r '.path_with_namespace // "—"')
+do_restore() {
+  local BACKUP_PATH=$1
+  local FILTER_NS="${2:-}"
 
-echo ""
-echo -e "${GREEN}${BOLD}Миграция завершена!${RESET}"
-echo -e "  Источник : ${src_path}"
-echo -e "  Новый    : ${new_path}"
-echo -e "  URL      : ${new_url}"
-echo ""
-echo -e "${YELLOW}Что нужно сделать вручную:${RESET}"
-echo "  1. CI/CD Variables     — перенести вручную (Settings → CI/CD → Variables)"
-echo "  2. Container Registry  — skopeo copy (см. инструкцию выше)"
-echo "  3. Webhooks            — пересоздать (Settings → Webhooks)"
-echo "  4. Deploy keys/tokens  — подключить (Settings → Repository → Deploy keys)"
-echo "  5. Pipeline schedules  — активировать нужные (Settings → CI/CD → Schedules)"
-echo "  6. Masked variables    — значения [MASKED] нужно выставить вручную"
-echo ""
+  # --- Распаковываем если архив ---
+  local WORK_DIR
+  if [[ "$BACKUP_PATH" == *.tar.gz ]]; then
+    WORK_DIR="/tmp/stand-restore-$(date +%s)"
+    mkdir -p "$WORK_DIR"
+    echo -e "${CYAN}Распаковываем архив...${NC}"
+    tar -xzf "$BACKUP_PATH" -C "$WORK_DIR" --strip-components=1
+  else
+    WORK_DIR="$BACKUP_PATH"
+  fi
 
-# Удалить архив если не просили сохранить
-if [[ "$KEEP_EXPORT" == false && -z "${EXPORT_FILE_ORIG:-}" ]]; then
-  rm -f "$EXPORT_FILE"
-  ok "Архив удалён: ${EXPORT_FILE}"
-else
-  ok "Архив сохранён: ${EXPORT_FILE}"
-fi
+  if [[ ! -d "$WORK_DIR" ]]; then
+    echo -e "${RED}ERROR: директория бэкапа не найдена: $WORK_DIR${NC}"
+    exit 1
+  fi
 
+  echo ""
+  echo -e "${BLUE}=========================================="
+  echo "  ВОССТАНОВЛЕНИЕ СТЕНДА"
+  echo "  Бэкап: $BACKUP_PATH"
+  echo -e "==========================================${NC}"
 
-chmod +x gitlab_migrate.sh
+  # Показываем метаданные бэкапа
+  if [[ -f "$WORK_DIR/backup-meta.json" ]]; then
+    echo ""
+    echo "Информация о бэкапе:"
+    jq -r '"  Дата:        " + .date, "  K8s версия:  " + .k8s_version, "  Неймспейсы: " + (.namespaces | join(", "))' \
+      "$WORK_DIR/backup-meta.json" 2>/dev/null || true
+  fi
 
-./gitlab_migrate.sh \
-  --host https://gitlab.example.com \
-  --token glpat-xxxxxxxxxxxx \
-  --source "old-group/old-project" \
-  --target-namespace "Проекты/Разработка/sys" \
-  --target-name "newrepo"
+  # Определяем неймспейсы для восстановления
+  local NAMESPACES_TO_RESTORE=()
+  if [[ -n "$FILTER_NS" ]]; then
+    NAMESPACES_TO_RESTORE=("$FILTER_NS")
+    echo -e "\nРежим: только namespace '$FILTER_NS'"
+  else
+    if [[ -d "$WORK_DIR/cluster/namespaces" ]]; then
+      while IFS= read -r F; do
+        NS=$(basename "$F" .json)
+        NAMESPACES_TO_RESTORE+=("$NS")
+      done < <(find "$WORK_DIR/cluster/namespaces" -name "*.json" | sort)
+    fi
+    echo -e "\nРежим: все неймспейсы из бэкапа"
+  fi
+
+  echo ""
+  echo "Будут восстановлены:"
+  for NS in "${NAMESPACES_TO_RESTORE[@]}"; do
+    echo -e "  - $NS"
+  done
+  echo ""
+  read -rp "Продолжить? [y/N]: " CONFIRM
+  if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+    echo "Отменено."
+    exit 0
+  fi
+
+  local RESTORED=()
+  local ERRORS=()
+
+  # ==========================================================
+  # Шаг 1: StorageClasses
+  # ==========================================================
+  echo ""
+  echo -e "${CYAN}[1/7] StorageClasses...${NC}"
+  if [[ -d "$WORK_DIR/cluster/storageclasses" ]]; then
+    for F in "$WORK_DIR/cluster/storageclasses"/*.json; do
+      [[ -f "$F" ]] || continue
+      NAME=$(basename "$F" .json)
+      if $KUBECTL get storageclass "$NAME" &>/dev/null; then
+        echo -e "  ${YELLOW}Уже существует: $NAME${NC}"
+      else
+        apply_resource "$F" && echo -e "  ${GREEN}storageclass/$NAME${NC}" || \
+          ERRORS+=("storageclass/$NAME")
+      fi
+    done
+  fi
+
+  # ==========================================================
+  # Шаг 2: Namespaces
+  # ==========================================================
+  echo ""
+  echo -e "${CYAN}[2/7] Namespaces...${NC}"
+  for NS in "${NAMESPACES_TO_RESTORE[@]}"; do
+    local NS_FILE="$WORK_DIR/cluster/namespaces/${NS}.json"
+    if $KUBECTL get namespace "$NS" &>/dev/null; then
+      echo -e "  ${YELLOW}Уже существует: $NS${NC}"
+    else
+      if [[ -f "$NS_FILE" ]]; then
+        apply_resource "$NS_FILE" && echo -e "  ${GREEN}namespace/$NS${NC}" || \
+          ERRORS+=("namespace/$NS")
+      else
+        $KUBECTL create namespace "$NS" && echo -e "  ${GREEN}namespace/$NS (создан)${NC}" || \
+          ERRORS+=("namespace/$NS")
+      fi
+    fi
+  done
+
+  # ==========================================================
+  # Шаг 3: PersistentVolumes
+  # ==========================================================
+  echo ""
+  echo -e "${CYAN}[3/7] PersistentVolumes...${NC}"
+  if [[ -d "$WORK_DIR/cluster/persistentvolumes" ]]; then
+    for F in "$WORK_DIR/cluster/persistentvolumes"/*.json; do
+      [[ -f "$F" ]] || continue
+      NAME=$(basename "$F" .json)
+      # Проверяем принадлежит ли PV нашим неймспейсам
+      CLAIM_NS=$(jq -r '.spec.claimRef.namespace // ""' "$F")
+      local MATCH=false
+      for NS in "${NAMESPACES_TO_RESTORE[@]}"; do
+        if [[ "$CLAIM_NS" == "$NS" ]]; then
+          MATCH=true
+          break
+        fi
+      done
+      if [[ "$MATCH" == "true" ]]; then
+        if $KUBECTL get pv "$NAME" &>/dev/null; then
+          echo -e "  ${YELLOW}Уже существует: pv/$NAME${NC}"
+        else
+          apply_resource "$F" && echo -e "  ${GREEN}pv/$NAME${NC}" || \
+            ERRORS+=("pv/$NAME")
+        fi
+      fi
+    done
+  fi
+
+  # ==========================================================
+  # Шаг 4: Ресурсы неймспейсов (в правильном порядке)
+  # ==========================================================
+  echo ""
+  echo -e "${CYAN}[4/7] Ресурсы неймспейсов...${NC}"
+
+  for NS in "${NAMESPACES_TO_RESTORE[@]}"; do
+    local NS_DIR="$WORK_DIR/namespaces/$NS"
+    [[ -d "$NS_DIR" ]] || continue
+
+    echo -e "  ${YELLOW}namespace: $NS${NC}"
+
+    for RESOURCE in "${RESTORE_ORDER[@]}"; do
+      # Пропускаем кластерные — уже обработали
+      [[ "$RESOURCE" == "namespaces" ]] && continue
+      [[ "$RESOURCE" == "storageclasses" ]] && continue
+      [[ "$RESOURCE" == "persistentvolumes" ]] && continue
+      [[ "$RESOURCE" == "clusterroles" ]] && continue
+      [[ "$RESOURCE" == "clusterrolebindings" ]] && continue
+
+      local RES_DIR="$NS_DIR/$RESOURCE"
+      [[ -d "$RES_DIR" ]] || continue
+
+      local COUNT=0
+      for F in "$RES_DIR"/*.json; do
+        [[ -f "$F" ]] || continue
+        NAME=$(basename "$F" .json)
+
+        # Пропускаем системные serviceaccounts
+        if [[ "$RESOURCE" == "serviceaccounts" && "$NAME" == "default" ]]; then
+          continue
+        fi
+
+        # Пропускаем системные secrets
+        if [[ "$RESOURCE" == "secrets" ]]; then
+          TYPE=$(jq -r '.type // ""' "$F")
+          if [[ "$TYPE" == "kubernetes.io/service-account-token" ]]; then
+            continue
+          fi
+        fi
+
+        apply_resource "$F" "$NS" && COUNT=$((COUNT + 1)) || \
+          ERRORS+=("$NS/$RESOURCE/$NAME")
+      done
+
+      [[ $COUNT -gt 0 ]] && echo -e "    ${RESOURCE}: ${COUNT} объектов"
+    done
+  done
+
+  # ==========================================================
+  # Шаг 5: RBAC кластерный
+  # ==========================================================
+  echo ""
+  echo -e "${CYAN}[5/7] ClusterRoleBindings...${NC}"
+  if [[ -d "$WORK_DIR/cluster/clusterrolebindings" ]]; then
+    for F in "$WORK_DIR/cluster/clusterrolebindings"/*.json; do
+      [[ -f "$F" ]] || continue
+      NAME=$(basename "$F" .json)
+      apply_resource "$F" && echo -e "  ${GREEN}clusterrolebinding/$NAME${NC}" || \
+        ERRORS+=("clusterrolebinding/$NAME")
+    done
+  fi
+
+  # ==========================================================
+  # Шаг 6: Helm releases
+  # ==========================================================
+  echo ""
+  echo -e "${CYAN}[6/7] Helm releases...${NC}"
+
+  for NS in "${NAMESPACES_TO_RESTORE[@]}"; do
+    local HELM_NS_DIR="$WORK_DIR/helm/$NS"
+    [[ -d "$HELM_NS_DIR" ]] || continue
+
+    echo -e "  ${YELLOW}namespace: $NS${NC}"
+
+    for RELEASE_DIR in "$HELM_NS_DIR"/*/; do
+      [[ -d "$RELEASE_DIR" ]] || continue
+      RELEASE=$(basename "$RELEASE_DIR")
+
+      local INFO_FILE="$RELEASE_DIR/info.json"
+      local VALUES_FILE="$RELEASE_DIR/values.yaml"
+
+      if [[ ! -f "$INFO_FILE" ]]; then
+        echo -e "    ${RED}$RELEASE: info.json не найден${NC}"
+        ERRORS+=("helm/$NS/$RELEASE")
+        continue
+      fi
+
+      CHART_FULL=$(jq -r '.chart' "$INFO_FILE")
+      CHART_NAME=$(echo "$CHART_FULL" | sed 's/-[0-9][0-9.]*$//')
+      CHART_VERSION=$(echo "$CHART_FULL" | grep -oP '[0-9]+\.[0-9]+\.[0-9.]+[^"]*$' || true)
+
+      # Проверяем существует ли релиз
+      RELEASE_EXISTS=$($HELM list -n "$NS" -q 2>/dev/null | grep -x "$RELEASE" || true)
+
+      VALUES_FLAG=""
+      [[ -f "$VALUES_FILE" ]] && VALUES_FLAG="-f $VALUES_FILE"
+
+      if [[ -n "$RELEASE_EXISTS" ]]; then
+        echo -e "    ${YELLOW}$RELEASE: уже существует — upgrade${NC}"
+        if $HELM upgrade "$RELEASE" "$CHART_NAME" \
+          -n "$NS" \
+          --reuse-values \
+          $VALUES_FLAG \
+          ${CHART_VERSION:+--version "$CHART_VERSION"} \
+          > /tmp/helm-restore.log 2>&1; then
+          echo -e "    ${GREEN}$RELEASE: OK${NC}"
+          RESTORED+=("$NS|$RELEASE|upgrade")
+        else
+          echo -e "    ${RED}$RELEASE: ОШИБКА$(tail -1 /tmp/helm-restore.log)${NC}"
+          ERRORS+=("helm/$NS/$RELEASE")
+        fi
+      else
+        echo -e "    $RELEASE: install"
+        if $HELM install "$RELEASE" "$CHART_NAME" \
+          -n "$NS" \
+          --create-namespace \
+          $VALUES_FLAG \
+          ${CHART_VERSION:+--version "$CHART_VERSION"} \
+          > /tmp/helm-restore.log 2>&1; then
+          echo -e "    ${GREEN}$RELEASE: OK${NC}"
+          RESTORED+=("$NS|$RELEASE|install")
+        else
+          echo -e "    ${RED}$RELEASE: ОШИБКА $(tail -1 /tmp/helm-restore.log)${NC}"
+          ERRORS+=("helm/$NS/$RELEASE")
+        fi
+      fi
+    done
+  done
+
+  # ==========================================================
+  # Шаг 7: Проверка подов
+  # ==========================================================
+  echo ""
+  echo -e "${CYAN}[7/7] Проверка подов...${NC}"
+  for NS in "${NAMESPACES_TO_RESTORE[@]}"; do
+    echo -e "  ${YELLOW}$NS:${NC}"
+    $KUBECTL get pods -n "$NS" 2>/dev/null || true
+  done
+
+  # --- Чистим tmp ---
+  if [[ "$BACKUP_PATH" == *.tar.gz ]]; then
+    rm -rf "$WORK_DIR"
+  fi
+
+  # ==========================================================
+  # Таблица результатов
+  # ==========================================================
+  echo ""
+  echo "=========================================="
+  echo "  ВОССТАНОВЛЕНО (Helm)"
+  echo "=========================================="
+  printf "%-30s %-20s %-10s\n" "NAMESPACE" "RELEASE" "ACTION"
+  printf "%-30s %-20s %-10s\n" "------------------------------" "--------------------" "----------"
+  if [[ ${#RESTORED[@]} -eq 0 ]]; then
+    echo "  Нет helm-релизов"
+  else
+    for ROW in "${RESTORED[@]}"; do
+      IFS='|' read -r NS REL ACT <<< "$ROW"
+      printf "%-30s %-20s ${GREEN}%-10s${NC}\n" "$NS" "$REL" "$ACT"
+    done
+  fi
+
+  echo ""
+  echo "=========================================="
+  echo "  ОШИБКИ"
+  echo "=========================================="
+  if [[ ${#ERRORS[@]} -eq 0 ]]; then
+    echo -e "  ${GREEN}Ошибок нет${NC}"
+  else
+    for ERR in "${ERRORS[@]}"; do
+      echo -e "  ${RED}$ERR${NC}"
+    done
+  fi
+
+  echo ""
+  echo -e "${GREEN}=== ВОССТАНОВЛЕНИЕ ЗАВЕРШЕНО ===${NC}"
+}
+
+# =============================================================
+# --- СПИСОК БЭКАПОВ ---
+# =============================================================
+list_backups() {
+  echo ""
+  echo "Доступные бэкапы в $BACKUP_BASE:"
+  echo ""
+  if ls "$BACKUP_BASE"/backup-*.tar.gz &>/dev/null; then
+    ls -lh "$BACKUP_BASE"/backup-*.tar.gz | \
+      awk '{print $5, $9}' | \
+      while read -r SIZE PATH; do
+        NAME=$(basename "$PATH")
+        DATE=$(echo "$NAME" | grep -oP '\d{8}-\d{6}' | \
+          sed 's/\(....\)\(..\)\(..\)-\(..\)\(..\)\(..\)/\1-\2-\3 \4:\5:\6/')
+        echo -e "  ${CYAN}$NAME${NC}  $DATE  ($SIZE)"
+      done
+  else
+    echo "  Бэкапов не найдено"
+  fi
+  echo ""
+}
+
+# =============================================================
+# --- МЕНЮ ---
+# =============================================================
+show_menu() {
+  echo ""
+  echo -e "${BLUE}=========================================="
+  echo "  STAND BACKUP/RESTORE"
+  echo "  Префикс: ${NS_PREFIX}*"
+  echo -e "==========================================${NC}"
+  echo ""
+  echo "  1) Создать бэкап всех неймспейсов (${NS_PREFIX}*)"
+  echo "  2) Создать бэкап одного неймспейса"
+  echo "  3) Восстановить весь стенд из бэкапа"
+  echo "  4) Восстановить один неймспейс из бэкапа"
+  echo "  5) Список бэкапов"
+  echo "  6) Выйти"
+  echo ""
+  read -rp "Выбор [1-6]: " CHOICE
+
+  case "$CHOICE" in
+    1)
+      do_backup
+      ;;
+    2)
+      echo ""
+      echo "Доступные неймспейсы:"
+      get_namespaces | tr ' ' '\n' | while read -r NS; do
+        echo "  - $NS"
+      done
+      echo ""
+      read -rp "Введи namespace: " NS_INPUT
+      do_backup "$NS_INPUT"
+      ;;
+    3)
+      list_backups
+      read -rp "Путь к архиву бэкапа: " BACKUP_PATH
+      do_restore "$BACKUP_PATH"
+      ;;
+    4)
+      list_backups
+      read -rp "Путь к архиву бэкапа: " BACKUP_PATH
+      echo ""
+      read -rp "Namespace для восстановления: " NS_INPUT
+      do_restore "$BACKUP_PATH" "$NS_INPUT"
+      ;;
+    5)
+      list_backups
+      show_menu
+      ;;
+    6)
+      echo "Выход."
+      exit 0
+      ;;
+    *)
+      echo "Неверный выбор"
+      show_menu
+      ;;
+  esac
+}
+
+# =============================================================
+# --- ТОЧКА ВХОДА ---
+# =============================================================
+mkdir -p "$BACKUP_BASE"
+
+case "${1:-menu}" in
+  backup)
+    do_backup "${2:-}"
+    ;;
+  restore)
+    if [[ -z "${2:-}" ]]; then
+      echo "ERROR: укажи путь к бэкапу"
+      echo "Использование: $0 restore /path/to/backup.tar.gz [namespace]"
+      exit 1
+    fi
+    do_restore "$2" "${3:-}"
+    ;;
+  list)
+    list_backups
+    ;;
+  menu|*)
+    show_menu
+    ;;
+esac
