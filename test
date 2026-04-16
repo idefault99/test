@@ -1,33 +1,16 @@
-initContainers:
-  - name: init-data-dir
-    image: busybox
-    command: ['sh', '-c']
-    args:
-      - |
-        CLUSTER_MODE="{{ $.Values.enableService.redis.type }}"
-        NODES_CONF="/data/nodes.conf"
-        DUMP_RDB="/data/dump.rdb"
+NS="<namespace>"
 
-        echo "Режим: $CLUSTER_MODE"
+# Удаляем поды
+kubectl delete pod redis-deployment-0 redis-deployment-1 redis-deployment-2 -n $NS 2>/dev/null
 
-        if [ "$CLUSTER_MODE" = "cluster" ]; then
-          # Переключаемся на cluster — очищаем данные от single
-          # В single mode нет nodes.conf, но есть dump.rdb с databases>1
-          if [ -f "$DUMP_RDB" ] && [ ! -f "$NODES_CONF" ]; then
-            echo "Обнаружены данные от single mode — очищаем для cluster"
-            rm -rf /data/* /data/.* 2>/dev/null || true
-          else
-            echo "Данные совместимы с cluster mode — пропускаем"
-          fi
-        else
-          # Переключаемся на single — очищаем данные от cluster
-          if [ -f "$NODES_CONF" ]; then
-            echo "Обнаружен nodes.conf от cluster mode — очищаем для single"
-            rm -rf /data/* /data/.* 2>/dev/null || true
-          else
-            echo "Данные совместимы с single mode — пропускаем"
-          fi
-        fi
-    volumeMounts:
-      - name: {{ $.Values.labels.redis }}-data
-        mountPath: /data
+# Удаляем PVC
+kubectl delete pvc redis-data-redis-deployment-0 -n $NS
+kubectl delete pvc redis-data-redis-deployment-1 -n $NS
+kubectl delete pvc redis-data-redis-deployment-2 -n $NS
+
+# Находим и удаляем PV (они в статусе Released после удаления PVC)
+kubectl get pv | grep $NS | awk '{print $1}' | xargs kubectl delete pv
+
+# StatefulSet создаст новые PVC и PV автоматически при старте подов
+kubectl get pvc -n $NS | grep redis
+kubectl get pods -n $NS | grep redis
