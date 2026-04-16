@@ -1,3 +1,54 @@
+chmod +x stand-backup.sh
+
+# Интерактивное меню
+./stand-backup.sh
+
+# Бэкап всего стенда
+./stand-backup.sh backup
+
+# Бэкап одного неймспейса
+./stand-backup.sh backup test-stand-appone
+
+# Восстановить весь стенд
+./stand-backup.sh restore /opt/stand-backups/backup-20240101-120000.tar.gz
+
+# Восстановить один неймспейс
+./stand-backup.sh restore /opt/stand-backups/backup-20240101-120000.tar.gz test-stand-appone
+
+# Список бэкапов
+./stand-backup.sh list
+
+
+backup-20240101-120000/
+  backup-meta.json          # дата, версии, список ns
+  cluster/
+    namespaces/             # объекты namespace
+    storageclasses/
+    persistentvolumes/
+    clusterrolebindings/
+  namespaces/
+    test-stand-appone/
+      secrets/
+      configmaps/
+      deployments/
+      services/
+      ingresses/
+      ...
+  helm/
+    test-stand-appone/
+      my-release/
+        values.yaml
+        history.txt
+        info.json
+
+
+StorageClass → Namespace → PV → [ресурсы ns в порядке] →
+Secret → ConfigMap → ServiceAccount → RBAC →
+Service → Deployment → StatefulSet → HPA → Ingress →
+ClusterRoleBindings → Helm releases → проверка подов
+
+
+
 #!/bin/bash
 # =============================================================
 # stand-backup.sh — Бэкап и восстановление стенда
