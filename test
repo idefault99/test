@@ -1,343 +1,231 @@
-{{- if eq .Values.enableService.redis.enable true }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: {{ $.Values.labels.redis }}-deployment
-  labels:
-    app: {{ $.Values.labels.redis }}
-    app.kubernetes.io/managed-by: Helm
-  namespace: {{ $ns }}
-spec:
-  serviceName: {{ $.Values.labels.redis }}-headless
-  {{- if eq $.Values.enableService.redis.type "cluster" }}
-  replicas: 3
-  {{- else if eq $.Values.enableService.redis.type "single" }}
-  replicas: 1
-  {{- else }}
-  {{ fail "Type of redis must be 'single' or 'cluster'" }}
-  {{- end }}
-  selector:
-    matchLabels:
-      app: {{ $.Values.labels.redis }}
-  podManagementPolicy: OrderedReady
-  updateStrategy:
-    type: RollingUpdate
-  persistentVolumeClaimRetentionPolicy:
-    whenDeleted: Retain
-    whenScaled: Retain
-  template:
-    metadata:
-      labels:
-        app: {{ $.Values.labels.redis }}
-    spec:
-      {{- if eq $.Values.enableService.redis.type "cluster" }}
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - {{ $.Values.labels.redis }}
-              topologyKey: kubernetes.io/hostname
-      {{- end }}
-      initContainers:
-        - name: init-data-dir
-          image: {{ $.Values.images.redis }}
-          command: ['sh', '-c']
-          args:
-            - |
-              CLUSTER_MODE="{{ $.Values.enableService.redis.type }}"
-              NODES_CONF="/data/nodes.conf"
+# Мне нужно развернуть проект на физических серверах, я дам те
 
-              echo "==> Redis data init | Режим: $CLUSTER_MODE"
-              echo "==> Содержимое /data/:"
-              ls -la /data/ 2>/dev/null || echo "  (пусто)"
-
-              if [ "$CLUSTER_MODE" = "cluster" ]; then
-                # Переключаемся на cluster
-                # nodes.conf нет = либо первый старт, либо данные от single
-                # В обоих случаях нужна чистка — single RDB несовместим с cluster
-                if [ ! -f "$NODES_CONF" ]; then
-                  echo "==> nodes.conf отсутствует — очищаем /data/ для cluster mode"
-                  find /data -mindepth 1 -delete 2>/dev/null || true
-                  echo "==> Очищено"
-                else
-                  echo "==> nodes.conf найден — данные от cluster mode, пропускаем очистку"
-                fi
-              else
-                # Переключаемся на single
-                # nodes.conf есть = данные от cluster, несовместимы с single
-                if [ -f "$NODES_CONF" ]; then
-                  echo "==> nodes.conf найден — очищаем /data/ для single mode"
-                  find /data -mindepth 1 -delete 2>/dev/null || true
-                  echo "==> Очищено"
-                else
-                  echo "==> Данные совместимы с single mode — пропускаем очистку"
-                fi
-              fi
-
-              echo "==> /data/ после инициализации:"
-              ls -la /data/ 2>/dev/null || echo "  (пусто)"
-          volumeMounts:
-            - name: {{ $.Values.labels.redis }}-data
-              mountPath: /data
-      containers:
-        - name: {{ $.Values.labels.redis }}
-          image: {{ $.Values.images.redis }}
-          imagePullPolicy: IfNotPresent
-          {{- if eq $.Values.enableService.redis.type "cluster" }}
-          command:
-            - sh
-            - -c
-            - |
-              cat > /tmp/redis.conf << EOF
-              port {{ $.Values.ports.internal.redis.client }}
-              cluster-enabled yes
-              cluster-config-file /data/nodes.conf
-              cluster-node-timeout 5000
-              appendonly yes
-              dir /data
-              cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}
-              EOF
-              exec redis-server /tmp/redis.conf
-          env:
-            - name: MY_POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          {{- else }}
-          command:
-            - redis-server
-            - --appendonly
-            - "yes"
-            - --dir
-            - /data
-          {{- end }}
-          ports:
-            - name: client
-              containerPort: {{ $.Values.ports.internal.redis.client }}
-          {{- if eq $.Values.enableService.redis.type "cluster" }}
-            - name: bus
-              containerPort: {{ $.Values.ports.internal.redis.bus }}
-          {{- end }}
-          volumeMounts:
-            - name: {{ $.Values.labels.redis }}-data
-              mountPath: /data
-          resources:
-            limits:
-              cpu: {{ ((((($.Values.configPods).redis).resources).limits).cpu) | default "200m" }}
-              memory: {{ ((((($.Values.configPods).redis).resources).limits).memory) | default "500Mi" }}
-            requests:
-              cpu: {{ ((((($.Values.configPods).redis).resources).requests).cpu) | default "100m" }}
-              memory: {{ ((((($.Values.configPods).redis).resources).requests).memory) | default "250Mi" }}
-          readinessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 5
-          livenessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 3
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
-  volumeClaimTemplates:
-    - metadata:
-        name: {{ $.Values.labels.redis }}-data
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: {{ $.Values.enableService.redis.storageClassName | default "nfs-csi" }}
-        resources:
-          requests:
-            storage: {{ $.Values.enableService.redis.storageSize | default "1Gi" }}
-{{- end }}
-{{- end }}
-{{- end }}
+_Экспортировано: 17.04.2026, 10:23:36 MSK_
 
 ---
-{{- if eq .Values.enableService.redis.enable true }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $.Values.labels.redis }}-headless
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-spec:
-  clusterIP: None
-  publishNotReadyAddresses: true
-  ports:
-    - name: client
-      port: {{ $.Values.ports.internal.redis.client }}
-      targetPort: {{ $.Values.ports.internal.redis.client }}
-      protocol: TCP
-  {{- if eq $.Values.enableService.redis.type "cluster" }}
-    - name: bus
-      port: {{ $.Values.ports.internal.redis.bus }}
-      targetPort: {{ $.Values.ports.internal.redis.bus }}
-      protocol: TCP
-  {{- end }}
-  selector:
-    app: {{ $.Values.labels.redis }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $.Values.labels.redis }}-service
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-spec:
-  type: ClusterIP
-  ports:
-    - name: client
-      port: {{ $.Values.ports.internal.redis.client }}
-      targetPort: {{ $.Values.ports.internal.redis.client }}
-      protocol: TCP
-  selector:
-    app: {{ $.Values.labels.redis }}
-{{- end }}
-{{- end }}
-{{- end }}
 
----
-{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ $.Values.labels.redis }}-job-{{ $.Release.Revision }}
-  labels:
-    app: {{ $.Values.labels.redis }}
-  namespace: {{ $ns }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 600
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      serviceAccountName: {{ $.Values.labels.redis }}-waiter-sa
-      restartPolicy: Never
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
-      initContainers:
-        - name: wait-for-redis-nodes
-          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
-          command: ['sh', '-c']
-          args:
-            - |
-              NS="{{ $ns }}"
-              PREFIX="{{ $.Values.labels.redis }}-deployment"
+Анализ требований и план действий
+Отличный проект! Давай разберем по порядкам и соберу всю необходимую информацию.
 
-              echo "==> Ждём появления и готовности всех 3 подов..."
+Скрипт для сбора информации о серверах
+Сначала создам скрипт для анализа серверов:
 
-              for INDEX in 0 1 2; do
-                POD="${PREFIX}-${INDEX}"
-                echo "--- Ожидаем появления ${POD}..."
+bash
+Копировать
+#!/bin/bash
+# server_info.sh - Скрипт сбора информации о серверах
 
-                ATTEMPTS=0
-                until kubectl get pod $POD -n $NS > /dev/null 2>&1; do
-                  ATTEMPTS=$((ATTEMPTS + 1))
-                  if [ $ATTEMPTS -ge 60 ]; then
-                    echo "ОШИБКА: ${POD} не появился за 5 минут"
-                    exit 1
-                  fi
-                  echo "  Попытка ${ATTEMPTS}/60: ${POD} ещё не создан, жду 5с..."
-                  sleep 5
-                done
+echo "==================================="
+echo "ИНФОРМАЦИЯ О СЕРВЕРЕ: $(hostname)"
+echo "==================================="
+echo ""
 
-                echo "  ${POD} найден, ждём Ready..."
-                kubectl wait --for=condition=Ready \
-                  -n $NS pod/$POD --timeout=300s
+echo "--- HOSTNAME И IP ---"
+hostname
+hostname -I
+echo ""
 
-                echo "  ${POD}: Ready ✓"
-              done
+echo "--- CPU ---"
+lscpu | grep -E "^Model name|^CPU\(s\)|^Thread|^Core|^Socket"
+echo ""
 
-              echo "==> Все 3 пода готовы"
-      containers:
-        - name: {{ $.Values.labels.redis }}
-          image: {{ $.Values.images.redis }}
-          imagePullPolicy: "IfNotPresent"
-          command: ["sh", "-c"]
-          args:
-            - |
-              POD0="{{ $.Values.labels.redis }}-deployment-0.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD1="{{ $.Values.labels.redis }}-deployment-1.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              POD2="{{ $.Values.labels.redis }}-deployment-2.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
-              PORT="{{ $.Values.ports.internal.redis.client }}"
+echo "--- GPU ---"
+if command -v nvidia-smi &> /dev/null; then
+    nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv,noheader
+else
+    echo "GPU не обнаружен или драйвера не установлены"
+fi
+echo ""
 
-              echo "==> Проверяем состояние кластера..."
-              CLUSTER_INFO=$(redis-cli -h $POD0 -p $PORT cluster info 2>/dev/null)
-              CLUSTER_STATE=$(echo "$CLUSTER_INFO" | grep "^cluster_state" | cut -d: -f2 | tr -d '[:space:]')
-              CLUSTER_SLOTS_OK=$(echo "$CLUSTER_INFO" | grep "^cluster_slots_ok" | cut -d: -f2 | tr -d '[:space:]')
-              CLUSTER_NODES=$(echo "$CLUSTER_INFO" | grep "^cluster_known_nodes" | cut -d: -f2 | tr -d '[:space:]')
+echo "--- ПАМЯТЬ ---"
+free -h
+echo ""
 
-              echo "  state=${CLUSTER_STATE} slots_ok=${CLUSTER_SLOTS_OK} known_nodes=${CLUSTER_NODES}"
+echo "--- ДИСКИ ---"
+lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE
+echo ""
+df -h
+echo ""
 
-              if [ "$CLUSTER_STATE" = "ok" ] && \
-                 [ "${CLUSTER_SLOTS_OK:-0}" = "16384" ] && \
-                 [ "${CLUSTER_NODES:-0}" -ge "3" ]; then
-                echo "==> Кластер здоров. Пропускаем."
-                exit 0
-              fi
+echo "--- RAID ---"
+if [ -f /proc/mdstat ]; then
+    cat /proc/mdstat
+else
+    echo "Software RAID не обнаружен"
+fi
 
-              echo "==> Кластер не инициализирован — сбрасываем и создаём"
+if command -v megacli &> /dev/null; then
+    megacli -LDInfo -Lall -aALL
+elif command -v storcli &> /dev/null; then
+    storcli /c0 show
+else
+    echo "Hardware RAID контроллер не обнаружен"
+fi
+echo ""
 
-              for POD in $POD0 $POD1 $POD2; do
-                echo "  Сбрасываем ${POD}..."
-                redis-cli -h $POD -p $PORT flushall 2>/dev/null || true
-                redis-cli -h $POD -p $PORT cluster reset hard 2>/dev/null || true
-              done
+echo "--- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---"
+ip addr show
+echo ""
+ip route show
+echo ""
 
-              sleep 3
+echo "--- СЕТЕВЫЕ НАСТРОЙКИ ---"
+cat /etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null || echo "Конфиги не найдены"
+echo ""
 
-              echo "==> Создаём Redis Cluster..."
-              redis-cli --cluster create \
-                $POD0:$PORT \
-                $POD1:$PORT \
-                $POD2:$PORT \
-                --cluster-replicas 0 \
-                --cluster-yes
+echo "--- ОС ---"
+cat /etc/redos-release 2>/dev/null || cat /etc/os-release
+uname -r
+echo ""
 
-              if [ $? -ne 0 ]; then
-                echo "==> ОШИБКА: не удалось создать кластер"
-                exit 1
-              fi
+echo "--- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---"
+echo "Тест записи (это займет время):"
+dd if=/dev/zero of=/tmp/testfile bs=1G count=1 oflag=direct 2>&1 | grep -v records
+rm -f /tmp/testfile
+echo ""
 
-              sleep 3
-              echo "==> Итоговое состояние:"
-              redis-cli -h $POD0 -p $PORT cluster info
-              echo ""
-              redis-cli -h $POD0 -p $PORT cluster nodes
-              echo "==> Готово!"
-{{- end }}
-{{- end }}
-{{- end }}
+echo "--- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---"
+ethtool eth0 2>/dev/null | grep Speed || echo "Не удалось определить скорость eth0"
+ethtool eth1 2>/dev/null | grep Speed || echo "Не удалось определить скорость eth1"
+echo ""
+
+echo "==================================="
+echo "Сбор информации завершен"
+echo "==================================="
+Запусти его на каждом сервере:
+
+bash
+Копировать
+chmod +x server_info.sh
+sudo ./server_info.sh > server_$(hostname)_info.txt
+Критически важные вопросы
+1. Сетевая конфигурация и IP адреса
+Какие IP-адреса сейчас на серверах?
+Можешь ли ты заранее узнать IP-адреса в новом ЦОД?
+Какая сетевая топология будет в новом ЦОД (L2/L3)?
+Планируется ли выделенная management сеть?
+Нужна ли настройка bonding для сетевых интерфейсов (для отказоустойчивости)?
+2. Хранилище данных
+Какой объем дисков на каждом сервере?
+Какой тип дисков (SSD/NVMe/HDD)?
+Есть ли RAID-контроллеры?
+Какой объем данных планируется хранить?
+Нужна ли репликация между storage-нодами?
+3. GPU конфигурация
+Какие модели GPU?
+Сколько GPU на каждом сервере?
+Установлены ли NVIDIA драйвера?
+Нужен ли GPU sharing между подами?
+4. Kubernetes архитектура
+Сколько master-нод планируется (рекомендую 3 для HA)?
+Где будут master-ноды (на серверах с GPU или отдельно)?
+Какая версия Kubernetes?
+Какой CNI плагин предпочтителен (Calico/Flannel/Cilium)?
+5. CI/CD
+Где находятся раннеры (GitLab/Jenkins/другое)?
+Есть ли доступ из раннеров к серверам?
+Нужен ли приватный registry для образов?
+6. Существующая конфигурация
+Можешь предоставить docker-compose.yml?
+Какие volumes используются?
+Какие объемы данных в Kafka, MinIO, PostgreSQL?
+Предварительная архитектура
+Пока я предлагаю такую архитектуру:
+
+Вариант 1: Без виртуализации (рекомендуемый)
+code
+Копировать
+┌─────────────────────────────────────────────────────────────┐
+│                     Kubernetes Cluster                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Control Plane Nodes (3 шт, на GPU-серверах):                │
+│  ├─ gpu-node-1: Master + Worker (GPU workloads)              │
+│  ├─ gpu-node-2: Master + Worker (GPU workloads)              │
+│  └─ gpu-node-3: Master + Worker (GPU workloads)              │
+│                                                               │
+│  GPU Worker Nodes:                                            │
+│  └─ gpu-node-4: Worker (GPU workloads)                       │
+│                                                               │
+│  Storage Nodes (2 шт):                                        │
+│  ├─ storage-node-1: Worker + Longhorn/NFS                    │
+│  └─ storage-node-2: Worker + Longhorn/NFS                    │
+│                                                               │
+├─────────────────────────────────────────────────────────────┤
+│  Namespaces:                                                  │
+│  ├─ infra: Kafka, MinIO                                      │
+│  ├─ data: PostgreSQL (StatefulSet)                           │
+│  └─ app: Ваше приложение                                     │
+└─────────────────────────────────────────────────────────────┘
+
+Storage Layer: Longhorn (распределенное хранилище)
+├─ Реплики на storage-node-1 и storage-node-2
+└─ Поддержка PVC с автоматической репликацией
+Вариант 2: С виртуализацией (для гибкости с IP)
+code
+Копировать
+┌─────────────────────────────────────────────────────────────┐
+│                      Physical Servers                         │
+├─────────────────────────────────────────────────────────────┤
+│  GPU Nodes: Proxmox/KVM                                       │
+│  └─ VMs с пробросом GPU (GPU passthrough)                    │
+│                                                               │
+│  Storage Nodes: Proxmox/KVM                                   │
+│  └─ VMs с пробросом дисков                                   │
+└─────────────────────────────────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Kubernetes Cluster (на VM)                       │
+│  + Фиксированные IP адреса                                   │
+│  + Легкая миграция                                           │
+│  - Overhead производительности (~5-10%)                      │
+└─────────────────────────────────────────────────────────────┘
+План настройки (черновик)
+Этап 1: Подготовка серверов
+bash
+Копировать
+# 1. Обновление системы
+# 2. Установка необходимых пакетов
+# 3. Настройка сети (bonding)
+# 4. Настройка хранилища
+# 5. Установка NVIDIA драйверов (для GPU нод)
+Этап 2: Установка Kubernetes
+bash
+Копировать
+# 1. Установка container runtime (containerd)
+# 2. Установка kubeadm, kubelet, kubectl
+# 3. Инициализация кластера
+# 4. Установка CNI
+# 5. Join worker nodes
+Этап 3: Настройка хранилища
+bash
+Копировать
+# Longhorn или NFS-CSI
+# Настройка репликации
+# Создание StorageClass
+Этап 4: Деплой инфраструктуры
+bash
+Копировать
+# Kafka (Strimzi Operator)
+# MinIO
+# PostgreSQL (CloudNativePG или Patroni)
+Этап 5: CI/CD
+bash
+Копировать
+# Настройка доступа для раннеров
+# Helm charts для приложений
+# GitOps (ArgoCD)
+Что мне нужно от тебя прямо сейчас:
+Запусти скрипт на всех серверах и пришли результаты
+Ответь на вопросы выше (особенно про IP-адреса)
+Пришли docker-compose.yml текущей конфигурации
+Уточни требования к отказоустойчивости: допустимое время недоступности (RTO), потеря данных (RPO)
+После этого я подготовлю:
+
+Детальную архитектуру
+Все конфигурационные файлы
+Скрипты автоматизации
+План миграции с минимальным downtime
+Жду информацию! 🚀
+
