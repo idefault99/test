@@ -1,1273 +1,344 @@
-Уточнение - Там нет Postgresql, но есть mongo
---- HOSTNAME И IP ---
-server-5
-1.1.1.1
-
---- CPU ---
-CPU(s):                               256
-Model name:                           AMD EPYC 7763 64-Core Processor
-Thread(s) per core:                   2
-Core(s) per socket:                   64
-Socket(s):                            2
-CPU(s) scaling MHz:                   62%
-
---- GPU ---
-GPU не обнаружен или драйвера не установлены
-
---- ПАМЯТЬ ---
-               total        used        free      shared  buff/cache   available
-Mem:           125Gi       2.8Gi       121Gi        13Mi       2.5Gi       122Gi
-Swap:          8.0Gi          0B       8.0Gi
-
---- ДИСКИ ---
-NAME    SIZE TYPE MOUNTPOINT FSTYPE
-sda     3.5T disk
-├─sda1  600M part /boot/efi  vfat
-├─sda2    1G part /boot      ext4
-└─sda3   75G part /          ext4
-sdb    18.2T disk
-zram0     8G disk [SWAP]
-
-Filesystem      Size  Used Avail Use% Mounted on
-devtmpfs        4.0M     0  4.0M   0% /dev
-tmpfs            63G  8.0K   63G   1% /dev/shm
-tmpfs            26G  4.7M   26G   1% /run
-efivarfs        128K   28K   96K  23% /sys/firmware/efi/efivars
-/dev/sda3        74G  3.3G   67G   5% /
-/dev/sda2       974M  345M  562M  39% /boot
-tmpfs            63G     0   63G   0% /tmp
-/dev/sda1       599M  8.1M  591M   2% /boot/efi
-tmpfs            13G  8.0K   13G   1% /run/user/1000
-
---- RAID ---
-Personalities :
-unused devices: <none>
-Hardware RAID контроллер не обнаружен
-
---- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute
-       valid_lft forever preferred_lft forever
-3: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    link/ether 30:56:0f:19:98:10 brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f0
-    inet 1.1.1.1/24 brd 10.96.184.255 scope global dynamic noprefixroute eno1
-       valid_lft 527839sec preferred_lft 527839sec
-    inet6 fe80::b42d:7fc9:6140:9b6b/64 scope link noprefixroute
-       valid_lft forever preferred_lft forever
-4: eno2: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc mq state DOWN group default qlen 1000
-    link/ether 30:56:0f:19:98:11 brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f1
-
-default via 10.96.184.1 dev eno1 proto dhcp src 1.1.1.1 metric 100
-10.96.184.0/24 dev eno1 proto kernel scope link src 1.1.1.1 metric 100
-
---- СЕТЕВЫЕ НАСТРОЙКИ ---
-Конфиги не найдены
-
---- ОС ---
-RED OS release (8.0) MINIMAL
-6.12.21-1.red80.x86_64
-
---- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---
-Тест записи (это займет время):
-1073741824 bytes (1.1 GB, 1.0 GiB) copied, 1.6218 s, 662 MB/s
-
---- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---
-Не удалось определить скорость eth0
-Не удалось определить скорость eth1
-===================================
---- HOSTNAME И IP ---
-server-2
-1.1.1.2
-
---- CPU ---
-CPU(s):                                  256
-Model name:                              AMD EPYC 7763 64-Core Processor
-Thread(s) per core:                      2
-Core(s) per socket:                      64
-Socket(s):                               2
-CPU(s) scaling MHz:                      43%
-
---- GPU ---
-GPU не обнаружен или драйвера не установлены
-
---- ПАМЯТЬ ---
-               total        used        free      shared  buff/cache   available
-Mem:           125Gi       2.6Gi       123Gi        13Mi       474Mi       123Gi
-Swap:          8.0Gi          0B       8.0Gi
-
---- ДИСКИ ---
-NAME    SIZE TYPE MOUNTPOINT FSTYPE
-sda    18.2T disk
-sdb     3.5T disk
-├─sdb1  600M part /boot/efi  vfat
-├─sdb2    1G part /boot      ext4
-└─sdb3   75G part /          ext4
-zram0     8G disk [SWAP]
-
-Filesystem      Size  Used Avail Use% Mounted on
-devtmpfs        4.0M     0  4.0M   0% /dev
-tmpfs            63G  8.0K   63G   1% /dev/shm
-tmpfs            26G  4.7M   26G   1% /run
-efivarfs        128K   28K   96K  23% /sys/firmware/efi/efivars
-/dev/sdb3        74G  3.3G   67G   5% /
-/dev/sdb2       974M  345M  562M  39% /boot
-tmpfs            63G     0   63G   0% /tmp
-/dev/sdb1       599M  8.1M  591M   2% /boot/efi
-tmpfs            13G  8.0K   13G   1% /run/user/1000
-
---- RAID ---
-Personalities :
-unused devices: <none>
-Hardware RAID контроллер не обнаружен
-
---- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute
-       valid_lft forever preferred_lft forever
-2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    link/ether 30:56:0f:19:98:54 brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f0
-    inet 1.1.1.2/24 brd 10.96.184.255 scope global dynamic noprefixroute eno1
-       valid_lft 527371sec preferred_lft 527371sec
-    inet6 fe80::9406:3c7:3f4b:6105/64 scope link noprefixroute
-       valid_lft forever preferred_lft forever
-3: eno2: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc mq state DOWN group default qlen 1000
-    link/ether 30:56:0f:19:98:55 brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f1
-
-default via 10.96.184.1 dev eno1 proto dhcp src 1.1.1.2 metric 100
-10.96.184.0/24 dev eno1 proto kernel scope link src 1.1.1.2 metric 100
-
---- СЕТЕВЫЕ НАСТРОЙКИ ---
-Конфиги не найдены
-
---- ОС ---
-RED OS release (8.0) MINIMAL
-6.12.69-1.red80.x86_64
-
---- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---
-Тест записи (это займет время):
-1073741824 bytes (1.1 GB, 1.0 GiB) copied, 1.62943 s, 659 MB/s
-
---- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---
-Не удалось определить скорость eth0
-Не удалось определить скорость eth1
-===================================
---- HOSTNAME И IP ---
-server-3
-1.1.1.3
-
---- CPU ---
-CPU(s):                               256
-Model name:                           AMD EPYC 7763 64-Core Processor
-Thread(s) per core:                   2
-Core(s) per socket:                   64
-Socket(s):                            2
-CPU(s) scaling MHz:                   62%
-
---- GPU ---
-GPU не обнаружен или драйвера не установлены
-
---- ПАМЯТЬ ---
-               total        used        free      shared  buff/cache   available
-Mem:           125Gi       2.8Gi       121Gi       7.0Mi       2.6Gi       122Gi
-Swap:          8.0Gi          0B       8.0Gi
-
---- ДИСКИ ---
-NAME    SIZE TYPE MOUNTPOINT FSTYPE
-sda     3.5T disk
-├─sda1  600M part /boot/efi  vfat
-├─sda2    1G part /boot      ext4
-└─sda3   75G part /          ext4
-sdb    18.2T disk
-zram0     8G disk [SWAP]
-
-Filesystem      Size  Used Avail Use% Mounted on
-devtmpfs        4.0M     0  4.0M   0% /dev
-tmpfs            63G  8.0K   63G   1% /dev/shm
-tmpfs            26G  4.7M   26G   1% /run
-efivarfs        128K   28K   96K  23% /sys/firmware/efi/efivars
-/dev/sda3        74G  3.3G   67G   5% /
-tmpfs            63G     0   63G   0% /tmp
-/dev/sda2       974M  345M  562M  39% /boot
-/dev/sda1       599M  8.1M  591M   2% /boot/efi
-tmpfs            13G  8.0K   13G   1% /run/user/1000
-
---- RAID ---
-Personalities :
-unused devices: <none>
-Hardware RAID контроллер не обнаружен
-
---- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute
-       valid_lft forever preferred_lft forever
-2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    link/ether 10:ff:e0:ee:3e:5c brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f0
-    inet 1.1.1.3/24 brd 10.96.184.255 scope global dynamic noprefixroute eno1
-       valid_lft 527094sec preferred_lft 527094sec
-    inet6 fe80::3c44:a099:2d5c:aa24/64 scope link noprefixroute
-       valid_lft forever preferred_lft forever
-3: eno2: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc mq state DOWN group default qlen 1000
-    link/ether 10:ff:e0:ee:3e:5d brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f1
-
-default via 10.96.184.1 dev eno1 proto dhcp src 1.1.1.3 metric 100
-10.96.184.0/24 dev eno1 proto kernel scope link src 1.1.1.3 metric 100
-
---- СЕТЕВЫЕ НАСТРОЙКИ ---
-Конфиги не найдены
-
---- ОС ---
-RED OS release (8.0) MINIMAL
-6.12.21-1.red80.x86_64
-
---- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---
-Тест записи (это займет время):
-1073741824 bytes (1.1 GB, 1.0 GiB) copied, 1.62361 s, 661 MB/s
-
---- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---
-Не удалось определить скорость eth0
-Не удалось определить скорость eth1
-===================================
---- HOSTNAME И IP ---
-server-4
-1.1.1.4
-
---- CPU ---
-CPU(s):                               256
-Model name:                           AMD EPYC 7763 64-Core Processor
-Thread(s) per core:                   2
-Core(s) per socket:                   64
-Socket(s):                            2
-CPU(s) scaling MHz:                   62%
-
---- GPU ---
-GPU не обнаружен или драйвера не установлены
-
---- ПАМЯТЬ ---
-               total        used        free      shared  buff/cache   available
-Mem:           125Gi       2.8Gi       121Gi       7.0Mi       2.6Gi       122Gi
-Swap:          8.0Gi          0B       8.0Gi
-
---- ДИСКИ ---
-NAME    SIZE TYPE MOUNTPOINT FSTYPE
-sda     3.5T disk
-├─sda1  600M part /boot/efi  vfat
-├─sda2    1G part /boot      ext4
-└─sda3   75G part /          ext4
-sdb    18.2T disk
-zram0     8G disk [SWAP]
-
-Filesystem      Size  Used Avail Use% Mounted on
-devtmpfs        4.0M     0  4.0M   0% /dev
-tmpfs            63G  8.0K   63G   1% /dev/shm
-tmpfs            26G  4.7M   26G   1% /run
-efivarfs        128K   28K   96K  23% /sys/firmware/efi/efivars
-/dev/sda3        74G  3.3G   67G   5% /
-tmpfs            63G     0   63G   0% /tmp
-/dev/sda2       974M  345M  562M  39% /boot
-/dev/sda1       599M  8.1M  591M   2% /boot/efi
-tmpfs            13G  8.0K   13G   1% /run/user/1000
-
---- RAID ---
-Personalities :
-unused devices: <none>
-Hardware RAID контроллер не обнаружен
-
---- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute
-       valid_lft forever preferred_lft forever
-3: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    link/ether 30:56:0f:19:98:a8 brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f0
-    inet 1.1.1.4/24 brd 10.96.184.255 scope global dynamic noprefixroute eno1
-       valid_lft 527018sec preferred_lft 527018sec
-    inet6 fe80::ba71:fdbe:fabb:f42c/64 scope link noprefixroute
-       valid_lft forever preferred_lft forever
-4: eno2: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc mq state DOWN group default qlen 1000
-    link/ether 30:56:0f:19:98:a9 brd ff:ff:ff:ff:ff:ff
-    altname enp97s0f1
-
-default via 10.96.184.1 dev eno1 proto dhcp src 1.1.1.4 metric 100
-10.96.184.0/24 dev eno1 proto kernel scope link src 1.1.1.4 metric 100
-
---- СЕТЕВЫЕ НАСТРОЙКИ ---
-Конфиги не найдены
-
---- ОС ---
-RED OS release (8.0) MINIMAL
-6.12.21-1.red80.x86_64
-
---- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---
-Тест записи (это займет время):
-1073741824 bytes (1.1 GB, 1.0 GiB) copied, 1.6498 s, 651 MB/s
-
---- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---
-Не удалось определить скорость eth0
-Не удалось определить скорость eth1
-
-===================================
---- HOSTNAME И IP ---
-server-5
-1.1.1.5
-
---- CPU ---
-CPU(s):                               128
-Model name:                           Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
-Thread(s) per core:                   2
-Core(s) per socket:                   32
-Socket(s):                            2
-CPU(s) scaling MHz:                   25%
-
---- GPU ---
-GPU не обнаружен или драйвера не установлены
-
---- ПАМЯТЬ ---
-               total        used        free      shared  buff/cache   available
-Mem:           125Gi       2.6Gi       121Gi       7.0Mi       2.4Gi       122Gi
-Swap:          8.0Gi          0B       8.0Gi
-
---- ДИСКИ ---
-NAME    SIZE TYPE MOUNTPOINT FSTYPE
-sda    18.2T disk
-sdb     3.5T disk
-├─sdb1  600M part /boot/efi  vfat
-├─sdb2    1G part /boot      ext4
-└─sdb3   75G part /          ext4
-zram0     8G disk [SWAP]
-
-Filesystem      Size  Used Avail Use% Mounted on
-devtmpfs        4.0M     0  4.0M   0% /dev
-tmpfs            63G  8.0K   63G   1% /dev/shm
-tmpfs            26G  4.8M   26G   1% /run
-efivarfs        512K   66K  442K  13% /sys/firmware/efi/efivars
-/dev/sdb3        74G  3.3G   67G   5% /
-/dev/sdb2       974M  258M  649M  29% /boot
-tmpfs            63G     0   63G   0% /tmp
-/dev/sdb1       599M  8.1M  591M   2% /boot/efi
-tmpfs            13G  8.0K   13G   1% /run/user/1000
-
---- RAID ---
-Personalities :
-unused devices: <none>
-Hardware RAID контроллер не обнаружен
-
---- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute
-       valid_lft forever preferred_lft forever
-2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    link/ether 00:15:b2:b3:19:48 brd ff:ff:ff:ff:ff:ff
-    altname enp2s0
-    inet 1.1.1.5/24 brd 10.96.184.255 scope global dynamic noprefixroute eno1
-       valid_lft 526981sec preferred_lft 526981sec
-    inet6 fe80::215:b2ff:feb3:1948/64 scope link noprefixroute
-       valid_lft forever preferred_lft forever
-
-default via 10.96.184.1 dev eno1 proto dhcp src 1.1.1.5 metric 100
-10.96.184.0/24 dev eno1 proto kernel scope link src 1.1.1.5 metric 100
-
---- СЕТЕВЫЕ НАСТРОЙКИ ---
-Конфиги не найдены
-
---- ОС ---
-RED OS release (8.0) MINIMAL
-6.12.21-1.red80.x86_64
-
---- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---
-Тест записи (это займет время):
-1073741824 bytes (1.1 GB, 1.0 GiB) copied, 1.41216 s, 760 MB/s
-
---- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---
-Не удалось определить скорость eth0
-Не удалось определить скорость eth1
-===================================
---- HOSTNAME И IP ---
-server-6
-1.1.1.6
-
---- CPU ---
-CPU(s):                               128
-Model name:                           Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
-Thread(s) per core:                   2
-Core(s) per socket:                   32
-Socket(s):                            2
-CPU(s) scaling MHz:                   25%
-
---- GPU ---
-GPU не обнаружен или драйвера не установлены
-
---- ПАМЯТЬ ---
-               total        used        free      shared  buff/cache   available
-Mem:           125Gi       2.6Gi       121Gi       7.0Mi       2.4Gi       122Gi
-Swap:          8.0Gi          0B       8.0Gi
-
---- ДИСКИ ---
-NAME    SIZE TYPE MOUNTPOINT FSTYPE
-sda    18.2T disk
-sdb     3.5T disk
-├─sdb1  600M part /boot/efi  vfat
-├─sdb2    1G part /boot      ext4
-└─sdb3   75G part /          ext4
-zram0     8G disk [SWAP]
-
-Filesystem      Size  Used Avail Use% Mounted on
-devtmpfs        4.0M     0  4.0M   0% /dev
-tmpfs            63G  8.0K   63G   1% /dev/shm
-tmpfs            26G  4.8M   26G   1% /run
-efivarfs        512K   66K  442K  13% /sys/firmware/efi/efivars
-/dev/sdb3        74G  3.3G   67G   5% /
-/dev/sdb2       974M  258M  649M  29% /boot
-tmpfs            63G     0   63G   0% /tmp
-/dev/sdb1       599M  8.1M  591M   2% /boot/efi
-tmpfs            13G  8.0K   13G   1% /run/user/1000
-
---- RAID ---
-Personalities :
-unused devices: <none>
-Hardware RAID контроллер не обнаружен
-
---- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute
-       valid_lft forever preferred_lft forever
-2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    link/ether 00:15:b2:b3:18:f4 brd ff:ff:ff:ff:ff:ff
-    altname enp2s0
-    inet 1.1.1.6/24 brd 10.96.184.255 scope global dynamic noprefixroute eno1
-       valid_lft 526904sec preferred_lft 526904sec
-    inet6 fe80::8924:4f75:c119:f1fc/64 scope link noprefixroute
-       valid_lft forever preferred_lft forever
-
-default via 10.96.184.1 dev eno1 proto dhcp src 1.1.1.6 metric 100
-10.96.184.0/24 dev eno1 proto kernel scope link src 1.1.1.6 metric 100
-
---- СЕТЕВЫЕ НАСТРОЙКИ ---
-Конфиги не найдены
-
---- ОС ---
-RED OS release (8.0) MINIMAL
-6.12.21-1.red80.x86_64
-
---- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---
-Тест записи (это займет время):
-1073741824 bytes (1.1 GB, 1.0 GiB) copied, 1.43171 s, 750 MB/s
-
---- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---
-Не удалось определить скорость eth0
-Не удалось определить скорость eth1
-===================================
-
-На 4 серверах стоят такие GPU - server-1...server-4
-81:00.0 3D controller: NVIDIA Corporation TU104GL [Tesla T4] (rev a1)
-
-Ответы на твои вопросы
-1. Сетевая конфигурация и IP адреса
-Какие IP-адреса сейчас на серверах? - Есть в инфо о серверах
-Можешь ли ты заранее узнать IP-адреса в новом ЦОД? - Сможем зарезервировать
-Какая сетевая топология будет в новом ЦОД (L2/L3)? - Сеть должны настроить сами в новом ЦОД
-Планируется ли выделенная management сеть? - Не уверен, для чего?
-Нужна ли настройка bonding для сетевых интерфейсов (для отказоустойчивости)? Что это и зачем
-2. Хранилище данных
-Какой объем дисков на каждом сервере? - Есть в инфо о серверах
-Какой тип дисков (SSD/NVMe/HDD)? - Есть в инфо о серверах
-Есть ли RAID-контроллеры? - Не уверен, как узнать?
-Какой объем данных планируется хранить? - текущего места должно зватить
-Нужна ли репликация между storage-нодами? - Для чего?
-3. GPU конфигурация
-Какие модели GPU? - Они стоят на сервере, но возможно их не видит или нет драйверов
-4. Kubernetes архитектура
-Сколько master-нод планируется (рекомендую 3 для HA)? Давай подумаем
-Где будут master-ноды (на серверах с GPU или отдельно)? Давай подумаем
-Какая версия Kubernetes? Давай ставить через kubaadm - самую стабильную
-Какой CNI плагин предпочтителен (Calico/Flannel/Cilium)? Calico
-5. CI/CD
-Где находятся раннеры (GitLab/Jenkins/другое)? - GitLab
-Есть ли доступ из раннеров к серверам? - Прокинем
-Нужен ли приватный registry для образов? - Есть свой
-6.
-#################### docker-compose.yml - Прод - server1 ####################
-services:
-  tor:
-    image: tor:2.4.0
-    env_file:
-      - /server/tor/.env
-    environment:
-      PATH: /venv/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      PYTHONPATH: /home/app:/venv/lib/python3.10/site-packages
-    volumes:
-      - /server/tor/minio_urls.txt:/home/app/src/minio_urls.txt
-      - seg_venv:/venv
-    working_dir: /home/app/src
-    command: python ./main.py
-    network_mode: "host"
-    restart: always
-    deploy:
-      replicas: 4
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  reader:
-    depends_on:
-      - tor
-    image: reader:2.1.0
-    volumes:
-      - /server/tor/minio_urls.txt:/home/app/src/minio_urls.txt
-    env_file:
-      - /server/reader/.env
-    working_dir: /home/app/src
-    restart: always
-    network_mode: host
-    command: ./main.bin
-    deploy:
-      replicas: 2
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  minio-handler-1:
-    depends_on:
-      - reader
-    image: miniohandler:2.1.2
-    env_file:
-      - /server/minio-handler/.env.v21
-    command: python3 src/server.py
-    network_mode: host
-    deploy:
-      resources:
-        reservations:
-          cpus: '1'
-          memory: '6G'
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  minio-handler-2:
-    depends_on:
-      - reader
-    image: miniohandler:2.1.2
-    env_file:
-      - /server/minio-handler/.env.v22
-    command: python3 src/server.py
-    network_mode: host
-    deploy:
-      resources:
-        reservations:
-          cpus: '1'
-          memory: '6G'
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  streams:
-    depends_on:
-      - minio-handler-1
-      - minio-handler-2
-    image: streams:2.2.0
-    environment:
-      - TZ=Europe/Moscow
-    env_file:
-      - /server/streams/.env
-    command: python3 src/server.py
-    ports:
-      - "9898:9898"
-    deploy:
-      resources:
-        reservations:
-          cpus: '6'
-          memory: '6G'
-    network_mode: host
-  feature-1:
-    depends_on:
-      - minio-handler-1
-      - minio-handler-2
-    image: feature:3.1.0
-    environment:
-      - TZ=Europe/Moscow
-    volumes:
-      - seg_venv:/venv
-    env_file:
-      - /server/feature/.env.1
-    command: python3 src/server.py
-    network_mode: host
-#    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '6.0'
-          memory: 5G
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-
-  # feature-1...feature-16 - 16 таких реплик
-volumes:
-  seg_venv:
-    external: true
-#################### docker-compose.yml - Прод - server2 ####################
-services:
-  tor:
-    image: tor:2.4.0
-    env_file:
-      - /server/tor/.env
-    environment:
-      PATH: /venv/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      PYTHONPATH: /home/app:/venv/lib/python3.10/site-packages
-    volumes:
-      - /server/tor/minio_urls.txt:/home/app/src/minio_urls.txt
-      - seg_venv:/venv
-    working_dir: /home/app/src
-    command: python ./main.py
-    network_mode: "host"
-    restart: always
-    deploy:
-      replicas: 4
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  reader:
-    depends_on:
-      - tor
-    image: reader:2.1.0
-    volumes:
-      - /server/tor/minio_urls.txt:/home/app/src/minio_urls.txt
-    env_file:
-      - /server/reader/.env
-    working_dir: /home/app/src
-    restart: always
-    network_mode: host
-    command: ./main.bin
-    deploy:
-      replicas: 2
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  minio-handler-1:
-    depends_on:
-      - reader
-    image:
-      miniohandler:2.1.2
-    env_file:
-      - /server/minio-handler/.env
-    command: python3 src/server.py
-    network_mode: host
-    deploy:
-      resources:
-        reservations:
-          cpus: '1'
-          memory: '6G'
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  streams:
-    depends_on:
-      - minio-handler-1
-    image:
-      streams:2.2.0
-    environment:
-      - TZ=Europe/Moscow
-    env_file:
-      - /server/streams/.env
-    command: python3 src/server.py
-    ports:
-      - "9898:9898"
-    deploy:
-      resources:
-        reservations:
-          cpus: '6'
-          memory: '6G'
-    network_mode: host
-  cameracolor:
-    image: cameracolor:2.0
-    container_name: cameracolor
-    ports:
-      - 8015:8015
-    network_mode: host
-    #networks:
-    #  - cameracolor_network
-    env_file: /server/cameracolor/.env
-    restart: unless-stopped
-  feature-1:
-    depends_on:
-      - minio-handler-1
-    image:
-      feature:3.1.0
-    environment:
-      - TZ=Europe/Moscow
-    volumes:
-      - seg_venv:/venv
-    env_file:
-      - /server/feature/.env.1
-    command: python3 src/server.py
-    network_mode: host
-#    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '6.0'
-          memory: 5G
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-
-  # feature-1...feature-16 - 16 таких реплик
-volumes:
-  seg_venv:
-    external: true
-networks:
-  cameracolor_network:
-    external: true
-#################### docker-compose.yml - Прод - server3 ####################
-services:
-  tor:
-    image: tor:2.4.0
-    env_file:
-      - /server/tor/.env
-    environment:
-      PATH: /venv/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      PYTHONPATH: /home/app:/venv/lib/python3.10/site-packages
-    volumes:
-      - /server/tor/minio_urls.txt:/home/app/src/minio_urls.txt
-      - seg_venv:/venv
-    working_dir: /home/app/src
-    command: python ./main.py
-    network_mode: "host"
-    restart: always
-    deploy:
-      replicas: 4
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  check:
-    image: obstruction_monitoring_obstruction_monitoring:latest
-    env_file:
-      - /server/check-zaslon/.env
-    command: ["python", "main.py"]
-    deploy:
-      replicas: 1
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-    network_mode: host
-  minio-handler-1:
-    depends_on:
-      - tor
-    image:
-      miniohandler:2.1.2
-    env_file:
-      - /server/minio-handler/.env
-    command: python3 src/server.py
-    network_mode: host
-    deploy:
-      resources:
-        reservations:
-          cpus: '1'
-          memory: '6G'
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  streams:
-    depends_on:
-      - minio-handler-1
-    image:
-      streams:2.2.0
-    environment:
-      - TZ=Europe/Moscow
-    env_file:
-      - /server/streams/.env
-    command: python3 src/server.py
-    ports:
-      - "9898:9898"
-    deploy:
-      resources:
-        reservations:
-          cpus: '6'
-          memory: '6G'
-    network_mode: host
-  feature-1:
-    depends_on:
-      - minio-handler-1
-    image:
-      feature:3.1.0
-    environment:
-      - TZ=Europe/Moscow
-    volumes:
-      - seg_venv:/venv
-    env_file:
-      - /server/feature/.env.1
-    command: python3 src/server.py
-    network_mode: host
-#    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '6.0'
-          memory: 5G
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-
-  # feature-1...feature-16 - 16 таких реплик
-volumes:
-  seg_venv:
-    external: true
-#################### docker-compose.yml - Прод - server4 ####################
-services:
-  tor:
-    image: tor:2.4.0
-    env_file:
-      - /server/tor/.env
-    environment:
-      PATH: /venv/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      PYTHONPATH: /home/app:/venv/lib/python3.10/site-packages
-    volumes:
-      - /server/tor/minio_urls.txt:/home/app/src/minio_urls.txt
-      - seg_venv:/venv
-    working_dir: /home/app/src
-    command: python ./main.py
-    network_mode: "host"
-    restart: always
-    deploy:
-      replicas: 4
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  reader:
-    depends_on:
-      - tor
-    image: reader:2.1.0
-    volumes:
-      - /server/tor/minio_urls.txt:/home/app/src/minio_urls.txt
-    env_file:
-      - /server/reader/.env
-    working_dir: /home/app/src
-    restart: always
-    network_mode: host
-    command: ./main.bin
-    deploy:
-      replicas: 2
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  minio-handler-1:
-    depends_on:
-      - reader
-    image:
-      miniohandler:2.1.2
-    env_file:
-      - /server/minio-handler/.env
-    command: python3 src/server.py
-    network_mode: host
-    deploy:
-      resources:
-        reservations:
-          cpus: '1'
-          memory: '6G'
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-  monit:
-    depends_on:
-      - minio-handler-1
-    image: monit_app
-    env_file: /server/monit/.env
-    ports:
-      - "8009:8009"
-    restart: always
-    networks:
-      - server_network
-  car-counter:
-    depends_on:
-      - minio-handler-1
-    image: car_counter:latest
-    env_file:
-      - /server/car-counter/.env
-    command: ./main.bin
-    restart: always
-    networks:
-      - server_network
-  controller:
-    depends_on:
-      - minio-handler-1
-    image: controller_app
-    network_mode: host
-    env_file: /server/controller/.env
-    restart: always
-  parking_support_service:
-    image: backend_parking_support_service
-    environment:
-      PATH: /venv/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      PYTHONPATH: /home/app:/venv/lib/python3.10/site-packages
-    volumes:
-      - seg_venv:/venv
-      - /server/parking_support_service/frontend:/home/app/frontend
-    working_dir: /home/app/src
-    ports:
-      - "9020:9020"
-      - "8080:8080"
-    restart: always
-    command: >
-      sh -c "
-      python main.py &
-      cd /home/app/frontend && python -m http.server 8080
-      "
-  streams:
-    depends_on:
-      - minio-handler-1
-    image:
-      streams:2.2.0
-    environment:
-      - TZ=Europe/Moscow
-    env_file:
-      - /server/streams/.env
-    command: python3 src/server.py
-    ports:
-      - "9898:9898"
-    deploy:
-      resources:
-        reservations:
-          cpus: '6'
-          memory: '6G'
-    network_mode: host
-  feature-1:
-    depends_on:
-      - minio-handler-1
-    image:
-      feature:3.1.0
-    environment:
-      - TZ=Europe/Moscow
-    volumes:
-      - seg_venv:/venv
-    env_file:
-      - /server/feature/.env.1
-    command: python3 src/server.py
-    network_mode: host
-#    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '6.0'
-          memory: 5G
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-
-  # feature-1...feature-16 - 16 таких реплик
-
-volumes:
-  seg_venv:
-    external: true
-networks:
-  server_network:
-    external: true
-    name: server_network
-######################  INFRA docker-compose.yml - server1 ######################
-services:
-  redis:
-    image: redis:6.2
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
-      interval: 30s
-      timeout: 10s
-    networks:
-      - server_network
-  minio:
-    image: minio/minio:latest
-    container_name: minio-server-parking
-    command: server --console-address ":9001" /data
-    ports:
-      - 9000:9000
-      - 9001:9001
-    env_file:
-      - /server/minio-server/.env
-    volumes:
-      - /media/minios3/minio-storage:/data
-    deploy:
-      restart_policy:
-        condition: always
-        window: 30s
-    networks:
-      - server_network
-  kafka2:
-    image: confluentinc/cp-kafka:6.2.0
-    hostname: kafka2
-    container_name: kafka2
-    restart: always
-    volumes:
-      - /server/kafka/data:/var/lib/kafka/data
-    ports:
-      - "9094:9094"
-      - "9096:9096"
-    environment:
-      KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: 168.19.184.14:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INSIDE://168.19.184.12:9094,OUTSIDE://168.19.184.12:9096
-      KAFKA_LISTENERS: INSIDE://0.0.0.0:9094,OUTSIDE://0.0.0.0:9096
-      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
-      KAFKA_MESSAGE_MAX_BYTES: 1000000000          # 5MB limit for large messages
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 1000000000    # Sync replica limit for large messages
-      KAFKA_NUM_PARTITIONS: 2                  # Increased partitions for high throughput
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1 #test option
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 2       # Replication for durability
-      KAFKA_MIN_INSYNC_REPLICAS: 1
-      KAFKA_HEAP_OPTS: "-Xmx6G -Xms6G"          # Increase heap size for large data volume
-      KAFKA_REPLICA_SOCKET_TIMEOUT_MS: 30000    # High replication timeout for large messages
-      KAFKA_MAX_REQUEST_SIZE: 1000000000          # 10MB max request size for producers
-      KAFKA_SOCKET_REQUEST_MAX_BYTES: 1000000000  # Allow larger requests
-    networks:
-      - server_network
-networks:
-  server_network:
-    external: true
-    name: server_network
-######################  INFRA docker-compose.yml - server2 ######################
-services:
-  minio:
-    image: minio/minio:latest
-    container_name: minio-server-parking
-    command: server --console-address ":9001" /data
-    ports:
-      - 9000:9000
-      - 9001:9001
-    env_file:
-      - /server/minio-server/.env
-    volumes:
-      - /media/minios3/minio-storage:/data
-    deploy:
-     restart_policy:
-       condition: always
-       window: 30s
-    networks:
-      - server_network
-  kafka3:
-    image: confluentinc/cp-kafka:6.2.0
-    hostname: kafka3
-    container_name: kafka3
-    restart: always
-    volumes:
-      - /server/kafka/data:/var/lib/kafka/data
-    ports:
-      - "9093:9093"
-      - "9095:9095"
-    environment:
-      KAFKA_BROKER_ID: 3
-      KAFKA_ZOOKEEPER_CONNECT: 168.19.184.14:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INSIDE://168.19.184.13:9093,OUTSIDE://168.19.184.13:9095
-      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9095
-      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
-      KAFKA_MESSAGE_MAX_BYTES: 1000000000          # 5MB limit for large messages
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 1000000000    # Sync replica limit for large messages
-      KAFKA_NUM_PARTITIONS: 2                  # Increased partitions for high throughput
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1 #test option
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 2       # Replication for durability
-      KAFKA_MIN_INSYNC_REPLICAS: 1
-      KAFKA_HEAP_OPTS: "-Xmx6G -Xms6G"          # Increase heap size for large data volume
-      KAFKA_REPLICA_SOCKET_TIMEOUT_MS: 30000    # High replication timeout for large messages
-      KAFKA_MAX_REQUEST_SIZE: 1000000000          # 10MB max request size for producers
-      KAFKA_SOCKET_REQUEST_MAX_BYTES: 1000000000  # Allow larger requests
-    networks:
-      - server_network
-  mongo-secondary1:
-    image: mongo:latest
-    container_name: mongo-secondary1
-    restart: always
-    volumes:
-      - /server/mongo/mongodb_data:/data/db
-    ports:
-      - 27017:27017
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
-    networks:
-      server_network:
-        ipv4_address: 10.10.0.3
-networks:
-  server_network:
-    external: true
-    name: server_network
-######################  INFRA docker-compose.yml - server3 ######################
-services:
-  minio:
-    image: minio/minio:latest
-    env_file:
-      - /server/minio-server/.env
-    container_name: minio-server-parking
-    command: server --console-address ":9001" /data
-    ports:
-      - 9000:9000
-      - 9001:9001
-    restart: unless-stopped
-    volumes:
-      - /media/minios3/minio-storage:/data
-    networks:
-      - server_network
-  mongo:
-    image: mongo:latest
-    container_name: mongo
-    restart: always
-    volumes:
-      - /server/mongo/mongodb_data:/data/db
-    ports:
-      - 27017:27017
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
-    networks:
-      - server_network
-networks:
-  server_network:
-    external: true
-    name: server_network
-######################  INFRA docker-compose.yml - server4 ######################
-services:
-  minio:
-    image: minio/minio:latest
-    container_name: minio-server-parking
-    command: server --console-address ":9001" /data
-    ports:
-      - 9000:9000
-      - 9001:9001
-    env_file:
-      - /server/minio-server/.env
-    volumes:
-      - /media/minios3/minio-storage:/data
-    networks:
-      - server_network
-  zookeeper-svc:
-    image: confluentinc/cp-zookeeper:6.2.0
-    hostname: zookeeper-svc
-    container_name: zookeeper-svc
-    restart: always
-    volumes:
-      - /server/kafka/conf/zookeeper:/etc/kafka
-      - /server/kafka/zoo_data/data:/var/lib/zookeeper/data
-      - /server/kafka/zoo_data/log:/var/lib/zookeeper/log
-    ports:
-      - "2181:2181"
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - server_network
-  kafka1:
-    image: confluentinc/cp-kafka:6.2.0
-    depends_on:
-      - zookeeper-svc
-    hostname: kafka1
-    container_name: kafka1
-    restart: always
-    volumes:
-      - /server/kafka/data:/var/lib/kafka/data
-      - /server/kafka/conf/kafka:/etc/kafka
-    ports:
-      - "9092:9092"
-      - "9094:9094"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper-svc:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka1:9092,OUTSIDE://168.19.184.14:9094
-      KAFKA_LISTENERS: INSIDE://0.0.0.0:9092,OUTSIDE://0.0.0.0:9094
-      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
-      KAFKA_MESSAGE_MAX_BYTES: 1000000000          # 5MB limit for large messages
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 1000000000    # Sync replica limit for large messages
-      KAFKA_NUM_PARTITIONS: 2                  # Increased partitions for high throughput
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 2       # Replication for durability
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1 #test option
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
-      KAFKA_MIN_INSYNC_REPLICAS: 1
-      KAFKA_HEAP_OPTS: "-Xmx6G -Xms6G"          # Increase heap size for large data volume
-      KAFKA_REPLICA_SOCKET_TIMEOUT_MS: 30000    # High replication timeout for large messages
-      KAFKA_MAX_REQUEST_SIZE: 1000000000          # 10MB max request size for producers
-      KAFKA_SOCKET_REQUEST_MAX_BYTES: 1000000000  # Allow larger requests
-    networks:
-      - server_network
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    depends_on:
-      - kafka1
-    environment:
-      KAFKA_CLUSTERS_0_NAME: kafka_cluster
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:9092, 168.19.184.12:9094, 168.19.184.13:9093 # Bootstrap to Kafka broker
-      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper-svc:2181         # Zookeeper address
-      DYNAMIC_CONFIG_ENABLED: 'true'                         # For dynamic configuration changes
-      KAFKA_CLUSTERS_0_AUDIT_TOPICAUDITENABLED: 'true'
-      KAFKA_CLUSTERS_0_AUDIT_CONSOLEAUDITENABLED: 'true'
-    ports:
-       - "9090:8080"  # Expose Kafka UI on port 9090 for web access
-    networks:
-       - server_network
-  mongo-secondary2:
-    image: mongo:latest
-    container_name: mongo-secondary2
-    restart: always
-    volumes:
-      - ./mongodb_data:/data/db
-    ports:
-      - 27017:27017
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
-    networks:
-      - server_network
-networks:
-  server_network:
-    external: true
-    name: server_network
+# Мне нужно развернуть проект на физических серверах, я дам те
+
+_Экспортировано: 17.04.2026, 14:51:24 MSK_
+
+---
+
+Полный план развертывания инфраструктуры
+Отлично! Теперь у меня есть полная картина. Анализирую конфигурацию и готовлю решение.
+
+Анализ текущей инфраструктуры
+Серверы и их роли:
+GPU-серверы (server-1 до server-4):
+
+CPU: AMD EPYC 7763 (256 cores) / Intel Xeon Gold 6338 (128 cores)
+RAM: 126GB
+GPU: NVIDIA Tesla T4 (по 1 шт на каждом)
+Диски: 3.5TB (sda) + 18.2TB (sdb) - не используются!
+Сеть: 10.96.184.x/24
+Storage-серверы (server-5, server-6):
+
+CPU: Intel Xeon Gold 6338 (128 cores)
+RAM: 126GB
+Диски: 3.5TB (sdb, система) + 18.2TB (sda, свободен)
+Сеть: 10.96.184.x/24
+Текущая архитектура (проблемы):
+MongoDB ReplicaSet разбросан по 3 серверам
+Kafka кластер (3 брокера) на разных серверах
+MinIO запущен на 4 серверах в режиме standalone (не distributed!)
+Зависимости между сервисами через depends_on не будут работать в k8s
+network_mode: host - проблема для Kubernetes
+Ответы на ваши вопросы
+1. Management сеть
+Зачем: Отдельная сеть для управления кластером (SSH, Kubernetes API) - изолирует управление от рабочего трафика и повышает безопасность.
+
+Рекомендация: Используйте eno2 (сейчас DOWN) для management сети, eno1 для рабочего трафика.
+
+2. Bonding сетевых интерфейсов
+Что это: Объединение 2 сетевых карт в одну для отказоустойчивости. Если одна сеть упадет - вторая подхватит.
+
+Режимы:
+
+mode=1 (active-backup) - одна активна, вторая в резерве
+mode=4 (802.3ad/LACP) - агрегация для увеличения пропускной способности
+Рекомендация: Пока у вас eno2 не подключен - настроим позже, если нужна HA сети.
+
+3. Репликация storage
+Зачем: Если один storage-сервер упадет, данные останутся на втором. Longhorn это делает автоматически.
+
+4. RAID
+У вас нет аппаратного RAID-контроллера. Будем использовать программные решения.
+
+Итоговая архитектура
+code
+Копировать
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          KUBERNETES CLUSTER (v1.29)                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    CONTROL PLANE (HA - 3 nodes)                     │    │
+│  ├─────────────────────────────────────────────────────────────────────┤    │
+│  │  server-1: Master + Worker (GPU) - 10.96.184.11                     │    │
+│  │  server-2: Master + Worker (GPU) - 10.96.184.12                     │    │
+│  │  server-3: Master + Worker (GPU) - 10.96.184.13                     │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                         WORKER NODES                                 │    │
+│  ├─────────────────────────────────────────────────────────────────────┤    │
+│  │  server-4: Worker (GPU) - 10.96.184.14                              │    │
+│  │  server-5: Worker (Storage) - 10.96.184.15                          │    │
+│  │  server-6: Worker (Storage) - 10.96.184.16                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                              NAMESPACES                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ├─ kube-system: CoreDNS, Calico, Metrics                                   │
+│  ├─ longhorn-system: Distributed Storage (18TB × 6 = 108TB usable)          │
+│  ├─ infra: Kafka (3 brokers), MinIO (distributed), Redis, Zookeeper         │
+│  ├─ database: MongoDB ReplicaSet (3 replicas)                               │
+│  └─ production: Ваши приложения (tor, reader, feature, etc.)                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Storage Layer: Longhorn
+├─ Replica: 2 (данные дублируются на 2 ноды)
+├─ Nodes: server-1,2,3,4,5,6 (используем все 18TB диски)
+└─ Automatic failover при отказе ноды
+ЭТАП 1: Подготовка серверов
+1.1. Скрипт подготовки дисков
+bash
+Копировать
+#!/bin/bash
+# prepare_storage.sh - Подготовка дисков для Longhorn
+
+set -e
+
+echo "=== Подготовка дисков для Longhorn ==="
+
+# Определяем большой диск (18TB)
+DISK=$(lsblk -nd -o NAME,SIZE | grep "18.2T" | awk '{print $1}')
+
+if [ -z "$DISK" ]; then
+    echo "Ошибка: диск 18TB не найден!"
+    exit 1
+fi
+
+echo "Найден диск: /dev/$DISK"
+
+# Создаем раздел для Longhorn
+echo "Создаем раздел на /dev/$DISK..."
+parted /dev/$DISK --script mklabel gpt
+parted /dev/$DISK --script mkpart primary ext4 0% 100%
+
+# Получаем имя раздела
+PARTITION="${DISK}1"
+
+# Форматируем раздел
+echo "Форматируем /dev/$PARTITION в ext4..."
+mkfs.ext4 -F /dev/$PARTITION
+
+# Создаем точку монтирования
+mkdir -p /var/lib/longhorn
+
+# Получаем UUID раздела
+UUID=$(blkid -s UUID -o value /dev/$PARTITION)
+
+# Добавляем в fstab
+echo "UUID=$UUID /var/lib/longhorn ext4 defaults,noatime 0 2" >> /etc/fstab
+
+# Монтируем
+mount /var/lib/longhorn
+
+echo "=== Диск успешно подготовлен ==="
+df -h /var/lib/longhorn
+Запустите на всех 6 серверах:
+
+bash
+Копировать
+chmod +x prepare_storage.sh
+sudo ./prepare_storage.sh
+1.2. Установка необходимых пакетов
+bash
+Копировать
+#!/bin/bash
+# install_base.sh - Установка базовых пакетов
+
+cat > /etc/yum.repos.d/kubernetes.repo <<EOF
+[kubernetes]
+name=Kubernetes
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/
+enabled=1
+gpgcheck=1
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key
+EOF
+
+# Отключаем SELinux
+setenforce 0
+sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+
+# Отключаем swap
+swapoff -a
+sed -i '/swap/d' /etc/fstab
+
+# Отключаем zram
+systemctl disable --now zram-swap.service 2>/dev/null || true
+
+# Устанавливаем пакеты
+dnf install -y \
+    containerd \
+    kubelet-1.29.0 \
+    kubeadm-1.29.0 \
+    kubectl-1.29.0 \
+    iproute-tc \
+    iscsi-initiator-utils \
+    nfs-utils \
+    util-linux \
+    curl \
+    wget \
+    git \
+    htop \
+    vim
+
+# Включаем модули ядра
+cat > /etc/modules-load.d/k8s.conf <<EOF
+overlay
+br_netfilter
+iscsi_tcp
+EOF
+
+modprobe overlay
+modprobe br_netfilter
+modprobe iscsi_tcp
+
+# Настройка sysctl
+cat > /etc/sysctl.d/k8s.conf <<EOF
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+net.ipv4.conf.all.rp_filter         = 1
+vm.overcommit_memory                = 1
+vm.panic_on_oom                     = 0
+kernel.panic                        = 10
+kernel.panic_on_oops                = 1
+EOF
+
+sysctl --system
+
+# Настройка containerd
+mkdir -p /etc/containerd
+containerd config default > /etc/containerd/config.toml
+
+# Включаем systemd cgroup driver
+sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+# Перезапускаем containerd
+systemctl enable --now containerd
+systemctl enable --now kubelet
+systemctl enable --now iscsid
+
+echo "=== Базовая установка завершена ==="
+Запустите на всех 6 серверах:
+
+bash
+Копировать
+chmod +x install_base.sh
+sudo ./install_base.sh
+1.3. Установка NVIDIA драйверов и NVIDIA Container Toolkit
+Только для GPU-серверов (server-1 до server-4):
+
+bash
+Копировать
+#!/bin/bash
+# install_nvidia.sh - Установка NVIDIA драйверов
+
+# Добавляем репозиторий NVIDIA
+dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
+
+# Устанавливаем драйвер
+dnf module install -y nvidia-driver:latest-dkms
+dnf install -y cuda-drivers
+
+# Устанавливаем NVIDIA Container Toolkit
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | \
+  tee /etc/yum.repos.d/nvidia-container-toolkit.repo
+
+dnf install -y nvidia-container-toolkit
+
+# Настраиваем containerd для NVIDIA
+nvidia-ctk runtime configure --runtime=containerd
+
+# Перезапускаем containerd
+systemctl restart containerd
+
+# Проверяем
+nvidia-smi
+
+echo "=== NVIDIA драйвера установлены ==="
+Запустите:
+
+bash
+Копировать
+chmod +x install_nvidia.sh
+sudo ./install_nvidia.sh
+ЭТАП 2: Резервирование IP-адресов
+Схема адресации для нового ЦОД:
+Предположим новая сеть будет 10.20.30.0/24
+
+Зарезервируйте:
+
+code
+Копировать
+10.20.30.11 - server-1 (gpu-master-1)
+10.20.30.12 - server-2 (gpu-master-2)
+10.20.30.13 - server-3 (gpu-master-3)
+10.20.30.14 - server-4 (gpu-worker-1)
+10.20.30.15 - server-5 (storage-1)
+10.20.30.16 - server-6 (storage-2)
+
+10.20.30.10 - VIP для Kubernetes API (keepalived)
+Настройка статических IP (до переезда настроим для текущей сети)
+bash
+Копировать
+#!/bin/bash
+# configure_network.sh - Настройка сети
+
+INTERFACE="eno1"
+HOSTNAME=$(hostname)
+
+# Определяем IP на основе hostname
+case $HOSTNAME in
+    server-1) IP="10.96.184.11" ;;
+    server-2) IP="10.96.184.12" ;;
+    server-3) IP="10.96.184.13" ;;
+    server-4) IP="10.96.184.14" ;;
+    server-5) IP="10.96.184.15" ;;
+    server-6) IP="10.96.184.16" ;;
+    *) echo "Unknown hostname"; exit 1 ;;
+esac
+
+# Создаем конфиг NetworkManager
+nmcli connection modify $INTERFACE ipv4.addresses $IP/24
+nmcli connection modify $INTERFACE ipv4.gateway 10.96.184.1
+nmcli connection modify $INTERFACE ipv4.dns "8.8.8.8 8.8.4.4"
+nmcli connection modify $INTERFACE ipv4.method manual
+nmcli connection up $INTERFACE
+
+# Обновляем /etc/hosts
+cat > /etc/hosts <<EOF
+127.0.0.1   localhost localhost.localdomain
+::1         localhost localhost.localdomain
+
+# Kubernetes nodes
+10.96.184.11 server-1 gpu-master-1
+10.96.184.12 server-2 gpu-master-2
+10.96.184.13 server-3 gpu-master-3
+10.96.184.14 server-4 gpu-worker-1
+10.96.184.15 server-5 storage-1
+10.96.184.16 server-6 storage-2
+
+10.96.184.10 k8s-api
+EOF
+
+echo "=== Сеть настроена: $IP ==="
+Запустите на каждом сервере:
+
+bash
+Копировать
+chmod +x configure_network.sh
+sudo ./configure_network.sh
+ЭТАП 3: Инициализация Kubernetes кластера
+3.1. На первом мастере (server-1)
+bash
+Копировать
+#!/bin/bash
+# init_k8s_master.sh - Инициализация первого мастера
+
+CONTROL_PLANE_ENDPOINT="10.96.184.10:6443"  # VIP (настроим позже)
+POD_NETWORK_CIDR="10.244.0.0/16"
+
+# Создаем конфигурацию kubeadm
+cat > kubeadm-config.yaml <<EOF
+apiVersion: ku
+
