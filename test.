@@ -1,231 +1,344 @@
 # Мне нужно развернуть проект на физических серверах, я дам те
 
-_Экспортировано: 17.04.2026, 10:23:36 MSK_
+_Экспортировано: 17.04.2026, 14:51:24 MSK_
 
 ---
 
-Анализ требований и план действий
-Отличный проект! Давай разберем по порядкам и соберу всю необходимую информацию.
+Полный план развертывания инфраструктуры
+Отлично! Теперь у меня есть полная картина. Анализирую конфигурацию и готовлю решение.
 
-Скрипт для сбора информации о серверах
-Сначала создам скрипт для анализа серверов:
+Анализ текущей инфраструктуры
+Серверы и их роли:
+GPU-серверы (server-1 до server-4):
+
+CPU: AMD EPYC 7763 (256 cores) / Intel Xeon Gold 6338 (128 cores)
+RAM: 126GB
+GPU: NVIDIA Tesla T4 (по 1 шт на каждом)
+Диски: 3.5TB (sda) + 18.2TB (sdb) - не используются!
+Сеть: 10.96.184.x/24
+Storage-серверы (server-5, server-6):
+
+CPU: Intel Xeon Gold 6338 (128 cores)
+RAM: 126GB
+Диски: 3.5TB (sdb, система) + 18.2TB (sda, свободен)
+Сеть: 10.96.184.x/24
+Текущая архитектура (проблемы):
+MongoDB ReplicaSet разбросан по 3 серверам
+Kafka кластер (3 брокера) на разных серверах
+MinIO запущен на 4 серверах в режиме standalone (не distributed!)
+Зависимости между сервисами через depends_on не будут работать в k8s
+network_mode: host - проблема для Kubernetes
+Ответы на ваши вопросы
+1. Management сеть
+Зачем: Отдельная сеть для управления кластером (SSH, Kubernetes API) - изолирует управление от рабочего трафика и повышает безопасность.
+
+Рекомендация: Используйте eno2 (сейчас DOWN) для management сети, eno1 для рабочего трафика.
+
+2. Bonding сетевых интерфейсов
+Что это: Объединение 2 сетевых карт в одну для отказоустойчивости. Если одна сеть упадет - вторая подхватит.
+
+Режимы:
+
+mode=1 (active-backup) - одна активна, вторая в резерве
+mode=4 (802.3ad/LACP) - агрегация для увеличения пропускной способности
+Рекомендация: Пока у вас eno2 не подключен - настроим позже, если нужна HA сети.
+
+3. Репликация storage
+Зачем: Если один storage-сервер упадет, данные останутся на втором. Longhorn это делает автоматически.
+
+4. RAID
+У вас нет аппаратного RAID-контроллера. Будем использовать программные решения.
+
+Итоговая архитектура
+code
+Копировать
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          KUBERNETES CLUSTER (v1.29)                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    CONTROL PLANE (HA - 3 nodes)                     │    │
+│  ├─────────────────────────────────────────────────────────────────────┤    │
+│  │  server-1: Master + Worker (GPU) - 10.96.184.11                     │    │
+│  │  server-2: Master + Worker (GPU) - 10.96.184.12                     │    │
+│  │  server-3: Master + Worker (GPU) - 10.96.184.13                     │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                         WORKER NODES                                 │    │
+│  ├─────────────────────────────────────────────────────────────────────┤    │
+│  │  server-4: Worker (GPU) - 10.96.184.14                              │    │
+│  │  server-5: Worker (Storage) - 10.96.184.15                          │    │
+│  │  server-6: Worker (Storage) - 10.96.184.16                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                              NAMESPACES                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ├─ kube-system: CoreDNS, Calico, Metrics                                   │
+│  ├─ longhorn-system: Distributed Storage (18TB × 6 = 108TB usable)          │
+│  ├─ infra: Kafka (3 brokers), MinIO (distributed), Redis, Zookeeper         │
+│  ├─ database: MongoDB ReplicaSet (3 replicas)                               │
+│  └─ production: Ваши приложения (tor, reader, feature, etc.)                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Storage Layer: Longhorn
+├─ Replica: 2 (данные дублируются на 2 ноды)
+├─ Nodes: server-1,2,3,4,5,6 (используем все 18TB диски)
+└─ Automatic failover при отказе ноды
+ЭТАП 1: Подготовка серверов
+1.1. Скрипт подготовки дисков
+bash
+Копировать
+#!/bin/bash
+# prepare_storage.sh - Подготовка дисков для Longhorn
+
+set -e
+
+echo "=== Подготовка дисков для Longhorn ==="
+
+# Определяем большой диск (18TB)
+DISK=$(lsblk -nd -o NAME,SIZE | grep "18.2T" | awk '{print $1}')
+
+if [ -z "$DISK" ]; then
+    echo "Ошибка: диск 18TB не найден!"
+    exit 1
+fi
+
+echo "Найден диск: /dev/$DISK"
+
+# Создаем раздел для Longhorn
+echo "Создаем раздел на /dev/$DISK..."
+parted /dev/$DISK --script mklabel gpt
+parted /dev/$DISK --script mkpart primary ext4 0% 100%
+
+# Получаем имя раздела
+PARTITION="${DISK}1"
+
+# Форматируем раздел
+echo "Форматируем /dev/$PARTITION в ext4..."
+mkfs.ext4 -F /dev/$PARTITION
+
+# Создаем точку монтирования
+mkdir -p /var/lib/longhorn
+
+# Получаем UUID раздела
+UUID=$(blkid -s UUID -o value /dev/$PARTITION)
+
+# Добавляем в fstab
+echo "UUID=$UUID /var/lib/longhorn ext4 defaults,noatime 0 2" >> /etc/fstab
+
+# Монтируем
+mount /var/lib/longhorn
+
+echo "=== Диск успешно подготовлен ==="
+df -h /var/lib/longhorn
+Запустите на всех 6 серверах:
+
+bash
+Копировать
+chmod +x prepare_storage.sh
+sudo ./prepare_storage.sh
+1.2. Установка необходимых пакетов
+bash
+Копировать
+#!/bin/bash
+# install_base.sh - Установка базовых пакетов
+
+cat > /etc/yum.repos.d/kubernetes.repo <<EOF
+[kubernetes]
+name=Kubernetes
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/
+enabled=1
+gpgcheck=1
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key
+EOF
+
+# Отключаем SELinux
+setenforce 0
+sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+
+# Отключаем swap
+swapoff -a
+sed -i '/swap/d' /etc/fstab
+
+# Отключаем zram
+systemctl disable --now zram-swap.service 2>/dev/null || true
+
+# Устанавливаем пакеты
+dnf install -y \
+    containerd \
+    kubelet-1.29.0 \
+    kubeadm-1.29.0 \
+    kubectl-1.29.0 \
+    iproute-tc \
+    iscsi-initiator-utils \
+    nfs-utils \
+    util-linux \
+    curl \
+    wget \
+    git \
+    htop \
+    vim
+
+# Включаем модули ядра
+cat > /etc/modules-load.d/k8s.conf <<EOF
+overlay
+br_netfilter
+iscsi_tcp
+EOF
+
+modprobe overlay
+modprobe br_netfilter
+modprobe iscsi_tcp
+
+# Настройка sysctl
+cat > /etc/sysctl.d/k8s.conf <<EOF
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+net.ipv4.conf.all.rp_filter         = 1
+vm.overcommit_memory                = 1
+vm.panic_on_oom                     = 0
+kernel.panic                        = 10
+kernel.panic_on_oops                = 1
+EOF
+
+sysctl --system
+
+# Настройка containerd
+mkdir -p /etc/containerd
+containerd config default > /etc/containerd/config.toml
+
+# Включаем systemd cgroup driver
+sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+# Перезапускаем containerd
+systemctl enable --now containerd
+systemctl enable --now kubelet
+systemctl enable --now iscsid
+
+echo "=== Базовая установка завершена ==="
+Запустите на всех 6 серверах:
+
+bash
+Копировать
+chmod +x install_base.sh
+sudo ./install_base.sh
+1.3. Установка NVIDIA драйверов и NVIDIA Container Toolkit
+Только для GPU-серверов (server-1 до server-4):
 
 bash
 Копировать
 #!/bin/bash
-# server_info.sh - Скрипт сбора информации о серверах
+# install_nvidia.sh - Установка NVIDIA драйверов
 
-echo "==================================="
-echo "ИНФОРМАЦИЯ О СЕРВЕРЕ: $(hostname)"
-echo "==================================="
-echo ""
+# Добавляем репозиторий NVIDIA
+dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
 
-echo "--- HOSTNAME И IP ---"
-hostname
-hostname -I
-echo ""
+# Устанавливаем драйвер
+dnf module install -y nvidia-driver:latest-dkms
+dnf install -y cuda-drivers
 
-echo "--- CPU ---"
-lscpu | grep -E "^Model name|^CPU\(s\)|^Thread|^Core|^Socket"
-echo ""
+# Устанавливаем NVIDIA Container Toolkit
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | \
+  tee /etc/yum.repos.d/nvidia-container-toolkit.repo
 
-echo "--- GPU ---"
-if command -v nvidia-smi &> /dev/null; then
-    nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv,noheader
-else
-    echo "GPU не обнаружен или драйвера не установлены"
-fi
-echo ""
+dnf install -y nvidia-container-toolkit
 
-echo "--- ПАМЯТЬ ---"
-free -h
-echo ""
+# Настраиваем containerd для NVIDIA
+nvidia-ctk runtime configure --runtime=containerd
 
-echo "--- ДИСКИ ---"
-lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE
-echo ""
-df -h
-echo ""
+# Перезапускаем containerd
+systemctl restart containerd
 
-echo "--- RAID ---"
-if [ -f /proc/mdstat ]; then
-    cat /proc/mdstat
-else
-    echo "Software RAID не обнаружен"
-fi
+# Проверяем
+nvidia-smi
 
-if command -v megacli &> /dev/null; then
-    megacli -LDInfo -Lall -aALL
-elif command -v storcli &> /dev/null; then
-    storcli /c0 show
-else
-    echo "Hardware RAID контроллер не обнаружен"
-fi
-echo ""
-
-echo "--- СЕТЕВЫЕ ИНТЕРФЕЙСЫ ---"
-ip addr show
-echo ""
-ip route show
-echo ""
-
-echo "--- СЕТЕВЫЕ НАСТРОЙКИ ---"
-cat /etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null || echo "Конфиги не найдены"
-echo ""
-
-echo "--- ОС ---"
-cat /etc/redos-release 2>/dev/null || cat /etc/os-release
-uname -r
-echo ""
-
-echo "--- ПРОИЗВОДИТЕЛЬНОСТЬ ДИСКА ---"
-echo "Тест записи (это займет время):"
-dd if=/dev/zero of=/tmp/testfile bs=1G count=1 oflag=direct 2>&1 | grep -v records
-rm -f /tmp/testfile
-echo ""
-
-echo "--- СЕТЕВАЯ ПРОИЗВОДИТЕЛЬНОСТЬ ---"
-ethtool eth0 2>/dev/null | grep Speed || echo "Не удалось определить скорость eth0"
-ethtool eth1 2>/dev/null | grep Speed || echo "Не удалось определить скорость eth1"
-echo ""
-
-echo "==================================="
-echo "Сбор информации завершен"
-echo "==================================="
-Запусти его на каждом сервере:
+echo "=== NVIDIA драйвера установлены ==="
+Запустите:
 
 bash
 Копировать
-chmod +x server_info.sh
-sudo ./server_info.sh > server_$(hostname)_info.txt
-Критически важные вопросы
-1. Сетевая конфигурация и IP адреса
-Какие IP-адреса сейчас на серверах?
-Можешь ли ты заранее узнать IP-адреса в новом ЦОД?
-Какая сетевая топология будет в новом ЦОД (L2/L3)?
-Планируется ли выделенная management сеть?
-Нужна ли настройка bonding для сетевых интерфейсов (для отказоустойчивости)?
-2. Хранилище данных
-Какой объем дисков на каждом сервере?
-Какой тип дисков (SSD/NVMe/HDD)?
-Есть ли RAID-контроллеры?
-Какой объем данных планируется хранить?
-Нужна ли репликация между storage-нодами?
-3. GPU конфигурация
-Какие модели GPU?
-Сколько GPU на каждом сервере?
-Установлены ли NVIDIA драйвера?
-Нужен ли GPU sharing между подами?
-4. Kubernetes архитектура
-Сколько master-нод планируется (рекомендую 3 для HA)?
-Где будут master-ноды (на серверах с GPU или отдельно)?
-Какая версия Kubernetes?
-Какой CNI плагин предпочтителен (Calico/Flannel/Cilium)?
-5. CI/CD
-Где находятся раннеры (GitLab/Jenkins/другое)?
-Есть ли доступ из раннеров к серверам?
-Нужен ли приватный registry для образов?
-6. Существующая конфигурация
-Можешь предоставить docker-compose.yml?
-Какие volumes используются?
-Какие объемы данных в Kafka, MinIO, PostgreSQL?
-Предварительная архитектура
-Пока я предлагаю такую архитектуру:
+chmod +x install_nvidia.sh
+sudo ./install_nvidia.sh
+ЭТАП 2: Резервирование IP-адресов
+Схема адресации для нового ЦОД:
+Предположим новая сеть будет 10.20.30.0/24
 
-Вариант 1: Без виртуализации (рекомендуемый)
+Зарезервируйте:
+
 code
 Копировать
-┌─────────────────────────────────────────────────────────────┐
-│                     Kubernetes Cluster                       │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  Control Plane Nodes (3 шт, на GPU-серверах):                │
-│  ├─ gpu-node-1: Master + Worker (GPU workloads)              │
-│  ├─ gpu-node-2: Master + Worker (GPU workloads)              │
-│  └─ gpu-node-3: Master + Worker (GPU workloads)              │
-│                                                               │
-│  GPU Worker Nodes:                                            │
-│  └─ gpu-node-4: Worker (GPU workloads)                       │
-│                                                               │
-│  Storage Nodes (2 шт):                                        │
-│  ├─ storage-node-1: Worker + Longhorn/NFS                    │
-│  └─ storage-node-2: Worker + Longhorn/NFS                    │
-│                                                               │
-├─────────────────────────────────────────────────────────────┤
-│  Namespaces:                                                  │
-│  ├─ infra: Kafka, MinIO                                      │
-│  ├─ data: PostgreSQL (StatefulSet)                           │
-│  └─ app: Ваше приложение                                     │
-└─────────────────────────────────────────────────────────────┘
+10.20.30.11 - server-1 (gpu-master-1)
+10.20.30.12 - server-2 (gpu-master-2)
+10.20.30.13 - server-3 (gpu-master-3)
+10.20.30.14 - server-4 (gpu-worker-1)
+10.20.30.15 - server-5 (storage-1)
+10.20.30.16 - server-6 (storage-2)
 
-Storage Layer: Longhorn (распределенное хранилище)
-├─ Реплики на storage-node-1 и storage-node-2
-└─ Поддержка PVC с автоматической репликацией
-Вариант 2: С виртуализацией (для гибкости с IP)
-code
-Копировать
-┌─────────────────────────────────────────────────────────────┐
-│                      Physical Servers                         │
-├─────────────────────────────────────────────────────────────┤
-│  GPU Nodes: Proxmox/KVM                                       │
-│  └─ VMs с пробросом GPU (GPU passthrough)                    │
-│                                                               │
-│  Storage Nodes: Proxmox/KVM                                   │
-│  └─ VMs с пробросом дисков                                   │
-└─────────────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Kubernetes Cluster (на VM)                       │
-│  + Фиксированные IP адреса                                   │
-│  + Легкая миграция                                           │
-│  - Overhead производительности (~5-10%)                      │
-└─────────────────────────────────────────────────────────────┘
-План настройки (черновик)
-Этап 1: Подготовка серверов
+10.20.30.10 - VIP для Kubernetes API (keepalived)
+Настройка статических IP (до переезда настроим для текущей сети)
 bash
 Копировать
-# 1. Обновление системы
-# 2. Установка необходимых пакетов
-# 3. Настройка сети (bonding)
-# 4. Настройка хранилища
-# 5. Установка NVIDIA драйверов (для GPU нод)
-Этап 2: Установка Kubernetes
-bash
-Копировать
-# 1. Установка container runtime (containerd)
-# 2. Установка kubeadm, kubelet, kubectl
-# 3. Инициализация кластера
-# 4. Установка CNI
-# 5. Join worker nodes
-Этап 3: Настройка хранилища
-bash
-Копировать
-# Longhorn или NFS-CSI
-# Настройка репликации
-# Создание StorageClass
-Этап 4: Деплой инфраструктуры
-bash
-Копировать
-# Kafka (Strimzi Operator)
-# MinIO
-# PostgreSQL (CloudNativePG или Patroni)
-Этап 5: CI/CD
-bash
-Копировать
-# Настройка доступа для раннеров
-# Helm charts для приложений
-# GitOps (ArgoCD)
-Что мне нужно от тебя прямо сейчас:
-Запусти скрипт на всех серверах и пришли результаты
-Ответь на вопросы выше (особенно про IP-адреса)
-Пришли docker-compose.yml текущей конфигурации
-Уточни требования к отказоустойчивости: допустимое время недоступности (RTO), потеря данных (RPO)
-После этого я подготовлю:
+#!/bin/bash
+# configure_network.sh - Настройка сети
 
-Детальную архитектуру
-Все конфигурационные файлы
-Скрипты автоматизации
-План миграции с минимальным downtime
-Жду информацию! 🚀
+INTERFACE="eno1"
+HOSTNAME=$(hostname)
+
+# Определяем IP на основе hostname
+case $HOSTNAME in
+    server-1) IP="10.96.184.11" ;;
+    server-2) IP="10.96.184.12" ;;
+    server-3) IP="10.96.184.13" ;;
+    server-4) IP="10.96.184.14" ;;
+    server-5) IP="10.96.184.15" ;;
+    server-6) IP="10.96.184.16" ;;
+    *) echo "Unknown hostname"; exit 1 ;;
+esac
+
+# Создаем конфиг NetworkManager
+nmcli connection modify $INTERFACE ipv4.addresses $IP/24
+nmcli connection modify $INTERFACE ipv4.gateway 10.96.184.1
+nmcli connection modify $INTERFACE ipv4.dns "8.8.8.8 8.8.4.4"
+nmcli connection modify $INTERFACE ipv4.method manual
+nmcli connection up $INTERFACE
+
+# Обновляем /etc/hosts
+cat > /etc/hosts <<EOF
+127.0.0.1   localhost localhost.localdomain
+::1         localhost localhost.localdomain
+
+# Kubernetes nodes
+10.96.184.11 server-1 gpu-master-1
+10.96.184.12 server-2 gpu-master-2
+10.96.184.13 server-3 gpu-master-3
+10.96.184.14 server-4 gpu-worker-1
+10.96.184.15 server-5 storage-1
+10.96.184.16 server-6 storage-2
+
+10.96.184.10 k8s-api
+EOF
+
+echo "=== Сеть настроена: $IP ==="
+Запустите на каждом сервере:
+
+bash
+Копировать
+chmod +x configure_network.sh
+sudo ./configure_network.sh
+ЭТАП 3: Инициализация Kubernetes кластера
+3.1. На первом мастере (server-1)
+bash
+Копировать
+#!/bin/bash
+# init_k8s_master.sh - Инициализация первого мастера
+
+CONTROL_PLANE_ENDPOINT="10.96.184.10:6443"  # VIP (настроим позже)
+POD_NETWORK_CIDR="10.244.0.0/16"
+
+# Создаем конфигурацию kubeadm
+cat > kubeadm-config.yaml <<EOF
+apiVersion: ku
 
