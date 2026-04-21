@@ -1,71 +1,1689 @@
-metadata:
-  name: {{ $.Values.labels.redis }}-deployment
-  annotations:
-    "helm.sh/resource-policy": keep  # ← НЕ удалять при helm uninstall
+# Kubernetes 1.32 на bare-metal RedOS 8: Итоговый гайд
 
+> **Апрель 2026. Версии компонентов:**
+> Kubernetes **1.32.13** (EOL 28.02.2026 — для нового кластера рассмотрите 1.33.x),
+> kube-vip **v0.9.2**, Calico **v3.29.5**, Longhorn **v1.10.2**,
+> NVIDIA driver **570-open-DKMS**, GPU Operator **v26.3.1**,
+> Strimzi **0.51.0** / Kafka **4.1.1**, MinIO Operator **v7.1.1**,
+> MongoDB **mongodb-kubernetes v1.x**, Redis **7.4-alpine**
 
-{{- if eq .Values.enableService.redis.enable true }}
-{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
-{{- range $module := $modules.main }}
-{{- if or (index $.Values.enableModules $module) (eq $module "")}}
-{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
+## Условные обозначения
+
+```
+[ВСЕ СЕРВЕРЫ]    — на всех 6 физических серверах
+[СЕРВЕР1]        — только на server-1 (первый control plane)
+[CP СЕРВЕРЫ]     — server-1, server-2, server-3
+[GPU СЕРВЕРЫ]    — server-1, server-2, server-3, server-4
+[STORAGE СЕРВЕРЫ]— server-5, server-6
+[ВОРКЕРЫ]        — server-4, server-5, server-6
+
+# [ТОЛЬКО ДЛЯ ПРОКСИ] — блок выполнять только при доступе через прокси
+```
+
+-----
+
+## Топология
+
+```
+server-1 (10.10.10.21) — CP + Worker + GPU (Tesla T4)   sda=OS, sdb=18.2TB
+server-2 (10.10.10.22) — CP + Worker + GPU (Tesla T4)   sda=OS, sdb=18.2TB
+server-3 (10.10.10.23) — CP + Worker + GPU (Tesla T4)   sda=OS, sdb=18.2TB
+server-4 (10.10.10.24) — Worker + GPU (Tesla T4)        sda=OS, sdb=18.2TB
+server-5 (10.10.10.25) — Worker + Storage               sda=OS, sdb=18.2TB
+server-6 (10.10.10.26) — Worker + Storage               sda=OS, sdb=18.2TB
+
+VIP:         10.10.10.20  →  k8s-api (kube-vip ARP)
+PodCIDR:     10.244.0.0/16
+ServiceCIDR: 10.96.0.0/12
+GPU слоты:   4 ноды × 4 time-slice = 16 виртуальных GPU
+Хранилище:   6 × 18.2 TB = 109.2 TB raw, ~54 TB полезно (replica=2)
+```
+
+-----
+
+## Фаза 0 — Настройка доступа в интернет
+
+### Вариант А — Прямой доступ
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+# Проверяем доступ
+curl -s --max-time 5 https://google.com -o /dev/null \
+  && echo "✓ Прямой доступ работает" \
+  || echo "✗ Нет доступа — используйте Вариант Б"
+
+# Убираем случайно унаследованный прокси
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+```
+
+### Вариант Б — Через прокси
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+PROXY="http://proxy.company.ru:3128"   # ← замените на свой адрес
+NO_PROXY_LIST="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16,.svc,.cluster.local,10.10.10.0/24"
+
+# [ТОЛЬКО ДЛЯ ПРОКСИ]
+cat >> /etc/environment <<EOF
+http_proxy=${PROXY}
+https_proxy=${PROXY}
+HTTP_PROXY=${PROXY}
+HTTPS_PROXY=${PROXY}
+no_proxy=${NO_PROXY_LIST}
+NO_PROXY=${NO_PROXY_LIST}
+EOF
+
+# dnf
+grep -q "^proxy=" /etc/dnf/dnf.conf || echo "proxy=${PROXY}" >> /etc/dnf/dnf.conf
+
+export http_proxy=$PROXY https_proxy=$PROXY no_proxy=$NO_PROXY_LIST
+curl -s --max-time 10 https://google.com -o /dev/null && echo "✓ Прокси работает"
+```
+
+-----
+
+## Фаза 1 — Подготовка ОС
+
+### Шаг 1.1 — Hostname и /etc/hosts
+
+**[ВСЕ СЕРВЕРЫ]** — на каждом своё имя
+
+```bash
+# Устанавливаем hostname (поменяйте N на номер сервера)
+hostnamectl set-hostname server-N
+
+# Одинаковый /etc/hosts на всех серверах
+cat >> /etc/hosts <<'EOF'
+
+# Kubernetes кластер
+10.10.10.20  k8s-api
+10.10.10.21  server-1
+10.10.10.22  server-2
+10.10.10.23  server-3
+10.10.10.24  server-4
+10.10.10.25  server-5
+10.10.10.26  server-6
+EOF
+
+# eno2 не используем — отключаем чтобы не мешал
+nmcli device set eno2 managed no 2>/dev/null || true
+```
+
+### Шаг 1.2 — Обновление системы и пакеты
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+dnf update -y
+
+dnf install -y \
+  curl wget git tar vim-enhanced jq \
+  dnf-plugins-core policycoreutils-python-utils \
+  iproute-tc ipvsadm socat conntrack-tools ethtool \
+  chrony firewalld \
+  gcc make dkms \
+  kernel-devel-$(uname -r) kernel-headers-$(uname -r) \
+  iscsi-initiator-utils nfs-utils \
+  container-selinux \
+  xfsprogs gdisk parted
+
+# Время
+systemctl enable --now chronyd
+chronyc tracking
+```
+
+### Шаг 1.3 — Отключение swap (zram — специфика RedOS 8)
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+# RedOS 8 по умолчанию использует zram-swap — kubelet его не переживает
+systemctl stop dev-zram0.swap 2>/dev/null || true
+systemctl mask dev-zram0.swap
+swapoff -a
+sed -i '/\sswap\s/s/^/#/' /etc/fstab
+
+# Проверка — должно быть пусто
+swapon --show
+free -h | grep -i swap
+```
+
+### Шаг 1.4 — SELinux в permissive
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+setenforce 0
+sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
+getenforce  # → Permissive
+```
+
+### Шаг 1.5 — systemd-resolved (конфликт с CoreDNS)
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+sed -i 's|^#\?DNSStubListener=.*|DNSStubListener=no|' /etc/systemd/resolved.conf
+systemctl daemon-reload
+systemctl restart systemd-resolved
+cat /etc/resolv.conf  # должен содержать реальные DNS, не 127.0.0.53
+```
+
+### Шаг 1.6 — Модули ядра и sysctl
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+cat > /etc/modules-load.d/k8s.conf <<'EOF'
+overlay
+br_netfilter
+ip_vs
+ip_vs_rr
+ip_vs_wrr
+ip_vs_sh
+nf_conntrack
+iscsi_tcp
+EOF
+modprobe overlay br_netfilter ip_vs ip_vs_rr nf_conntrack iscsi_tcp
+
+cat > /etc/sysctl.d/k8s.conf <<'EOF'
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+net.ipv4.conf.all.rp_filter         = 0
+fs.inotify.max_user_instances       = 8192
+fs.inotify.max_user_watches         = 524288
+vm.swappiness                       = 0
+vm.overcommit_memory                = 1
+kernel.panic                        = 10
+kernel.panic_on_oops                = 1
+EOF
+sysctl --system
+```
+
+### Шаг 1.7 — firewalld
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+systemctl enable --now firewalld
+
+# Доверяем внутренним сетям кластера
+firewall-cmd --permanent --zone=trusted --add-source=10.10.10.0/24
+firewall-cmd --permanent --zone=trusted --add-source=10.244.0.0/16
+firewall-cmd --permanent --zone=trusted --add-source=10.96.0.0/12
+
+# NodePort для внешнего доступа
+firewall-cmd --permanent --add-port=30000-32767/tcp
+
+firewall-cmd --reload
+```
+
+### Шаг 1.8 — containerd
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+dnf install -y containerd
+
+mkdir -p /etc/containerd
+containerd config default > /etc/containerd/config.toml
+
+# Обязательно для kubeadm 1.32
+sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+# RedOS 8: CNI бинари в /usr/libexec/cni, а не /opt/cni/bin
+sed -i 's|bin_dir = "/opt/cni/bin"|bin_dir = "/usr/libexec/cni"|g' /etc/containerd/config.toml
+mkdir -p /opt/cni/bin
+ln -sf /usr/libexec/cni/* /opt/cni/bin/ 2>/dev/null || true
+
+# pause образ для k8s 1.32
+sed -i 's|sandbox_image = "registry.k8s.io/pause:3.8"|sandbox_image = "registry.k8s.io/pause:3.10"|' \
+  /etc/containerd/config.toml
+
+# [ТОЛЬКО ДЛЯ ПРОКСИ]
+mkdir -p /etc/systemd/system/containerd.service.d
+cat > /etc/systemd/system/containerd.service.d/proxy.conf <<EOF
+[Service]
+Environment="HTTP_PROXY=http://proxy.company.ru:3128"
+Environment="HTTPS_PROXY=http://proxy.company.ru:3128"
+Environment="NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,.svc,.cluster.local"
+EOF
+
+systemctl daemon-reload
+systemctl enable --now containerd
+systemctl restart containerd
+
+# Проверка
+ctr version
+crictl info 2>/dev/null | grep -i cgroup  # → "cgroupDriver": "systemd"
+```
+
+### Шаг 1.9 — Kubernetes пакеты
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+cat > /etc/yum.repos.d/kubernetes.repo <<'EOF'
+[kubernetes]
+name=Kubernetes
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.32/rpm/
+enabled=1
+gpgcheck=1
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.32/rpm/repodata/repomd.xml.key
+exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+EOF
+
+dnf install -y --disableexcludes=kubernetes \
+  kubelet-1.32.13 kubeadm-1.32.13 kubectl-1.32.13
+
+systemctl enable kubelet
+
+# [ТОЛЬКО ДЛЯ ПРОКСИ]
+mkdir -p /etc/systemd/system/kubelet.service.d
+cat > /etc/systemd/system/kubelet.service.d/proxy.conf <<EOF
+[Service]
+Environment="HTTP_PROXY=http://proxy.company.ru:3128"
+Environment="HTTPS_PROXY=http://proxy.company.ru:3128"
+Environment="NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,.svc,.cluster.local"
+EOF
+systemctl daemon-reload
+```
+
+### Проверка Фазы 1
+
+```bash
+uname -r                    # 6.12.x.red80
+getenforce                  # Permissive
+swapon --show               # пусто
+systemctl is-active containerd  # active
+kubeadm version -o short    # v1.32.13
+```
+
+-----
+
+## Фаза 2 — NVIDIA драйвер и диск данных
+
+### Шаг 2.1 — Blacklist nouveau
+
+**[GPU СЕРВЕРЫ]**
+
+```bash
+cat > /etc/modprobe.d/blacklist-nouveau.conf <<'EOF'
+blacklist nouveau
+options nouveau modeset=0
+EOF
+
+grubby --args "rd.driver.blacklist=nouveau modprobe.blacklist=nouveau nouveau.modeset=0" \
+  --update-kernel ALL
+
+dracut --force --regenerate-all
+reboot
+```
+
+После перезагрузки:
+
+```bash
+lsmod | grep nouveau  # пусто — хорошо
+lspci | grep -i nvidia  # Tesla T4 видна
+```
+
+### Шаг 2.2 — NVIDIA 570-open-DKMS
+
+**[GPU СЕРВЕРЫ]**
+
+> На ядре RedOS 8 (6.12.x) прекомпилированные kmod NVIDIA для RHEL 8 (4.18) **не работают**.
+> Только DKMS.
+
+```bash
+# Репозиторий CUDA NVIDIA
+dnf config-manager --add-repo \
+  https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
+rpm --import \
+  https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/D42D0685.pub
+
+# Устанавливаем через DKMS-поток
+dnf module reset -y nvidia-driver
+dnf module enable -y nvidia-driver:570-open-dkms
+dnf module install -y nvidia-driver:570-open-dkms
+
+# Persistence daemon — критично для Tesla T4
+systemctl enable --now nvidia-persistenced
+
+reboot
+```
+
+После перезагрузки:
+
+```bash
+nvidia-smi
+# Должно показать: Tesla T4, Driver 570.x.x, CUDA 12.8
+
+dkms status
+# nvidia-open/570.x.x, 6.12.x.red80, x86_64: installed
+```
+
+### Шаг 2.3 — NVIDIA Container Toolkit 1.19.0
+
+**[GPU СЕРВЕРЫ]**
+
+> Избегайте версии 1.18.0 — она перезаписывает поле imports в containerd config
+> и ломает GPU Operator.
+
+```bash
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+  | tee /etc/yum.repos.d/nvidia-container-toolkit.repo
+
+NCT_VER="1.19.0-1"
+dnf install -y \
+  nvidia-container-toolkit-${NCT_VER} \
+  nvidia-container-toolkit-base-${NCT_VER} \
+  libnvidia-container-tools-${NCT_VER} \
+  libnvidia-container1-${NCT_VER}
+
+# Настраиваем containerd — НЕ делаем nvidia runtime дефолтным
+nvidia-ctk runtime configure --runtime=containerd --set-as-default=false
+systemctl restart containerd
+
+# Тест
+ctr run --rm --gpus 0 \
+  docker.io/nvidia/cuda:12.8.0-base-ubi8 test nvidia-smi
+```
+
+### Шаг 2.4 — Подготовка диска sdb (18.2 TB) под Longhorn
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+# Убеждаемся что sdb — диск данных, а не OS
+lsblk -dno NAME,SIZE,MODEL
+# sda — системный (~3.5TB), sdb — данные (~18.2TB)
+
+# Форматируем в XFS
+mkfs.xfs -f -L longhorn /dev/sdb
+
+# Получаем UUID
+UUID=$(blkid -s UUID -o value /dev/sdb)
+echo "UUID=$UUID"
+
+# Точка монтирования
+mkdir -p /var/lib/longhorn
+echo "UUID=$UUID  /var/lib/longhorn  xfs  defaults,noatime,nodiratime  0 0" >> /etc/fstab
+
+systemctl daemon-reload
+mount -a
+df -hT /var/lib/longhorn  # должно показать ~18TB XFS
+
+# SELinux контекст для Longhorn
+semanage fcontext -a -t container_file_t '/var/lib/longhorn(/.*)?'
+restorecon -RvF /var/lib/longhorn
+
+# iSCSI для Longhorn
+echo "InitiatorName=$(iscsi-iname)" > /etc/iscsi/initiatorname.iscsi
+systemctl enable --now iscsid
+```
+
+### Проверка Фазы 2
+
+```bash
+# GPU серверы:
+nvidia-smi && dkms status
+df -hT /var/lib/longhorn
+systemctl is-active iscsid
+```
+
+-----
+
+## Фаза 3 — Kubernetes кластер
+
+### Шаг 3.1 — kube-vip static pod
+
+**[CP СЕРВЕРЫ]** — выполнить ДО kubeadm init/join
+
+```bash
+export VIP=10.10.10.20
+export INTERFACE=eno1
+export KVVERSION=v0.9.2
+
+ctr image pull ghcr.io/kube-vip/kube-vip:${KVVERSION}
+
+mkdir -p /etc/kubernetes/manifests
+
+ctr run --rm --net-host \
+  ghcr.io/kube-vip/kube-vip:${KVVERSION} kv \
+  /kube-vip manifest pod \
+    --interface ${INTERFACE} \
+    --address ${VIP} \
+    --controlplane \
+    --arp \
+    --leaderElection \
+  | tee /etc/kubernetes/manifests/kube-vip.yaml
+
+# КРИТИЧНО для K8s ≥1.29: kubeadm init создаёт super-admin.conf
+# Временно подменяем путь — иначе kube-vip не сможет получить leader lease
+sed -i 's#path: /etc/kubernetes/admin.conf#path: /etc/kubernetes/super-admin.conf#' \
+  /etc/kubernetes/manifests/kube-vip.yaml
+```
+
+### Шаг 3.2 — kubeadm init
+
+**[СЕРВЕР1]**
+
+```bash
+cat > /root/kubeadm-config.yaml <<'EOF'
 ---
-apiVersion: batch/v1
-kind: Job
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 10.10.10.21
+  bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: node-ip
+      value: 10.10.10.21
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v1.32.13
+clusterName: k8s-prod
+controlPlaneEndpoint: "k8s-api:6443"
+networking:
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  dnsDomain: cluster.local
+apiServer:
+  certSANs:
+    - k8s-api
+    - kubernetes
+    - kubernetes.default.svc
+    - kubernetes.default.svc.cluster.local
+    - 10.10.10.20
+    - 10.10.10.21
+    - 10.10.10.22
+    - 10.10.10.23
+    - 127.0.0.1
+    - localhost
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+serverTLSBootstrap: true
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+mode: iptables
+EOF
+
+# Предварительно скачиваем образы (хорошо видно ошибки прокси заранее)
+kubeadm config images pull --config /root/kubeadm-config.yaml
+
+# Инициализация
+kubeadm init --config /root/kubeadm-config.yaml --upload-certs 2>&1 \
+  | tee /root/kubeadm-init.log
+
+# Настраиваем kubectl
+mkdir -p $HOME/.kube
+cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+
+# Откатываем super-admin.conf hack обратно на admin.conf
+sed -i 's#path: /etc/kubernetes/super-admin.conf#path: /etc/kubernetes/admin.conf#' \
+  /etc/kubernetes/manifests/kube-vip.yaml
+
+sleep 10
+curl -k https://10.10.10.20:6443/healthz  # → ok
+ping -c 3 10.10.10.20                     # VIP отвечает
+```
+
+> **Сохраните из /root/kubeadm-init.log:**
+> 
+> - TOKEN и HASH (для join воркеров)
+> - CERTIFICATE_KEY (для join CP, живёт 2 часа)
+> 
+> Если certificate-key истёк:
+> 
+> ```bash
+> kubeadm init phase upload-certs --upload-certs
+> kubeadm token create --print-join-command
+> ```
+
+### Шаг 3.3 — Join server-2 и server-3 как CP
+
+**[СЕРВЕР2, СЕРВЕР3]** — сначала выполнить Фазы 1 и 2, потом kube-vip (шаг 3.1), затем:
+
+```bash
+# Адаптируйте IP для каждого сервера (.22 для server-2, .23 для server-3)
+cat > /root/kubeadm-join-cp.yaml <<EOF
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: "k8s-api:6443"
+    token: "<TOKEN>"
+    caCertHashes: ["sha256:<HASH>"]
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: 10.10.10.22
+    bindPort: 6443
+  certificateKey: "<CERTIFICATE_KEY>"
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: node-ip
+      value: 10.10.10.22
+EOF
+
+kubeadm join --config /root/kubeadm-join-cp.yaml
+
+mkdir -p $HOME/.kube
+cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+```
+
+### Шаг 3.4 — Join воркеров server-4, server-5, server-6
+
+**[ВОРКЕРЫ]** — сначала Фаза 1 и 2, затем:
+
+```bash
+# Поменяйте IP и имя сервера для каждого
+kubeadm join k8s-api:6443 \
+  --token "<TOKEN>" \
+  --discovery-token-ca-cert-hash "sha256:<HASH>"
+
+# На server-4: node-ip нужно прописать вручную после join
+cat > /etc/systemd/system/kubelet.service.d/node-ip.conf <<'EOF'
+[Service]
+Environment="KUBELET_EXTRA_ARGS=--node-ip=10.10.10.24"
+EOF
+# Аналогично .25 и .26 для server-5 и server-6
+systemctl daemon-reload && systemctl restart kubelet
+```
+
+### Шаг 3.5 — Calico CNI (VXLAN, BGP disabled)
+
+**[СЕРВЕР1]**
+
+```bash
+# Запрет NetworkManager управлять интерфейсами Calico
+cat > /etc/NetworkManager/conf.d/calico.conf <<'EOF'
+[keyfile]
+unmanaged-devices=interface-name:cali*;interface-name:tunl*;interface-name:vxlan.calico
+EOF
+systemctl reload NetworkManager
+
+# Tigera Operator
+kubectl create -f \
+  https://raw.githubusercontent.com/projectcalico/calico/v3.29.5/manifests/tigera-operator.yaml
+
+# Установка
+cat <<'EOF' | kubectl apply -f -
+apiVersion: operator.tigera.io/v1
+kind: Installation
 metadata:
-  name: {{ $.Values.labels.redis }}-pre-upgrade-{{ $.Release.Revision }}
-  namespace: {{ $ns }}
-  annotations:
-    "helm.sh/hook": pre-upgrade
-    "helm.sh/hook-weight": "-5"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  name: default
 spec:
-  backoffLimit: 1
-  activeDeadlineSeconds: 120
-  ttlSecondsAfterFinished: 60
+  calicoNetwork:
+    bgp: Disabled
+    ipPools:
+      - name: default-ipv4-ippool
+        blockSize: 26
+        cidr: 10.244.0.0/16
+        encapsulation: VXLAN
+        natOutgoing: Enabled
+        nodeSelector: all()
+    nodeAddressAutodetectionV4:
+      interface: eno1
+    mtu: 1450
+---
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+spec: {}
+EOF
+
+kubectl -n calico-system rollout status ds/calico-node --timeout=300s
+```
+
+### Шаг 3.6 — Снятие taint и лейблы
+
+**[СЕРВЕР1]**
+
+```bash
+# CP-ноды работают также воркерами — снимаем taint
+kubectl taint nodes server-1 server-2 server-3 \
+  node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+
+# Лейблы GPU-нод
+for n in server-1 server-2 server-3 server-4; do
+  kubectl label node $n gpu=true --overwrite
+done
+
+# Лейблы storage-нод
+for n in server-5 server-6; do
+  kubectl label node $n storage=true --overwrite
+done
+
+# Longhorn будет использовать все 6 нод
+for n in server-1 server-2 server-3 server-4 server-5 server-6; do
+  kubectl label node $n node.longhorn.io/create-default-disk=true --overwrite
+done
+
+kubectl get nodes -o wide
+# Все 6 нод в Ready
+```
+
+### Шаг 3.7 — Установка Helm
+
+**[СЕРВЕР1]**
+
+```bash
+# [ТОЛЬКО ДЛЯ ПРОКСИ]
+export HTTPS_PROXY=http://proxy.company.ru:3128
+
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+  | DESIRED_VERSION=v3.17.0 bash
+
+helm version
+```
+
+### Проверка Фазы 3
+
+```bash
+kubectl get nodes -o wide              # 6 нод Ready
+kubectl get pods -A | grep -v Running  # только Completed или пусто
+curl -k https://k8s-api:6443/healthz   # ok
+ping -c3 10.10.10.20                   # VIP отвечает
+kubeadm certs check-expiration         # сроки сертификатов
+```
+
+-----
+
+## Фаза 4 — GPU Operator и time-slicing
+
+**[СЕРВЕР1]**
+
+```bash
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+helm repo update
+
+kubectl create namespace gpu-operator
+
+# ConfigMap: 4 слайса на каждую Tesla T4
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: time-slicing-config
+  namespace: gpu-operator
+data:
+  tesla-t4: |-
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 4
+EOF
+
+# Устанавливаем GPU Operator — driver и toolkit ВЫКЛЮЧЕНЫ (установлены вручную)
+helm install gpu-operator nvidia/gpu-operator \
+  --namespace gpu-operator \
+  --version v26.3.1 \
+  --set driver.enabled=false \
+  --set toolkit.enabled=false \
+  --set devicePlugin.config.name=time-slicing-config \
+  --set devicePlugin.config.default=tesla-t4 \
+  --set cdi.enabled=true \
+  --set cdi.default=true
+
+# Активируем time-slicing на GPU-нодах
+kubectl -n gpu-operator rollout status ds/nvidia-device-plugin-daemonset --timeout=300s
+
+kubectl label node -l gpu=true \
+  nvidia.com/device-plugin.config=tesla-t4 --overwrite
+```
+
+### Проверка Фазы 4
+
+```bash
+kubectl get nodes -o json \
+  | jq -r '.items[] | select(.metadata.labels.gpu=="true") | .metadata.name + ": " + .status.capacity["nvidia.com/gpu"]'
+# server-1: 4
+# server-2: 4
+# server-3: 4
+# server-4: 4
+
+# Тест GPU-пода
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-test
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    gpu: "true"
+  containers:
+    - name: cuda
+      image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+EOF
+
+kubectl wait pod/gpu-test --for=condition=Succeeded --timeout=120s
+kubectl logs gpu-test  # Test PASSED
+kubectl delete pod gpu-test
+```
+
+-----
+
+## Фаза 5 — Longhorn v1.10.2
+
+**[СЕРВЕР1]**
+
+```bash
+helm repo add longhorn https://charts.longhorn.io
+helm repo update
+
+# SELinux workaround для iscsid на RHEL-совместимых
+kubectl apply -f \
+  https://raw.githubusercontent.com/longhorn/longhorn/v1.10.2/deploy/prerequisite/longhorn-iscsi-selinux-workaround.yaml
+
+kubectl create namespace longhorn-system
+
+cat > /root/longhorn-values.yaml <<'EOF'
+defaultSettings:
+  defaultDataPath: "/var/lib/longhorn"
+  defaultReplicaCount: 2
+  createDefaultDiskLabeledNodes: true
+  storageMinimalAvailablePercentage: 10
+  storageOverProvisioningPercentage: 100
+  replicaSoftAntiAffinity: false
+  replicaAutoBalance: "best-effort"
+  defaultDataLocality: "disabled"
+  nodeDownPodDeletionPolicy: "delete-both-statefulset-and-deployment-pod"
+  v2DataEngine: false
+
+persistence:
+  defaultClass: false
+  defaultFsType: xfs
+  reclaimPolicy: Delete
+
+csi:
+  kubeletRootDir: /var/lib/kubelet
+
+longhornUI:
+  replicas: 2
+EOF
+
+helm install longhorn longhorn/longhorn \
+  --namespace longhorn-system \
+  --version 1.10.2 \
+  -f /root/longhorn-values.yaml
+
+kubectl -n longhorn-system rollout status ds/longhorn-manager --timeout=600s
+
+# StorageClasses
+cat <<'EOF' | kubectl apply -f -
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "2880"
+  fsType: "xfs"
+  dataLocality: "disabled"
+  replicaAutoBalance: "best-effort"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-single
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "2880"
+  fsType: "xfs"
+  dataLocality: "strict-local"
+EOF
+
+kubectl get storageclass
+```
+
+### Проверка Фазы 5
+
+```bash
+# Тест PVC
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+spec:
+  storageClassName: longhorn
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
+kubectl get pvc test-pvc -w  # → Bound за 10-30 сек
+kubectl delete pvc test-pvc
+
+# Проверка нод в Longhorn UI (port-forward)
+kubectl -n longhorn-system port-forward svc/longhorn-frontend 8080:80 &
+# Открыть http://localhost:8080 — все 6 нод Ready, диск ~18TB
+```
+
+-----
+
+## Фаза 6 — Инфраструктурные сервисы
+
+### 6.1 — Kafka (Strimzi 0.51.0, KRaft, storage-ноды)
+
+**[СЕРВЕР1]**
+
+```bash
+kubectl create namespace kafka
+
+helm install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  --version 0.51.0 \
+  --namespace strimzi --create-namespace \
+  --set watchAnyNamespace=true
+
+cat <<'EOF' | kubectl apply -f -
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: combined
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: prod-kafka
+spec:
+  replicas: 3
+  roles:
+    - controller
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 200Gi
+        class: longhorn
+        deleteClaim: false
+  resources:
+    requests: {cpu: 500m, memory: 2Gi}
+    limits:   {cpu: "2",  memory: 4Gi}
   template:
+    pod:
+      affinity:
+        podAntiAffinity:
+          # Мягкий — допускаем два брокера на одной ноде
+          # (у нас 2 storage-ноды, 3 брокера)
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    strimzi.io/cluster: prod-kafka
+                topologyKey: kubernetes.io/hostname
+      nodeSelector:
+        storage: "true"
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: prod-kafka
+  namespace: kafka
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 4.1.1
+    metadataVersion: 4.1-IV1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      default.replication.factor: 2
+      min.insync.replicas: 1
+      offsets.topic.replication.factor: 2
+      transaction.state.log.replication.factor: 2
+      transaction.state.log.min.isr: 1
+      auto.create.topics.enable: "false"
+      message.max.bytes: "1073741824"
+      replica.fetch.max.bytes: "1073741824"
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+EOF
+
+kubectl -n kafka wait kafka/prod-kafka --for=condition=Ready --timeout=600s
+# Сервис для приложений: prod-kafka-kafka-bootstrap.kafka.svc:9092
+```
+
+### 6.2 — MinIO Operator v7.1.1 (на 4 GPU-нодах, longhorn-single)
+
+**[СЕРВЕР1]**
+
+```bash
+helm repo add minio-operator https://operator.min.io/
+helm repo update
+
+helm install minio-operator minio-operator/operator \
+  --namespace minio-operator --create-namespace \
+  --version 7.1.1
+
+kubectl create namespace minio-tenant
+
+kubectl create secret generic minio-config-env \
+  -n minio-tenant \
+  --from-literal=config.env='export MINIO_ROOT_USER="admin"
+export MINIO_ROOT_PASSWORD="ChangeMe-StrongPass-123!"
+export MINIO_STORAGE_CLASS_STANDARD="EC:2"'
+
+# 4 пула — по одному на каждую GPU-ноду
+# longhorn-single (replica=1): MinIO сам обеспечивает отказоустойчивость через EC:2
+cat <<'EOF' | kubectl apply -f -
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: minio
+  namespace: minio-tenant
+spec:
+  image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
+  configuration:
+    name: minio-config-env
+  mountPath: /export
+  requestAutoCert: false
+  pools:
+    - name: pool-server-1
+      servers: 1
+      volumesPerServer: 4
+      nodeSelector: {kubernetes.io/hostname: server-1}
+      volumeClaimTemplate:
+        metadata: {name: data}
+        spec:
+          storageClassName: longhorn-single
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 2Ti}}
+      resources:
+        requests: {cpu: "2", memory: 8Gi}
+        limits:   {cpu: "4", memory: 16Gi}
+    - name: pool-server-2
+      servers: 1
+      volumesPerServer: 4
+      nodeSelector: {kubernetes.io/hostname: server-2}
+      volumeClaimTemplate:
+        metadata: {name: data}
+        spec:
+          storageClassName: longhorn-single
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 2Ti}}
+      resources:
+        requests: {cpu: "2", memory: 8Gi}
+        limits:   {cpu: "4", memory: 16Gi}
+    - name: pool-server-3
+      servers: 1
+      volumesPerServer: 4
+      nodeSelector: {kubernetes.io/hostname: server-3}
+      volumeClaimTemplate:
+        metadata: {name: data}
+        spec:
+          storageClassName: longhorn-single
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 2Ti}}
+      resources:
+        requests: {cpu: "2", memory: 8Gi}
+        limits:   {cpu: "4", memory: 16Gi}
+    - name: pool-server-4
+      servers: 1
+      volumesPerServer: 4
+      nodeSelector: {kubernetes.io/hostname: server-4}
+      volumeClaimTemplate:
+        metadata: {name: data}
+        spec:
+          storageClassName: longhorn-single
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 2Ti}}
+      resources:
+        requests: {cpu: "2", memory: 8Gi}
+        limits:   {cpu: "4", memory: 16Gi}
+EOF
+
+kubectl -n minio-tenant wait tenant/minio --for=condition=Ready --timeout=600s
+# Сервис: minio.minio-tenant.svc:80
+```
+
+### 6.3 — MongoDB ReplicaSet (storage-ноды)
+
+**[СЕРВЕР1]**
+
+```bash
+helm repo add mongodb https://mongodb.github.io/helm-charts
+helm repo update
+
+helm install mongodb-operator mongodb/mongodb-kubernetes \
+  --namespace mongodb-operator --create-namespace \
+  --set operator.watchNamespace="*"
+
+kubectl create namespace mongodb
+
+kubectl create secret generic mongodb-admin-password \
+  -n mongodb \
+  --from-literal=password="ChangeMe-MongoAdmin-456!"
+
+cat <<'EOF' | kubectl apply -f -
+apiVersion: mongodbcommunity.mongodb.com/v1
+kind: MongoDBCommunity
+metadata:
+  name: mongodb-rs
+  namespace: mongodb
+spec:
+  members: 3
+  type: ReplicaSet
+  version: "7.0.14"
+  security:
+    authentication:
+      modes: ["SCRAM"]
+  users:
+    - name: admin
+      db: admin
+      passwordSecretRef:
+        name: mongodb-admin-password
+      roles:
+        - {name: clusterAdmin,         db: admin}
+        - {name: userAdminAnyDatabase,  db: admin}
+        - {name: readWriteAnyDatabase,  db: admin}
+      scramCredentialsSecretName: mongodb-admin-scram
+  statefulSet:
     spec:
-      serviceAccountName: {{ $.Values.labels.redis }}-waiter-sa
-      restartPolicy: Never
-      imagePullSecrets:
-        - name: {{ $.Values.imagePullSecret }}
+      volumeClaimTemplates:
+        - metadata: {name: data-volume}
+          spec:
+            storageClassName: longhorn
+            accessModes: [ReadWriteOnce]
+            resources: {requests: {storage: 50Gi}}
+        - metadata: {name: logs-volume}
+          spec:
+            storageClassName: longhorn
+            accessModes: [ReadWriteOnce]
+            resources: {requests: {storage: 5Gi}}
+      template:
+        spec:
+          nodeSelector:
+            storage: "true"
+          affinity:
+            podAntiAffinity:
+              # Мягкий — 3 реплики на 2 нодах допустимо
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        app: mongodb-rs-svc
+                    topologyKey: kubernetes.io/hostname
+          containers:
+            - name: mongod
+              resources:
+                requests: {cpu: 500m, memory: 1Gi}
+                limits:   {cpu: "2",  memory: 4Gi}
+EOF
+
+# Сервис: mongodb-rs-svc.mongodb.svc:27017
+```
+
+### 6.4 — Redis (без persistence)
+
+**[СЕРВЕР1]**
+
+```bash
+kubectl create namespace cache
+
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: redis-config, namespace: cache}
+data:
+  redis.conf: |
+    maxmemory 1gb
+    maxmemory-policy allkeys-lru
+    appendonly no
+    save ""
+    tcp-keepalive 60
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: redis, namespace: cache}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata: {labels: {app: redis}}
+    spec:
       containers:
-        - name: pre-upgrade
-          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
-          command: ['sh', '-c']
-          args:
-            - |
-              NS="{{ $ns }}"
-              STS="{{ $.Values.labels.redis }}-deployment"
+        - name: redis
+          image: redis:7.4-alpine
+          command: [redis-server, /etc/redis/redis.conf]
+          ports: [{containerPort: 6379}]
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: 500m, memory: 1Gi}
+          volumeMounts: [{name: config, mountPath: /etc/redis}]
+          readinessProbe:
+            exec: {command: [redis-cli, ping]}
+            initialDelaySeconds: 5
+      volumes:
+        - name: config
+          configMap: {name: redis-config}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: redis, namespace: cache}
+spec:
+  type: ClusterIP
+  selector: {app: redis}
+  ports: [{port: 6379, targetPort: 6379}]
+EOF
 
-              echo "==> Проверяем StatefulSet $STS в $NS..."
+kubectl -n cache exec deploy/redis -- redis-cli ping  # → PONG
+# Сервис: redis.cache.svc:6379
+```
 
-              if ! kubectl get statefulset $STS -n $NS > /dev/null 2>&1; then
-                echo "==> StatefulSet не найден — пропускаем"
-                exit 0
-              fi
+-----
 
-              # Проверяем есть ли уже volumeClaimTemplates (новая схема)
-              VCT=$(kubectl get statefulset $STS -n $NS \
-                -o jsonpath='{.spec.volumeClaimTemplates}' 2>/dev/null)
+## Фаза 7 — Приложения
 
-              if [ -n "$VCT" ] && [ "$VCT" != "null" ] && [ "$VCT" != "[]" ]; then
-                echo "==> volumeClaimTemplates уже есть — StatefulSet совместим, пропускаем удаление"
-                exit 0
-              fi
+Шаблон Deployment без hostNetwork с GPU time-slicing:
 
-              echo "==> Старый StatefulSet без volumeClaimTemplates — удаляем с cascade=orphan"
-              kubectl delete statefulset $STS -n $NS --cascade=orphan
-              echo "==> Удалён"
-{{- end }}
-{{- end }}
-{{- end }}
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-app
+  namespace: apps
+spec:
+  replicas: 4
+  selector: {matchLabels: {app: ml-app}}
+  template:
+    metadata: {labels: {app: ml-app}}
+    spec:
+      nodeSelector:
+        gpu: "true"
+      containers:
+        - name: app
+          image: registry.company.ru/ml-app:1.0
+          ports: [{containerPort: 8080}]
+          resources:
+            limits:
+              nvidia.com/gpu: "1"   # один time-slice
+              cpu: "4"
+              memory: 8Gi
+            requests:
+              cpu: "2"
+              memory: 4Gi
+          env:
+            - {name: KAFKA_BOOTSTRAP,
+               value: "prod-kafka-kafka-bootstrap.kafka.svc:9092"}
+            - {name: MONGO_URI,
+               value: "mongodb://admin:ChangeMe-MongoAdmin-456!@mongodb-rs-svc.mongodb.svc:27017"}
+            - {name: REDIS_HOST,
+               value: "redis.cache.svc"}
+            - {name: S3_ENDPOINT,
+               value: "http://minio.minio-tenant.svc:80"}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: ml-app, namespace: apps}
+spec:
+  type: NodePort
+  selector: {app: ml-app}
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+```
 
+-----
 
+## Фаза 8 — CI/CD (GitLab Runner)
+
+```bash
+# RBAC для деплоя из GitLab
+kubectl create namespace apps
+
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: gitlab-deployer, namespace: apps}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: gitlab-deployer, namespace: apps}
 rules:
-  - apiGroups: [""]
-    resources: ["pods", "pods/status"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["statefulsets"]
-    verbs: ["get", "list", "watch", "delete"]  # ← добавить delete
+  - apiGroups: ["", "apps", "batch"]
+    resources:
+      - pods
+      - services
+      - configmaps
+      - secrets
+      - persistentvolumeclaims
+      - deployments
+      - statefulsets
+      - jobs
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: gitlab-deployer, namespace: apps}
+subjects:
+  - {kind: ServiceAccount, name: gitlab-deployer, namespace: apps}
+roleRef:
+  {kind: Role, name: gitlab-deployer, apiGroup: rbac.authorization.k8s.io}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-deployer-token
+  namespace: apps
+  annotations: {kubernetes.io/service-account.name: gitlab-deployer}
+type: kubernetes.io/service-account-token
+EOF
+
+# Генерируем kubeconfig для GitLab Runner
+SA_TOKEN=$(kubectl -n apps get secret gitlab-deployer-token \
+  -o jsonpath='{.data.token}' | base64 -d)
+CA_CERT=$(kubectl -n apps get secret gitlab-deployer-token \
+  -o jsonpath='{.data.ca\.crt}')
+
+cat > /root/kubeconfig-gitlab.yaml <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- name: prod
+  cluster:
+    server: https://k8s-api:6443
+    certificate-authority-data: ${CA_CERT}
+contexts:
+- name: gitlab@prod
+  context: {cluster: prod, namespace: apps, user: gitlab-deployer}
+current-context: gitlab@prod
+users:
+- name: gitlab-deployer
+  user: {token: ${SA_TOKEN}}
+EOF
+chmod 600 /root/kubeconfig-gitlab.yaml
+echo "Загрузите /root/kubeconfig-gitlab.yaml в GitLab CI/CD → Variables → KUBECONFIG (тип File)"
+```
+
+`.gitlab-ci.yml`:
+
+```yaml
+stages: [build, deploy]
+
+variables:
+  CHART_PATH: ./charts/app-template
+  NAMESPACE: apps
+
+build:
+  stage: build
+  tags: [docker]
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+
+deploy:
+  stage: deploy
+  tags: [k8s-deploy]
+  script:
+    - chmod 600 $KUBECONFIG
+    - helm upgrade --install ml-app $CHART_PATH
+        --set image.tag=$CI_COMMIT_SHA
+        -n $NAMESPACE
+        --kubeconfig $KUBECONFIG
+        --atomic --timeout 5m --wait
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+```
+
+-----
+
+## Фаза 9 — Смена IP при переезде в новый ЦОД
+
+### Вариант А — Оба IP на интерфейсе одновременно (рекомендуется)
+
+Если сетевой администратор добавил новый IP на `eno1` заранее — это самый простой вариант.
+Кластер не останавливается, downtime ~30 секунд в момент переключения VIP.
+
+#### До переезда — пока серверы в старом ЦОД
+
+**[CP СЕРВЕРЫ]** — перегенерируем сертификаты с обоими наборами IP:
+
+```bash
+# Поменяйте 10.20.30.x на реальные новые IP
+cat > /tmp/new-san.yaml <<'EOF'
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v1.32.13
+controlPlaneEndpoint: "k8s-api:6443"
+networking:
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+apiServer:
+  certSANs:
+    - k8s-api
+    - kubernetes
+    - kubernetes.default.svc
+    - kubernetes.default.svc.cluster.local
+    - 127.0.0.1
+    - localhost
+    # Старые IP (текущий ЦОД)
+    - 10.10.10.20
+    - 10.10.10.21
+    - 10.10.10.22
+    - 10.10.10.23
+    # Новые IP (новый ЦОД)
+    - 10.20.30.20
+    - 10.20.30.21
+    - 10.20.30.22
+    - 10.20.30.23
+EOF
+
+rm -f /etc/kubernetes/pki/apiserver.{crt,key}
+kubeadm init phase certs apiserver --config /tmp/new-san.yaml
+
+# Рестарт apiserver — подхватит новый сертификат
+crictl pods --name kube-apiserver -q | xargs -r crictl stopp
+sleep 15
+
+# Проверяем что кластер жив
+kubectl get nodes
+```
+
+**[ВСЕ СЕРВЕРЫ]** — обновляем /etc/hosts под новый VIP:
+
+```bash
+# k8s-api теперь указывает на новый VIP
+sed -i 's/^10.10.10.20  k8s-api/10.20.30.20  k8s-api/' /etc/hosts
+
+# Проверяем
+grep k8s-api /etc/hosts  # → 10.20.30.20  k8s-api
+```
+
+**[CP СЕРВЕРЫ]** — переключаем kube-vip на новый VIP:
+
+```bash
+sed -i 's|value: 10.10.10.20|value: 10.20.30.20|' \
+  /etc/kubernetes/manifests/kube-vip.yaml
+# kube-vip перезапустится автоматически через kubelet (~10 сек)
+
+sleep 15
+ping -c3 10.20.30.20   # новый VIP должен отвечать
+curl -k https://k8s-api:6443/healthz  # → ok
+```
+
+**[ВСЕ СЕРВЕРЫ]** — обновляем node-ip kubelet под новые адреса:
+
+```bash
+# Меняйте IP на соответствующий каждому серверу
+OLD_IP="10.10.10.21"  # ← адрес текущего сервера
+NEW_IP="10.20.30.21"  # ← новый адрес текущего сервера
+
+sed -i "s|--node-ip=${OLD_IP}|--node-ip=${NEW_IP}|g" \
+  /var/lib/kubelet/kubeadm-flags.env
+systemctl restart kubelet
+```
+
+Проверяем что всё работает через новые адреса:
+
+```bash
+curl -k https://10.20.30.20:6443/healthz  # → ok
+kubectl get nodes -o wide                  # ноды показывают новые INTERNAL-IP
+```
+
+#### После физического переезда
+
+Серверы подключились к новой сети, старые IP `10.10.10.x` пропали сами.
+Нужно только убрать старые записи:
+
+```bash
+# [ВСЕ СЕРВЕРЫ]
+# Убираем старый IP с интерфейса (если ещё висит)
+ip addr del 10.10.10.21/24 dev eno1 2>/dev/null || true  # свой IP каждого сервера
+
+# Убираем старые записи из /etc/hosts
+sed -i '/10\.10\.10\./d' /etc/hosts
+
+# Перезапуск kubelet для финальной синхронизации
+systemctl restart kubelet
+
+kubectl get nodes -o wide  # все ноды Ready с новыми IP
+```
+
+-----
+
+### Вариант Б — Полный runbook (смена IP без предварительной подготовки)
+
+Используется если второй IP не был добавлен заранее.
+**Downtime: 10-20 минут** (зависит от скорости рестарта etcd).
+
+#### Шаг Б.1 — Резервная копия (ОБЯЗАТЕЛЬНО до выключения)
+
+**[CP СЕРВЕРЫ]**
+
+```bash
+TS=$(date +%Y%m%d-%H%M%S)
+
+# Snapshot etcd
+ETCDCTL_API=3 etcdctl snapshot save /var/lib/etcd/snapshot-${TS}.db \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
+
+# Бэкап конфигов
+tar czf /root/kube-backup-${TS}.tgz /etc/kubernetes /var/lib/kubelet
+
+# Бэкап всего кластера
+kubectl get all,cm,secret,pv,pvc,sa -A -o yaml > /root/cluster-${TS}.yaml
+echo "Резервные копии: /root/kube-backup-${TS}.tgz, /root/cluster-${TS}.yaml"
+```
+
+#### Шаг Б.2 — После переезда: обновляем /etc/hosts и сеть
+
+**[ВСЕ СЕРВЕРЫ]**
+
+```bash
+# Обновляем IP на интерфейсе (пример для server-1)
+nmcli con mod eno1 ipv4.addresses 10.20.30.21/24 ipv4.gateway 10.20.30.1
+nmcli con up eno1
+
+# Обновляем /etc/hosts
+cat > /etc/hosts <<'EOF'
+127.0.0.1   localhost localhost.localdomain
+::1         localhost
+
+10.20.30.20  k8s-api
+10.20.30.21  server-1
+10.20.30.22  server-2
+10.20.30.23  server-3
+10.20.30.24  server-4
+10.20.30.25  server-5
+10.20.30.26  server-6
+EOF
+```
+
+#### Шаг Б.3 — Обновляем kube-vip
+
+**[CP СЕРВЕРЫ]**
+
+```bash
+sed -i 's|value: 10.10.10.20|value: 10.20.30.20|' \
+  /etc/kubernetes/manifests/kube-vip.yaml
+```
+
+#### Шаг Б.4 — Перегенерируем сертификаты
+
+**[CP СЕРВЕРЫ]** — на каждом из трёх:
+
+```bash
+cat > /tmp/new-san.yaml <<'EOF'
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v1.32.13
+controlPlaneEndpoint: "k8s-api:6443"
+networking:
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+apiServer:
+  certSANs:
+    - k8s-api
+    - kubernetes
+    - kubernetes.default.svc
+    - kubernetes.default.svc.cluster.local
+    - 127.0.0.1
+    - localhost
+    - 10.20.30.20
+    - 10.20.30.21
+    - 10.20.30.22
+    - 10.20.30.23
+EOF
+
+rm -f /etc/kubernetes/pki/apiserver.{crt,key}
+kubeadm init phase certs apiserver --config /tmp/new-san.yaml
+```
+
+#### Шаг Б.5 — Обновляем etcd static pod
+
+**[CP СЕРВЕРЫ]** — на каждом:
+
+```bash
+# Заменяем старые IP на новые в etcd манифесте
+sed -i \
+  -e 's|10\.10\.10\.21|10.20.30.21|g' \
+  -e 's|10\.10\.10\.22|10.20.30.22|g' \
+  -e 's|10\.10\.10\.23|10.20.30.23|g' \
+  /etc/kubernetes/manifests/etcd.yaml
+
+# Обновляем peer URLs в самом etcd (выполнить только на СЕРВЕР1)
+# Останавливаем kubelet — etcd упадёт, потом поднимем вручную
+systemctl stop kubelet
+```
+
+**[СЕРВЕР1]** — принудительный запуск etcd как одиночного узла:
+
+```bash
+# Временно добавляем --force-new-cluster
+sed -i '/etcd$/a\    - --force-new-cluster' /etc/kubernetes/manifests/etcd.yaml
+
+# Запускаем kubelet — etcd стартует в single-node режиме
+systemctl start kubelet
+sleep 30
+
+# Обновляем peer URLs
+ETCDCTL_API=3 etcdctl member list \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
+
+# Для каждого члена обновляем URL (ID берём из вывода выше)
+for SERVER_IP in 10.20.30.21 10.20.30.22 10.20.30.23; do
+  MEMBER_ID=$(ETCDCTL_API=3 etcdctl member list \
+    --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/server.crt \
+    --key=/etc/kubernetes/pki/etcd/server.key \
+    | grep $SERVER_IP | cut -d, -f1)
+  [ -n "$MEMBER_ID" ] && \
+    ETCDCTL_API=3 etcdctl member update $MEMBER_ID \
+      --peer-urls=https://${SERVER_IP}:2380 \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+      --cert=/etc/kubernetes/pki/etcd/server.crt \
+      --key=/etc/kubernetes/pki/etcd/server.key
+done
+
+# Убираем --force-new-cluster
+sed -i '/force-new-cluster/d' /etc/kubernetes/manifests/etcd.yaml
+```
+
+#### Шаг Б.6 — Запускаем все серверы
+
+```bash
+# [СЕРВЕР2, СЕРВЕР3] — запускаем kubelet
+systemctl start kubelet
+
+# [ВСЕ СЕРВЕРЫ] — обновляем node-ip и перезапускаем kubelet
+OLD_IP="10.10.10.21"  # ← свой IP каждого сервера
+NEW_IP="10.20.30.21"
+
+sed -i "s|--node-ip=${OLD_IP}|--node-ip=${NEW_IP}|g" \
+  /var/lib/kubelet/kubeadm-flags.env
+systemctl restart kubelet
+```
+
+#### Шаг Б.7 — Финальная проверка (оба варианта)
+
+```bash
+kubectl get nodes -o wide              # все Ready, новые INTERNAL-IP
+kubectl get pods -A | grep -v Running  # пусто или только Completed
+curl -k https://k8s-api:6443/healthz   # → ok
+ping -c3 10.20.30.20                   # новый VIP отвечает
+kubeadm certs check-expiration         # срок сертификатов
+kubectl -n longhorn-system get pods    # все Running — данные целы
+```
+
+-----
+
+## Таблица решённых проблем
+
+|# |Проблема                                                                  |Решение                                                   |Фаза|
+|--|--------------------------------------------------------------------------|----------------------------------------------------------|----|
+|1 |Ядро 6.12 несовместимо с prекомпилированными kmod RHEL 8                  |`nvidia-driver:570-open-dkms` modularity stream           |2   |
+|2 |NVIDIA Container Toolkit 1.18.0 ломает containerd config                  |Используем 1.19.0 (1.18.1+ исправлен)                     |2   |
+|3 |RedOS 8: zram-swap включён по умолчанию                                   |`systemctl mask dev-zram0.swap`                           |1   |
+|4 |RedOS 8: systemd-resolved конфликтует с CoreDNS                           |`DNSStubListener=no`                                      |1   |
+|5 |RedOS 8: CNI бинари в `/usr/libexec/cni` (не `/opt/cni/bin`)              |Правка `bin_dir` в containerd config + симлинки           |1   |
+|6 |kube-vip не может получить leader lease при init (K8s ≥1.29)              |Временно `super-admin.conf` → откат на `admin.conf`       |3   |
+|7 |NetworkManager перехватывает интерфейсы Calico                            |`/etc/NetworkManager/conf.d/calico.conf` unmanaged-devices|3   |
+|8 |Calico eBPF не поддерживается на ядре 6.12 в Red Hat-derived дистрибутивах|iptables + VXLAN dataplane (eBPF не включаем)             |3   |
+|9 |GPU time-slicing: 16 GPU нужно, 4 физических                              |4 × T4 × 4 time-slice = 16 виртуальных слотов             |4   |
+|10|hostNetwork конфликты портов                                              |ClusterIP для внутреннего, NodePort 30000-32767 снаружи   |7   |
+|11|Longhorn 1.7.x — EOL                                                      |Используем v1.10.2 (Prime stable)                         |5   |
+|12|Longhorn + iscsid SELinux denials на RHEL 8                               |`longhorn-iscsi-selinux-workaround.yaml`                  |5   |
+|13|Kafka 3 брокера на 2 storage-нодах                                        |`preferredAntiAffinity` (мягкий) — допустимо              |6   |
+|14|MongoDB Community Operator архивирован 12.12.2025                         |Переход на унифицированный `mongodb-kubernetes`           |6   |
+|15|MongoDB 3 реплики на 2 storage-нодах                                      |`preferredAntiAffinity` — кворум всегда есть              |6   |
+|16|MinIO и GPU-поды конкурируют за ресурсы                                   |`longhorn-single` (replica=1) + MinIO EC:2 = своя HA      |6   |
+|17|Прокси не настроен во всех слоях                                          |drop-in файлы для containerd + kubelet, `/etc/environment`|0   |
+|18|Смена IP без предварительной подготовки — долгий downtime                 |**Вариант А**: добавить новый IP заранее, downtime ~30 сек|9   |
+|19|Сертификаты apiserver не содержат новые IP после переезда                 |Перегенерация с обоими наборами IP до переезда (Вариант А)|9   |
+|20|Strimzi 0.45 — EOL, несовместим с Kafka 4.x                               |Strimzi 0.51.0 + Kafka 4.1.1                              |6   |
