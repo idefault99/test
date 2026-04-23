@@ -1,11 +1,2 @@
-    [plugins."io.containerd.grpc.v1.cri".registry]
-      config_path = "/etc/containerd/certs.d"
-
-      [plugins."io.containerd.grpc.v1.cri".registry.configs]
-        [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.test"]
-          [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.test".auth]
-            auth = "BASE64"
-
-      [plugins."io.containerd.grpc.v1.cri".registry.headers]
-
-      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+INFO[0000] trying next host                              error="failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-itr.rty.ru/jwt/auth?scope=repository%3Adpm%2Fiac%2Finfra%3Apull&service=container_registry: 403 Forbidden" host=registry.test
+ctr: failed to resolve reference "registry.test/dpm/infra:kanik": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-itr.rty.ru/jwt/auth?scope=repository%3Adpm%2Fiac%2Finfra%3Apull&service=container_registry: 403 Forbidden
