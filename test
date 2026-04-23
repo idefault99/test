@@ -1,9 +1,5 @@
-cat > /etc/containerd/certs.d/registry.test/hosts.toml <<'EOF'
-server = "https://registry.test"
-
-[host."https://registry.test"]
-  capabilities = ["pull", "resolve", "push"]
-  [host."https://registry.test".auth]
-    username = "your_gitlab_user"
-    password = "your_gitlab_token_or_password"
-EOF
+# Проверяем что токен/пароль вообще правильный
+curl -u "your_user:your_token" \
+  "https://registry.test/v2/dpm/infra/tags/list"
+# Должно вернуть JSON со списком тегов
+# Если 401/403 — проблема в самом токене
