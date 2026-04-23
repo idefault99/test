@@ -1,5 +1,155 @@
-# Проверяем что токен/пароль вообще правильный
-curl -u "your_user:your_token" \
-  "https://registry.test/v2/dpm/infra/tags/list"
-# Должно вернуть JSON со списком тегов
-# Если 401/403 — проблема в самом токене
+Нужно настроить pvc для Mongodb чтобы при удалении подов данные не терялись, вот текущий конфиг
+Также что нужно в values.yml чтобы все работало
+{{ if eq .Values.enableService.mongodb true }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.labels.mongodb }}-config
+  labels:
+    app: {{ .Values.labels.mongodb }}
+  namespace: {{ .Release.Namespace }}
+data:
+  MONGO_INITDB_ROOT_USERNAME: {{ .Values.mongoDb.user }}
+  MONGO_INITDB_ROOT_PASSWORD: {{ .Values.mongoDb.password }}
+
+{{ end }}
+---
+{{ if eq .Values.enableService.mongodb true }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.labels.mongodb }}-deployment
+  labels:
+    app: {{ .Values.labels.mongodb }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  serviceName: {{ .Values.labels.mongodb }}-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.labels.mongodb }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.labels.mongodb }}
+    spec:
+      {{ if .Values.securityContext.mongodb.enable }}
+      securityContext:
+        runAsUser: {{ .Values.securityContext.mongodb.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.mongodb.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.mongodb.fsGroup }}
+      {{ end }}
+      containers:
+      - name: {{ .Values.labels.mongodb }}
+        image: {{ .Values.images.mongo }}
+        imagePullPolicy: "IfNotPresent"
+        ports:
+        - containerPort: {{ .Values.ports.internal.mongodb }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Values.labels.mongodb }}-config
+        resources:
+          limits:
+            cpu: {{ (((((.Values.configPods).mongodb).resources).limits).cpu) | default "2000m" }}
+            memory: {{ (((((.Values.configPods).mongodb).resources).limits).memory) | default "500Mi" }}
+          requests:
+            cpu: {{ (((((.Values.configPods).mongodb).resources).requests).cpu) | default "100m" }}
+            memory: {{ (((((.Values.configPods).mongodb).resources).requests).memory) | default "300Mi" }}
+        volumeMounts:
+          - mountPath: /data/db
+            name: {{ .Values.labels.mongodb }}-{{ .Release.Namespace }}-pv-volume
+      {{ if .Values.bindNode }}
+      nodeSelector:
+        kubernetes.io/hostname: {{ .Values.bindNode }}
+      {{ end }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret}}
+      volumes:
+        - name: {{ .Values.labels.mongodb }}-{{ .Release.Namespace }}-pv-volume
+          persistentVolumeClaim:
+            claimName: {{ .Values.labels.mongodb }}
+{{ end }}
+---
+{{ if eq .Values.enableService.mongodb true }}
+{{if  .Values.ports.external.mongodb }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: {{ .Values.labels.mongodb }}
+  name: {{ .Values.labels.mongodb }}-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.ports.internal.mongodb }}
+    nodePort: {{ .Values.ports.external.mongodb }}
+  selector:
+    app: {{ .Values.labels.mongodb }}
+{{else}}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: {{ .Values.labels.mongodb }}
+  name: {{ .Values.labels.mongodb }}-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.ports.internal.mongodb }}
+  selector:
+    app: {{ .Values.labels.mongodb }}
+{{ end }}
+{{ end }}
+---
+{{ if eq .Values.enableService.mongodb true }}
+{{ if eq .Values.NFS.service.mongodb false }}
+kind: PersistentVolume
+apiVersion: v1
+metadata:
+  name: {{ .Values.labels.mongodb }}-{{ .Release.Namespace }}-pv-volume
+  labels:
+    app: {{ .Values.labels.mongodb }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  storageClassName: ""
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "{{ .Values.storageLocalPath}}/{{ .Release.Namespace }}/{{ .Values.labels.mongodb }}"
+    type: DirectoryOrCreate
+{{ if .Values.bindNode }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - {{ .Values.bindNode }}
+{{ end }}
+{{ end }}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ .Values.labels.mongodb }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  {{ if eq .Values.NFS.service.mongodb false }}
+  storageClassName: ""
+  volumeName: {{ .Values.labels.mongodb }}-{{ .Release.Namespace }}-pv-volume
+  {{ else }}
+  storageClassName: {{ .Values.NFS.name }}
+  {{ end }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+{{ end }}
