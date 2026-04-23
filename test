@@ -1,2 +1,9 @@
-INFO[0000] trying next host                              error="failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-itr.rty.ru/jwt/auth?scope=repository%3Adpm%2Fiac%2Finfra%3Apull&service=container_registry: 403 Forbidden" host=registry.test
-ctr: failed to resolve reference "registry.test/dpm/infra:kanik": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-itr.rty.ru/jwt/auth?scope=repository%3Adpm%2Fiac%2Finfra%3Apull&service=container_registry: 403 Forbidden
+cat > /etc/containerd/certs.d/registry.test/hosts.toml <<'EOF'
+server = "https://registry.test"
+
+[host."https://registry.test"]
+  capabilities = ["pull", "resolve", "push"]
+  [host."https://registry.test".auth]
+    username = "your_gitlab_user"
+    password = "your_gitlab_token_or_password"
+EOF
