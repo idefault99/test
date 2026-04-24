@@ -1,2 +1,1 @@
-kubectl exec -it <pod> -n schedule-dev -- \
-  curl -v http://auth-service.schedule-dev.svc.cluster.local/api/v1/auth/browser/userinfo
+в
