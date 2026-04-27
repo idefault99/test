@@ -1,1 +1,205 @@
-в
+FROM python:3.10
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV PYTHONUNBUFFERED 1
+
+CMD ["python", "src/main.py"]
+---
+stages:
+  - build
+  - deploy
+
+default:
+  before_script:
+    - export TAG=$(eval $TAG_SCRIPT)
+
+variables:
+  TAG_SCRIPT: '(if [ "$${CI_COMMIT_TAG}" == "" ]; then echo "$${CI_COMMIT_REF_SLUG}"; else echo "$${CI_COMMIT_TAG}"; fi);'
+
+.build:
+  tags:
+    - docker
+  stage: build
+  image:
+    name: registry.test/dpm/iac/infra:kaniko-executor-v1.23.2-debug
+    entrypoint: [ "" ]
+  when: manual
+
+build:
+  extends: .build
+  script:
+    - /kaniko/executor
+      --skip-tls-verify
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Docker/py/Dockerfile"
+      --target product
+      --skip-unused-stages=true
+      --destination "${CI_REGISTRY_IMAGE}:${TAG}"
+      --build-arg GITLAB_USERNAME=gitlab-ci-token
+      --build-arg GITLAB_TOKEN=${CI_JOB_TOKEN}
+      --build-arg http_proxy=$http_proxy
+      --build-arg https_proxy=$https_proxy
+      --build-arg no_proxy=$no_proxy
+      --cache=true
+      --cache-ttl=188h
+
+.buildkit_build:
+  stage: build
+  allow_failure: true
+  tags:
+    - docker 
+  image:
+    name: registry.test/dpm/iac/infra/docker:28.5.0-rc.1-cli-alpine3.22
+  services: 
+    - registry.test/dpm/iac/infra/docker:28.5.0-rc.1-dind-alpine3.22
+  variables:
+    TARGET: production
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "unix:///runner/services/docker/docker.sock"
+  before_script:
+    - mkdir -p $HOME/.docker/
+    - echo "${CI_JOB_TOKEN}" | docker login registry.test --username gitlab-ci-token --password-stdin
+    - export TAG=$(eval $TAG_SCRIPT)
+    - docker context create my-builder
+    - docker buildx create my-builder --driver docker-container --use --buildkitd-config ${BUILDKITD_CONFIG}
+  after_script:
+     - docker context rm my-builder
+
+.buildkit_bin:
+  extends: .buildkit_build
+  variables:
+    TARGET: production
+    PACKAGE_GROUPS: main
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/py/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG}.bin \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --provenance=false \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --target ${TARGET}  \
+      --build-arg POETRY_PACKAGE_GROUPS=${PACKAGE_GROUPS} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg GITLAB_USERNAME=gitlab-ci-token \
+      --build-arg GITLAB_TOKEN=${CI_JOB_TOKEN} \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: on_success
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: on_success
+    - when: manual
+
+.buildkit_source:
+  extends: .buildkit_build
+  variables:
+    TARGET: source
+    PACKAGE_GROUPS: main,dev,test
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/py/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG} \
+      --tag $CI_REGISTRY_IMAGE:latest \
+      --provenance=false \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --target ${TARGET}  \
+      --build-arg POETRY_PACKAGE_GROUPS=${PACKAGE_GROUPS} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg GITLAB_USERNAME=gitlab-ci-token \
+      --build-arg GITLAB_TOKEN=${CI_JOB_TOKEN} \
+      --build-arg NEXUS_PYPI_URL=${NEXUS_PYPI_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --push=true
+  rules:
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: on_success
+    - if: $CI_COMMIT_TAG == null && $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
+      when: manual
+
+.build_source:
+  extends: .buildkit_source
+  variables:
+    TARGET: node
+  script:
+    - |
+      docker buildx build ./ -f ${CI_PROJECT_DIR}/Docker/py/Dockerfile \
+      --tag ${CI_REGISTRY_IMAGE}:${TAG}.src \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache \
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache:${TAG}.src,mode=max \
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache:${TAG}.src \
+      --target ${TARGET} \
+      --provenance=false \
+      --build-arg PROJECT_NAME=${RELEASE_NAME} \
+      --build-arg PROJECT_REVISION=${TAG} \
+      --build-arg PROJECT_COMMIT_SHA=${CI_COMMIT_SHA::8} \
+      --build-arg NEXUS_NPM_URL=${NEXUS_NPM_URL} \
+      --build-arg NEXUS_USERNAME=${NEXUS_USERNAME} \
+      --build-arg NEXUS_PASSWORD=${NEXUS_PASSWORD} \
+      --build-arg http_proxy=$http_proxy \
+      --build-arg https_proxy=$https_proxy \
+      --build-arg no_proxy=$no_proxy \
+      --build-arg VAR_S3=true \
+      --build-arg S3_ACCESS_KEY=${S3_ACCESS_KEY} \
+      --build-arg S3_SECRET_KEY=${S3_SECRET_KEY} \
+      --push=true
+
+build_src:
+  extends: .build_source
+
+.deploy:
+  stage: deploy
+  tags:
+    - docker
+  image:
+    name: registry.test/dpm/iac/infra:helm
+    pull_policy: [always, if-not-present]
+    entrypoint: [""]
+  variables:
+    REGISTRY: "${CI_REGISTRY_IMAGE}"
+    IMAGE_POSTFIX: ".bin" # для фронта будем указывать "", для прочего просто менять эту переменную
+  before_script:
+    - export TAG=$(eval $TAG_SCRIPT)
+    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
+    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
+    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.test.model.svo.aero/dpm/iac/dev-infra.git
+    - cp -r ./dev-infra/templates/utils ./Helm/templates
+  script:
+    - |
+      helm upgrade -i --history-max 2 -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
+      --set "image=${REGISTRY}:${TAG}${IMAGE_POSTFIX}"
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: manual
+      # needs: ["linter", "test"]
+    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
+      when: manual
+    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
+      when: manual
+
+aoshub_coparking_demo:
+  extends: .deploy
+  environment: aoshub_coparking_demo
+  variables:
+    NAMESPACE: coparking-demo
