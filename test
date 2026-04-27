@@ -15,6 +15,7 @@ metadata:
   namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
 spec:
   serviceName: {{ $.Values.labels.redis }}-headless
+
   {{- if eq $.Values.enableService.redis.type "cluster" }}
   replicas: 3
   {{- else if eq $.Values.enableService.redis.type "single" }}
@@ -22,20 +23,32 @@ spec:
   {{- else }}
   {{ fail "Type of redis must be 'single' or 'cluster'" }}
   {{- end }}
+
   selector:
     matchLabels:
       app: {{ $.Values.labels.redis }}
+
   podManagementPolicy: OrderedReady
+
   updateStrategy:
     type: RollingUpdate
+
+  {{- if eq $.Values.enableService.redis.type "cluster" }}
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain
     whenScaled: Retain
+  {{- end }}
+
   template:
     metadata:
       labels:
         app: {{ $.Values.labels.redis }}
+
     spec:
+      securityContext:
+        fsGroup: {{ $.Values.enableService.redis.fsGroup | default 1001 }}
+        fsGroupChangePolicy: "OnRootMismatch"
+
       {{- if eq $.Values.enableService.redis.type "cluster" }}
       affinity:
         podAntiAffinity:
@@ -48,49 +61,73 @@ spec:
                       - {{ $.Values.labels.redis }}
               topologyKey: kubernetes.io/hostname
       {{- end }}
+
       initContainers:
         - name: init-data-dir
           image: {{ $.Values.images.redis }}
-          command: ['sh', '-c']
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - sh
+            - -c
           args:
             - |
-              CLUSTER_MODE="{{ $.Values.enableService.redis.type }}"
-              NODES_CONF="/data/nodes.conf"
-              
-              echo "==> Redis data init | Режим: $CLUSTER_MODE"
-              echo "==> Содержимое /data/:"
-              ls -la /data/ 2>/dev/null || echo "  (пусто)"
+              set -e
 
-              if [ "$CLUSTER_MODE" = "cluster" ]; then
-                # nodes.conf нет = либо первый старт, либо данные от single
-                if [ ! -f "$NODES_CONF" ]; then
-                  echo "==> nodes.conf отсутствует — очищаем /data/ для cluster mode"
+              CLUSTER_MODE="{{ $.Values.enableService.redis.type }}"
+              REDIS_UID="{{ $.Values.enableService.redis.runAsUser | default 1001 }}"
+              REDIS_GID="{{ $.Values.enableService.redis.runAsGroup | default 1001 }}"
+              NODES_CONF="/data/nodes.conf"
+
+              echo "==> Redis data init | mode: ${CLUSTER_MODE}"
+              echo "==> Redis uid/gid: ${REDIS_UID}:${REDIS_GID}"
+
+              echo "==> Current /data content:"
+              ls -la /data 2>/dev/null || true
+
+              echo "==> Fixing /data permissions"
+              chown -R "${REDIS_UID}:${REDIS_GID}" /data 2>/dev/null || true
+              chmod -R g+rwX /data 2>/dev/null || true
+
+              if [ "${CLUSTER_MODE}" = "cluster" ]; then
+                if [ ! -f "${NODES_CONF}" ]; then
+                  echo "==> nodes.conf not found — cleaning /data for cluster mode"
                   find /data -mindepth 1 -delete 2>/dev/null || true
-                  echo "==> Очищено"
+                  echo "==> /data cleaned"
                 else
-                  echo "==> nodes.conf найден — данные от cluster mode, пропускаем очистку"
+                  echo "==> nodes.conf found — existing cluster data, skip cleanup"
                 fi
               else
-                # Переключаемся на single
-                # nodes.conf есть = данные от cluster, несовместимы с single
-                if [ -f "$NODES_CONF" ]; then
-                  echo "==> nodes.conf найден — очищаем /data/ для single mode"
+                if [ -f "${NODES_CONF}" ]; then
+                  echo "==> nodes.conf found — cleaning /data for single mode"
                   find /data -mindepth 1 -delete 2>/dev/null || true
-                  echo "==> Очищено"
+                  echo "==> /data cleaned"
                 else
-                  echo "==> Данные совместимы с single mode — пропускаем очистку"
+                  echo "==> single mode data is compatible, skip cleanup"
                 fi
               fi
 
-              echo "==> /data/ после инициализации: "
-              ls -la /data/ 2>/dev/null || echo "  (пусто)"
+              echo "==> Fixing /data permissions after cleanup"
+              chown -R "${REDIS_UID}:${REDIS_GID}" /data 2>/dev/null || true
+              chmod -R g+rwX /data 2>/dev/null || true
+
+              echo "==> Final /data content:"
+              ls -la /data 2>/dev/null || true
           volumeMounts:
             - name: {{ $.Values.labels.redis }}-data
               mountPath: /data
+
       containers:
         - name: {{ $.Values.labels.redis }}
           image: {{ $.Values.images.redis }}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: {{ $.Values.enableService.redis.runAsUser | default 1001 }}
+            runAsGroup: {{ $.Values.enableService.redis.runAsGroup | default 1001 }}
+            allowPrivilegeEscalation: false
+
           {{- if eq $.Values.enableService.redis.type "cluster" }}
           command:
             - sh
@@ -105,6 +142,7 @@ spec:
               dir /data
               cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}.svc.{{ $.Values.localK8sDomain }}
               EOF
+
               exec redis-server /tmp/redis.conf
           env:
             - name: MY_POD_NAME
@@ -119,6 +157,7 @@ spec:
             - --dir
             - /data
           {{- end }}
+
           ports:
             - name: client
               containerPort: {{ $.Values.ports.internal.redis.client }}
@@ -126,9 +165,11 @@ spec:
             - name: bus
               containerPort: {{ $.Values.ports.internal.redis.bus }}
           {{- end }}
+
           volumeMounts:
             - name: {{ $.Values.labels.redis }}-data
               mountPath: /data
+
           resources:
             limits:
               cpu: {{ ((((($.Values.configPods).redis).resources).limits).cpu) | default "200m" }}
@@ -136,6 +177,7 @@ spec:
             requests:
               cpu: {{ ((((($.Values.configPods).redis).resources).requests).cpu) | default "100m" }}
               memory: {{ ((((($.Values.configPods).redis).resources).requests).memory) | default "250Mi" }}
+
           readinessProbe:
             exec:
               command:
@@ -144,6 +186,7 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 5
+
           livenessProbe:
             exec:
               command:
@@ -152,8 +195,17 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
+
       imagePullSecrets:
         - name: {{ $.Values.imagePullSecret }}
+
+      {{- if eq $.Values.enableService.redis.type "single" }}
+      volumes:
+        - name: {{ $.Values.labels.redis }}-data
+          emptyDir: {}
+      {{- end }}
+
+  {{- if eq $.Values.enableService.redis.type "cluster" }}
   volumeClaimTemplates:
     - metadata:
         name: {{ $.Values.labels.redis }}-data
@@ -164,6 +216,7 @@ spec:
         resources:
           requests:
             storage: {{ $.Values.enableService.redis.storageSize | default "1Gi" }}
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
