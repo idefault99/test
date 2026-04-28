@@ -49,6 +49,27 @@ spec:
               topologyKey: kubernetes.io/hostname
       {{- end }}
       initContainers:
+        # Исправляем права на /data для nonroot образа.
+        # Работает с любым storage: nfs-csi, longhorn, emptyDir —
+        # потому что запускается уже после того как том примонтирован.
+        # busybox запускается от root, поэтому chown всегда проходит.
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ['sh', '-c']
+          args:
+            - |
+              mkdir -p /data
+              # Получаем UID/GID основного контейнера из образа redis
+              # Стандартный redis-образ использует UID 999 (redis user)
+              chown -R 999:999 /data
+              chmod -R 755 /data
+              echo "==> /data permissions fixed: $(ls -la /data)"
+          volumeMounts:
+            - name: {{ $.Values.labels.redis }}-data
+              mountPath: /data
+          securityContext:
+            runAsUser: 0   # root — только для chown, основной контейнер nonroot
+
         - name: init-data-dir
           image: {{ $.Values.images.redis }}
           command: ['sh', '-c']
@@ -62,7 +83,6 @@ spec:
               ls -la /data/ 2>/dev/null || echo "  (пусто)"
 
               if [ "$CLUSTER_MODE" = "cluster" ]; then
-                # nodes.conf нет = либо первый старт, либо данные от single
                 if [ ! -f "$NODES_CONF" ]; then
                   echo "==> nodes.conf отсутствует — очищаем /data/ для cluster mode"
                   find /data -mindepth 1 -delete 2>/dev/null || true
@@ -71,8 +91,6 @@ spec:
                   echo "==> nodes.conf найден — данные от cluster mode, пропускаем очистку"
                 fi
               else
-                # Переключаемся на single
-                # nodes.conf есть = данные от cluster, несовместимы с single
                 if [ -f "$NODES_CONF" ]; then
                   echo "==> nodes.conf найден — очищаем /data/ для single mode"
                   find /data -mindepth 1 -delete 2>/dev/null || true
@@ -154,6 +172,22 @@ spec:
             failureThreshold: 3
       imagePullSecrets:
         - name: {{ $.Values.imagePullSecret }}
+
+      # Том определяется здесь только если PVC выключен.
+      # Если PVC включен — том создаётся через volumeClaimTemplates ниже
+      # и StatefulSet сам его монтирует по имени.
+      {{- if not ($.Values.enableService.redis.pvcEnabled) }}
+      volumes:
+        - name: {{ $.Values.labels.redis }}-data
+          emptyDir: {}
+      {{- end }}
+
+  # PVC создаётся только если явно включён в values:
+  #   enableService.redis.pvcEnabled: true
+  # При выключенном pvcEnabled используется emptyDir (см. выше).
+  # Это позволяет менять storage (nfs-csi / longhorn) только через values
+  # без изменения шаблона.
+  {{- if $.Values.enableService.redis.pvcEnabled }}
   volumeClaimTemplates:
     - metadata:
         name: {{ $.Values.labels.redis }}-data
@@ -164,6 +198,7 @@ spec:
         resources:
           requests:
             storage: {{ $.Values.enableService.redis.storageSize | default "1Gi" }}
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -329,4 +364,3 @@ spec:
 {{- end }}
 {{- end }}
 {{- end }}
----
