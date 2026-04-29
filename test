@@ -1,6 +1,8 @@
-kubectl exec -it <pod-name> -n <namespace> -- \
-  mongosh --quiet \
-  -u "$MONGO_INITDB_ROOT_USERNAME" \
-  -p "$MONGO_INITDB_ROOT_PASSWORD" \
-  --authenticationDatabase admin \
-  --eval "rs.status()"
+MONGO_URI = (
+    "mongodb://user:password@"
+    "mongodb-service.mongo-namespace.svc.cluster.local:27017"
+    "/mydb"
+    "?authSource=admin"
+    "&replicaSet=rs0"          # обязательно для changeStream
+    "&directConnection=true"   # для single-node RS — без этого драйвер может зависнуть
+)
