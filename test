@@ -1,29 +1,6 @@
-containers:
-  - name: {{ .Values.labels.mongodb }}
-    image: {{ .Values.images.mongo }}
-    imagePullPolicy: {{ .Values.mongodb.imagePullPolicy | default "IfNotPresent" | quote }}
-    command:
-      - /bin/sh
-      - -c
-      - |
-        mongod --replSet rs0 --bind_ip_all &
-        MONGOD_PID=$!
-        echo "Waiting for mongod..."
-        until mongosh --quiet --host 127.0.0.1:{{ .Values.ports.internal.mongodb }} \
-              --eval "db.adminCommand('ping').ok" 2>/dev/null | grep -q 1; do
-          sleep 2
-        done
-        echo "Initiating replica set..."
-        mongosh --host 127.0.0.1:{{ .Values.ports.internal.mongodb }} \
-          -u "$MONGO_INITDB_ROOT_USERNAME" \
-          -p "$MONGO_INITDB_ROOT_PASSWORD" \
-          --authenticationDatabase admin --eval "
-            try { rs.status(); print('RS already initiated.'); }
-            catch(e) {
-              rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:{{ .Values.ports.internal.mongodb }}' }] });
-              print('RS initiated.');
-            }
-          "
-        wait $MONGOD_PID
-    ports:
-    ...
+kubectl exec -it <pod-name> -n <namespace> -- \
+  mongosh --quiet \
+  -u "$MONGO_INITDB_ROOT_USERNAME" \
+  -p "$MONGO_INITDB_ROOT_PASSWORD" \
+  --authenticationDatabase admin \
+  --eval "rs.status()"
