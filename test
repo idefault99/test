@@ -1,1 +1,33 @@
-update Pod redis-deployment-0 in StatefulSet redis-deployment failed error: Pod "redis-deployment-0" is invalid: spec: Forbidden: pod updates may not change fields other than `spec.containers[*].image`,`spec.initContainers[*].image`,`spec.activeDeadlineSeconds`,`spec.tolerations` (only additions to existing tolerations),`spec.terminationGracePeriodSeconds` (allow it to be set to 1 if it was previously negative) core.PodSpec{ Volumes: []core.Volume{ { Name: "redis-data", VolumeSource: core.VolumeSource{ HostPath: nil, - EmptyDir: &core.EmptyDirVolumeSource{}, + EmptyDir: nil, GCEPersistentDisk: nil, AWSElasticBlockStore: nil, ... // 3 identical fields ISCSI: nil, Glusterfs: nil, - PersistentVolumeClaim: nil, + PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "redis-data-redis-deployment-0"}, RBD: nil, Quobyte: nil, ... // 17 identical fields }, }, {Name: "kube-api-access-bbvrw", VolumeSource: {Projected: &{Sources: {{ServiceAccountToken: &{ExpirationSeconds: 3607, Path: "token"}}, {ConfigMap: &{LocalObjectReference: {Name: "kube-root-ca.crt"}, Items: {{Key: "ca.crt", Path: "ca.crt"}}}}, {DownwardAPI: &{Items: {{Path: "namespace", FieldRef: &{APIVersion: "v1", FieldPath: "metadata.namespace"}}}}}}, DefaultMode: &420}}}, }, InitContainers: {{Name: "init-data-dir", Image: "registry/dpm/iac/infra/redis/redis:8.4.0", Command: {"sh", "-c"}, Args: {"CLUSTER_MODE=\"single\"\nNODES_CONF=\"/data/nodes.conf\"\n\necho \"==> R"...}, ...}}, Containers: {{Name: "redis", Image: "registry/dpm/iac/infra/redis/redis:8.4.0", Command: {"redis-server", "--appendonly", "yes", "--dir", ...}, Ports: {{Name: "client", ContainerPort: 6379, Protocol: "TCP"}}, ...}}, ... // 30 identical fields }
+# В namespace: infra
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-proxy
+  namespace: infra
+spec:
+  type: ExternalName
+  externalName: app-service.app-namespace.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 8080  # порт сервиса в app-namespace
+
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: infra-ingress
+  namespace: infra
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /app/$2
+spec:
+  rules:
+    - host: your-host.example.com
+      http:
+        paths:
+          - path: /api/v1/app(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: app-proxy
+                port:
+                  number: 80
