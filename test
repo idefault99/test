@@ -1,8 +1,483 @@
-MONGO_URI = (
-    "mongodb://user:password@"
-    "mongodb-service.mongo-namespace.svc.cluster.local:27017"
-    "/mydb"
-    "?authSource=admin"
-    "&replicaSet=rs0"          # обязательно для changeStream
-    "&directConnection=true"   # для single-node RS — без этого драйвер может зависнуть
-)
+{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $.Values.labels.redis }}-config
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+data:
+  redis-stack.conf: |
+    port {{ $.Values.ports.internal.redis.client }}
+    bind 0.0.0.0
+    cluster-enabled yes
+    cluster-config-file /data/nodes.conf
+    cluster-node-timeout 5000
+    appendonly yes
+    dir /data
+    protected-mode no
+    # При рестарте нода восстанавливает своё место в кластере из nodes.conf
+    cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}.svc.{{ $.Values.localK8sDomain }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $.Values.labels.redis }}-deployment
+  labels:
+    app: {{ $.Values.labels.redis }}
+    app.kubernetes.io/managed-by: Helm
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+spec:
+  serviceName: {{ $.Values.labels.redis }}-headless
+  {{- if eq $.Values.enableService.redis.type "cluster" }}
+  replicas: 3
+  {{- else if eq $.Values.enableService.redis.type "single" }}
+  replicas: 1
+  {{- else }}
+  {{ fail "Type of redis must be 'single' or 'cluster'" }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ $.Values.labels.redis }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  template:
+    metadata:
+      labels:
+        app: {{ $.Values.labels.redis }}
+    spec:
+      {{- if eq $.Values.enableService.redis.type "cluster" }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - {{ $.Values.labels.redis }}
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      initContainers:
+        - name: init-data-dir
+          image: {{ $.Values.images.redis }}
+          command: ['sh', '-c']
+          args:
+            - |
+              CLUSTER_MODE="{{ $.Values.enableService.redis.type }}"
+              NODES_CONF="/data/nodes.conf"
+              
+              echo "==> Redis data init | Режим: $CLUSTER_MODE"
+              echo "==> Содержимое /data/:"
+              ls -la /data/ 2>/dev/null || echo "  (пусто)"
+
+              if [ "$CLUSTER_MODE" = "cluster" ]; then
+                # nodes.conf нет = либо первый старт, либо данные от single
+                if [ ! -f "$NODES_CONF" ]; then
+                  echo "==> nodes.conf отсутствует — очищаем /data/ для cluster mode"
+                  find /data -mindepth 1 -delete 2>/dev/null || true
+                  echo "==> Очищено"
+                else
+                  echo "==> nodes.conf найден — данные от cluster mode, пропускаем очистку"
+                fi
+              else
+                # Переключаемся на single
+                # nodes.conf есть = данные от cluster, несовместимы с single
+                if [ -f "$NODES_CONF" ]; then
+                  echo "==> nodes.conf найден — очищаем /data/ для single mode"
+                  find /data -mindepth 1 -delete 2>/dev/null || true
+                  echo "==> Очищено"
+                else
+                  echo "==> Данные совместимы с single mode — пропускаем очистку"
+                fi
+              fi
+
+              echo "==> /data/ после инициализации: "
+              ls -la /data/ 2>/dev/null || echo "  (пусто)"
+          volumeMounts:
+            - name: {{ $.Values.labels.redis }}-data
+              mountPath: /data
+      containers:
+        - name: {{ $.Values.labels.redis }}
+          image: {{ $.Values.images.redis }}
+          imagePullPolicy: IfNotPresent
+          {{- if eq $.Values.enableService.redis.type "cluster" }}
+          command:
+            - sh
+            - -c
+            - |
+              cat > /tmp/redis.conf << EOF
+              port {{ $.Values.ports.internal.redis.client }}
+              bind 0.0.0.0
+              cluster-enabled yes
+              cluster-config-file /data/nodes.conf
+              cluster-node-timeout 5000
+              appendonly yes
+              dir /data
+              protected-mode no
+              cluster-announce-hostname $(MY_POD_NAME).{{ $.Values.labels.redis }}-headless.{{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}.svc.{{ $.Values.localK8sDomain }}
+              EOF
+              exec redis-server /tmp/redis.conf
+          env:
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          {{- else }}
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --dir
+            - /data
+            - --bind
+            - 0.0.0.0
+            - --protected-mode
+            - "no"
+          {{- end }}
+          ports:
+            - name: client
+              containerPort: {{ $.Values.ports.internal.redis.client }}
+          {{- if eq $.Values.enableService.redis.type "cluster" }}
+            - name: bus
+              containerPort: {{ $.Values.ports.internal.redis.bus }}
+          {{- end }}
+          volumeMounts:
+            - name: {{ $.Values.labels.redis }}-data
+              mountPath: /data
+          resources:
+            limits:
+              cpu: {{ ((((($.Values.configPods).redis).resources).limits).cpu) | default "200m" }}
+              memory: {{ ((((($.Values.configPods).redis).resources).limits).memory) | default "500Mi" }}
+            requests:
+              cpu: {{ ((((($.Values.configPods).redis).resources).requests).cpu) | default "100m" }}
+              memory: {{ ((((($.Values.configPods).redis).resources).requests).memory) | default "250Mi" }}
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+      {{- if not ($.Values.enableService.redis.pvcEnabled) }}
+      volumes:
+        - name: {{ $.Values.labels.redis }}-data
+          emptyDir: {}
+      {{- end }}
+  {{- if $.Values.enableService.redis.pvcEnabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: {{ $.Values.labels.redis }}-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: {{ $.Values.enableService.redis.storageClassName | default "nfs-csi" }}
+        resources:
+          requests:
+            storage: {{ $.Values.enableService.redis.storageSize | default "1Gi" }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $.Values.labels.redis }}-pre-upgrade-{{ $.Release.Revision }}
+  namespace: {{ $ns }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 120
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      serviceAccountName: {{ $.Values.labels.redis }}-waiter-sa
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+      containers:
+        - name: pre-upgrade
+          image: {{ $.Values.images.kubectl }}
+          command: ['sh', '-c']
+          args:
+            - |
+              NS="{{ $ns }}"
+              STS="{{ $.Values.labels.redis }}-deployment"
+              if ! kubectl get statefulset $STS -n $NS > /dev/null 2>&1; then
+                echo "StatefulSet не найден"
+                exit 0
+              fi
+
+              VCT=$(kubectl get statefulset $STS -n $NS \
+                -o jsonpath='{.spec.volumeClaimTemplates}' 2>/dev/null)
+
+              if [ -n "$VCT" ] && [ "$VCT" != "null" ] && [ "$VCT" != "[]" ]; then
+                echo "volumeClaimTemplates уже есть - StatefulSet совместим"
+                exit 0
+              fi
+
+              echo "Старый StatefulSet без volumeClaimTemplates - удаляем с cascade=orphan"
+              kubectl delete statefulset $STS -n $NS --cascade=orphan
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if and (eq .Values.enableService.redis.enable true) (eq .Values.enableService.redis.type "cluster") }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+{{- $ns := printf "%s%s" $.Release.Namespace (ternary "" (printf "-%s" $module) (eq $module "")) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $.Values.labels.redis }}-job-{{ $.Release.Revision }}
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $ns }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: {{ $.Values.labels.redis }}-waiter-sa
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+      initContainers:
+        - name: wait-for-redis-nodes
+          image: registry.test.model.svo.aero/dpm/iac/infra:kubectl
+          env:
+            - name: REDIS_TYPE
+              value: {{ $.Values.enableService.redis.type | quote }}
+          command: ['sh', '-c']
+          args:
+            - |
+              NS="{{ $ns }}"
+              PREFIX="{{ $.Values.labels.redis }}-deployment"
+              TYPE="$REDIS_TYPE"
+      
+              if [ "$TYPE" = "cluster" ]; then
+                REPLICAS=3
+              else
+                REPLICAS=1
+              fi
+      
+              for INDEX in $(seq 0 $((REPLICAS - 1))); do
+                POD="${PREFIX}-${INDEX}"
+      
+                ATTEMPTS=0
+                until kubectl get pod $POD -n $NS > /dev/null 2>&1; do
+                  ATTEMPTS=$((ATTEMPTS + 1))
+                  if [ $ATTEMPTS -ge 60 ]; then
+                    echo "error: ${POD} не появился"
+                    exit 1
+                  fi
+                  sleep 5
+                done
+      
+                echo "  ${POD} найден, ждём Ready..."
+                kubectl wait --for=condition=Ready \
+                  -n $NS pod/$POD --timeout=300s
+      
+                echo "  ${POD}: Ready"
+              done
+      
+              echo "OK"
+      containers:
+        - name: {{ $.Values.labels.redis }}
+          image: {{ $.Values.images.redis }}
+          imagePullPolicy: "IfNotPresent"
+          command: ["sh", "-c"]
+          args:
+            - |
+              POD0="{{ $.Values.labels.redis }}-deployment-0.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
+              POD1="{{ $.Values.labels.redis }}-deployment-1.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
+              POD2="{{ $.Values.labels.redis }}-deployment-2.{{ $.Values.labels.redis }}-headless.{{ $ns }}.svc.{{ $.Values.localK8sDomain }}"
+              PORT="{{ $.Values.ports.internal.redis.client }}"
+
+              echo "Проверяем состояние кластера..."
+              CLUSTER_INFO=$(redis-cli -h $POD0 -p $PORT cluster info 2>/dev/null)
+              CLUSTER_STATE=$(echo "$CLUSTER_INFO" | grep "^cluster_state" | cut -d: -f2 | tr -d '[:space:]')
+              CLUSTER_SLOTS_OK=$(echo "$CLUSTER_INFO" | grep "^cluster_slots_ok" | cut -d: -f2 | tr -d '[:space:]')
+              CLUSTER_NODES=$(echo "$CLUSTER_INFO" | grep "^cluster_known_nodes" | cut -d: -f2 | tr -d '[:space:]')
+
+              echo "  state=${CLUSTER_STATE} slots_ok=${CLUSTER_SLOTS_OK} known_nodes=${CLUSTER_NODES}"
+
+              if [ "$CLUSTER_STATE" = "ok" ] && \
+                 [ "${CLUSTER_SLOTS_OK:-0}" = "16384" ] && \
+                 [ "${CLUSTER_NODES:-0}" -ge "3" ]; then
+                exit 0
+              fi
+
+              for POD in $POD0 $POD1 $POD2; do
+                redis-cli -h $POD -p $PORT flushall 2>/dev/null || true
+                redis-cli -h $POD -p $PORT cluster reset hard 2>/dev/null || true
+              done
+              sleep 3
+
+              echo "Создаём Redis Cluster"
+              redis-cli --cluster create \
+                $POD0:$PORT \
+                $POD1:$PORT \
+                $POD2:$PORT \
+                --cluster-replicas 0 \
+                --cluster-yes
+
+              if [ $? -ne 0 ]; then
+                echo "error: не удалось создать кластер"
+                exit 1
+              fi
+
+              sleep 3
+              redis-cli -h $POD0 -p $PORT cluster info
+              echo ""
+              redis-cli -h $POD0 -p $PORT cluster nodes
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if and (eq .Values.enableService.redis.enable true) }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $.Values.labels.redis }}-waiter-sa
+  annotations:
+    "helm.sh/hook": pre-install, pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-reader-role
+  annotations:
+    "helm.sh/hook": pre-install, pre-upgrade
+    "helm.sh/hook-weight": "-9"
+    "helm.sh/hook-delete-policy": before-hook-creation
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $.Values.labels.redis }}-waiter-rolebinding
+  annotations:
+    "helm.sh/hook": pre-install, pre-upgrade
+    "helm.sh/hook-weight": "-8"
+    "helm.sh/hook-delete-policy": before-hook-creation
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Values.labels.redis }}-waiter-sa
+    namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+roleRef:
+  kind: Role
+  name: pod-reader-role
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- if eq .Values.enableService.redis.enable true }}
+{{- $modules := .Files.Get "files/redis_module.yaml" | fromYaml -}}
+{{- range $module := $modules.main }}
+{{- if or (index $.Values.enableModules $module) (eq $module "")}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.labels.redis }}-headless
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: client
+      port: {{ $.Values.ports.internal.redis.client }}
+      targetPort: {{ $.Values.ports.internal.redis.client }}
+      protocol: TCP
+  {{- if eq $.Values.enableService.redis.type "cluster" }}
+    - name: bus
+      port: {{ $.Values.ports.internal.redis.bus }}
+      targetPort: {{ $.Values.ports.internal.redis.bus }}
+      protocol: TCP
+  {{- end }}
+  selector:
+    app: {{ $.Values.labels.redis }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.labels.redis }}-service
+  labels:
+    app: {{ $.Values.labels.redis }}
+  namespace: {{ $.Release.Namespace }}{{ if eq $module "" }}{{ else }}-{{ $module }}{{ end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: client
+      port: {{ $.Values.ports.internal.redis.client }}
+      targetPort: {{ $.Values.ports.internal.redis.client }}
+      protocol: TCP
+  selector:
+    app: {{ $.Values.labels.redis }}
+{{- end }}
+{{- end }}
+{{- end }}
