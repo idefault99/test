@@ -1,1 +1,22 @@
-BadValue: security.keyFile is required when authorization is enabled with replica sets
+initContainers:
+  - name: init-keyfile
+    image: {{ .Values.images.mongo }}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ ! -f /data/db/keyfile ]; then
+          openssl rand -base64 756 > /data/db/keyfile
+          chmod 400 /data/db/keyfile
+          # владелец должен совпадать с runAsUser mongod (999)
+          chown 999:999 /data/db/keyfile
+        fi
+    volumeMounts:
+      - name: data
+        mountPath: /data/db
+
+
+args:
+  - "--replSet=rs0"
+  - "--bind_ip_all"
+  - "--keyFile=/data/db/keyfile"
