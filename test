@@ -522,3 +522,19 @@ data:
     # Содержимое /opt/vault/tls/ca.crt — вставь при деплое
     # Или используй --set-file vault.caCert=ca.crt
 {{- end }}
+
+
+---
+как деплоить
+# 1. Скопировать CA cert с Vault VM
+scp user@vault-vm:/opt/vault/tls/ca.crt ./ca.crt
+
+# 2. Задеплоить chart (из namespace stand-test)
+helm upgrade --install stand-secrets ./charts/stand-secrets \
+  --namespace stand-test \
+  --values values.yaml \
+  --set-file vault.caCert=./ca.crt
+
+# 3. Проверить статус
+microk8s kubectl get externalsecret -A
+microk8s kubectl get secret vault-app-secrets -n stand-test-appone -o jsonpath='{.data}' | jq 'to_entries[] | .key'
