@@ -1,4 +1,16 @@
-
-uid=0(root) gid=0(root) groups=0(root)
--rw------- 1 nobody nogroup 1024 Apr 30  2026 /data/db/keyfile
-chown: changing ownership of '/data/db/keyfile': Operation not permitted
+initContainers:
+  - name: init-keyfile
+    image: {{ .Values.images.mongo }}
+    securityContext:
+      runAsUser: 999  # создаём файл сразу от mongod-пользователя
+      runAsGroup: 999
+    command:
+      - /bin/sh
+      - -c
+      - |
+        openssl rand -base64 756 > /data/db/keyfile
+        chmod 600 /data/db/keyfile
+        ls -la /data/db/keyfile
+    volumeMounts:
+      - name: data
+        mountPath: /data/db
