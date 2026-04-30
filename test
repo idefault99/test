@@ -523,6 +523,262 @@ data:
     # Или используй --set-file vault.caCert=ca.crt
 {{- end }}
 
+---
+Новый чарт
+vault:
+  # ⚠ ПОПРАВИТЬ: IP или DNS твоей Vault VM
+  address: "https://192.168.1.10:8200"
+  authPath: "kubernetes"
+  kvMount: "stands"          # корневой mount в Vault
+  caConfigMap: "vault-ca"    # имя ConfigMap с ca.crt
+
+stand:
+  # ⚠ ПОПРАВИТЬ: имя стенда (используется и в пути Vault и в именах namespace-ов)
+  name: "stand-test"
+
+  # Namespace инфры = stand.name (т.е. "stand-test")
+  # Namespace приложения = stand.name + "-" + suffix (т.е. "stand-test-appone")
+
+  infra:
+    # ⚠ ПОПРАВИТЬ: список сервисов инфры и их секреты
+    # Каждый сервис → путь stands/stand-test/infra/<service>
+    # → K8s Secret "<service>-vault-secret" в namespace stand-test
+    services:
+      - name: minio
+        secretName: minio-vault-secret
+        # Ключи из Vault которые попадут в Secret
+        keys:
+          - access-key
+          - secret-key
+          - endpoint
+
+      - name: kafka
+        secretName: kafka-vault-secret
+        keys:
+          - bootstrap-servers
+          - username
+          - password
+
+      - name: postgres
+        secretName: postgres-vault-secret
+        keys:
+          - host
+          - port
+          - username
+          - password
+          - database
+
+  apps:
+    # ⚠ ПОПРАВИТЬ: список app-namespace-ов и их сервисы
+    - suffix: "appone"    # namespace = stand-test-appone
+      services:
+        - name: backend
+          secretName: backend-vault-secret
+          keys:
+            - db-password
+            - api-key
+            - jwt-secret
+
+        - name: worker
+          secretName: worker-vault-secret
+          keys:
+            - db-password
+            - queue-url
+
+    # Добавляй новые app namespace-ы по аналогии:
+    # - suffix: "apptwo"
+    #   services:
+    #     - name: backend
+    #       ...
+
+---
+{{/*
+Namespace для инфры = имя стенда
+*/}}
+{{- define "stand.infraNamespace" -}}
+{{ .Values.stand.name }}
+{{- end }}
+
+{{/*
+Namespace для приложения: stand-test-appone
+*/}}
+{{- define "stand.appNamespace" -}}
+{{ .Values.stand.name }}-{{ . }}
+{{- end }}
+
+{{/*
+Vault role name: stand-test-infra, stand-test-appone
+*/}}
+{{- define "stand.vaultRole" -}}
+{{ .stand }}-{{ .suffix }}
+{{- end }}
+
+{{/*
+Vault path: stands/stand-test/infra/minio
+*/}}
+{{- define "stand.vaultPath" -}}
+{{ .kvMount }}/{{ .stand }}/{{ .section }}/{{ .service }}
+{{- end }}
+---
+{{- $root := . }}
+{{- $stand := .Values.stand.name }}
+
+{{/* infra namespace */}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.vault.caConfigMap }}
+  namespace: {{ $stand }}
+data:
+  ca.crt: {{ .Values.vault.caCert | quote }}
+
+{{/* app namespaces */}}
+{{- range .Values.stand.apps }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $root.Values.vault.caConfigMap }}
+  namespace: {{ $stand }}-{{ .suffix }}
+data:
+  ca.crt: {{ $root.Values.vault.caCert | quote }}
+{{- end }}
+
+---
+{{- $root := . }}
+{{- $stand := .Values.stand.name }}
+{{- $vault := .Values.vault }}
+
+{{/* SecretStore для infra namespace */}}
+---
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: {{ $stand }}
+spec:
+  provider:
+    vault:
+      server: {{ $vault.address }}
+      path: {{ $vault.kvMount }}
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: {{ $vault.authPath }}
+          role: {{ $stand }}-infra
+          serviceAccountRef:
+            name: external-secrets
+            namespace: external-secrets
+      caProvider:
+        type: ConfigMap
+        name: {{ $vault.caConfigMap }}
+        key: ca.crt
+        namespace: {{ $stand }}
+
+{{/* SecretStore для каждого app namespace */}}
+{{- range .Values.stand.apps }}
+---
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: {{ $stand }}-{{ .suffix }}
+spec:
+  provider:
+    vault:
+      server: {{ $vault.address }}
+      path: {{ $vault.kvMount }}
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: {{ $vault.authPath }}
+          role: {{ $stand }}-{{ .suffix }}
+          serviceAccountRef:
+            name: external-secrets
+            namespace: external-secrets
+      caProvider:
+        type: ConfigMap
+        name: {{ $vault.caConfigMap }}
+        key: ca.crt
+        namespace: {{ $stand }}-{{ .suffix }}
+{{- end }}
+
+---
+{{- $root := . }}
+{{- $stand := .Values.stand.name }}
+{{- $vault := .Values.vault }}
+
+{{/* ExternalSecrets для infra */}}
+{{- range .Values.stand.infra.services }}
+{{- $svc := . }}
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: {{ $svc.secretName }}
+  namespace: {{ $stand }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: SecretStore
+  target:
+    name: {{ $svc.secretName }}
+    creationPolicy: Owner
+  data:
+  {{- range $svc.keys }}
+    - secretKey: {{ . }}
+      remoteRef:
+        key: {{ $stand }}/infra/{{ $svc.name }}
+        property: {{ . }}
+  {{- end }}
+{{- end }}
+
+{{/* ExternalSecrets для каждого app namespace */}}
+{{- range .Values.stand.apps }}
+{{- $app := . }}
+{{- $appNs := printf "%s-%s" $stand $app.suffix }}
+{{- range $app.services }}
+{{- $svc := . }}
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: {{ $svc.secretName }}
+  namespace: {{ $appNs }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: SecretStore
+  target:
+    name: {{ $svc.secretName }}
+    creationPolicy: Owner
+  data:
+  {{- range $svc.keys }}
+    - secretKey: {{ . }}
+      remoteRef:
+        key: {{ $stand }}/{{ $app.suffix }}/{{ $svc.name }}
+        property: {{ . }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
+---
+деплой чарта
+# Скопировать CA с Vault VM
+scp user@vault-vm:/opt/vault/tls/ca.crt ./ca.crt
+
+# Задеплоить
+helm upgrade --install stand-secrets ./charts/stand-secrets \
+  --namespace stand-test \
+  --values values.yaml \
+  --set-file vault.caCert=./ca.crt
+
+# Проверить
+microk8s kubectl get externalsecret -A
+microk8s kubectl get secretstore -A
 
 ---
 как деплоить
