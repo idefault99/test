@@ -1,10 +1,4 @@
-{"t":{"$date":"2026-04-30T07:58:16.515+00:00"},"s":"I",  "c":"CONTROL",  "id":23285,   "ctx":"main","msg":"Automatically disabling TLS 1.0, to force-enable TLS 1.0 specify --sslDisabledProtocols 'none'"}
-{"t":{"$date":"2026-04-30T07:58:16.517+00:00"},"s":"I",  "c":"NETWORK",  "id":4915701, "ctx":"main","msg":"Initialized wire specification","attr":{"spec":{"incomingExternalClient":{"minWireVersion":0,"maxWireVersion":21},"incomingInternalClient":{"minWireVersion":0,"maxWireVersion":21},"outgoing":{"minWireVersion":6,"maxWireVersion":21},"isInternalClient":true}}}
-{"t":{"$date":"2026-04-30T07:58:16.518+00:00"},"s":"I",  "c":"NETWORK",  "id":4648601, "ctx":"main","msg":"Implicit TCP FastOpen unavailable. If TCP FastOpen is required, set tcpFastOpenServer, tcpFastOpenClient, and tcpFastOpenQueueSize."}
-{"t":{"$date":"2026-04-30T07:58:16.519+00:00"},"s":"I",  "c":"ACCESS",   "id":20254,   "ctx":"main","msg":"Read security file failed","attr":{"error":{"code":30,"codeName":"InvalidPath","errmsg":"permissions on /data/db/keyfile are too open"}}}
-{"t":{"$date":"2026-04-30T07:58:16.519+00:00"},"s":"I",  "c":"ASIO",     "id":6529201, "ctx":"main","msg":"Network interface redundant shutdown","attr":{"state":"Stopped"}}
-{"t":{"$date":"2026-04-30T07:58:16.520+00:00"},"s":"I",  "c":"ASIO",     "id":22582,   "ctx":"main","msg":"Killing all outstanding egress activity."}
-{"t":{"$date":"2026-04-30T07:58:16.520+00:00"},"s":"I",  "c":"SHARDING", "id":5847201, "ctx":"main","msg":"Balancer command scheduler stop requested"}
-{"t":{"$date":"2026-04-30T07:58:16.520+00:00"},"s":"I",  "c":"ASIO",     "id":6529201, "ctx":"main","msg":"Network interface redundant shutdown","attr":{"state":"Stopped"}}
-{"t":{"$date":"2026-04-30T07:58:16.520+00:00"},"s":"I",  "c":"ASIO",     "id":22582,   "ctx":"main","msg":"Killing all outstanding egress activity."}
-{"t":{"$date":"2026-04-30T07:58:16.520+00:00"},"s":"F",  "c":"CONTROL",  "id":20575,   "ctx":"main","msg":"Error creating service context","attr":{"error":"Location5579201: Unable to acquire security key[s]"}}
+
+uid=0(root) gid=0(root) groups=0(root)
+-rw------- 1 nobody nogroup 1024 Apr 30  2026 /data/db/keyfile
+chown: changing ownership of '/data/db/keyfile': Operation not permitted
