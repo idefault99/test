@@ -1,12 +1,219 @@
-members: [{ _id: 0, host: 'mongodb-headless.{{ .Release.Namespace }}.svc.cluster.local:27017' }]
+{{- if eq .Values.enableService.mongodb true }}
+---
+# ── ConfigMap: credentials + init script ────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.labels.mongodb }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
+data:
+  MONGO_INITDB_ROOT_USERNAME: {{ .Values.mongodb.user | quote }}
+  MONGO_INITDB_ROOT_PASSWORD: {{ .Values.mongodb.password | quote }}
+  MONGO_INITDB_DATABASE: {{ .Values.mongodb.initDatabase | default "admin" | quote }}
+  # Скрипт выполняется через /docker-entrypoint-initdb.d/ — только при первом старте
+  # (когда /data/db пустой). docker-entrypoint.sh сам создаёт root-пользователя
+  # ДО запуска скриптов из этой директории.
+  init-rs.sh: |
+    #!/bin/bash
+    set -e
+    echo "Initiating replica set rs0..."
+    mongosh --quiet \
+      -u "$MONGO_INITDB_ROOT_USERNAME" \
+      -p "$MONGO_INITDB_ROOT_PASSWORD" \
+      --authenticationDatabase admin \
+      --eval "
+        try {
+          rs.status();
+          print('Replica set already initiated.');
+        } catch(e) {
+          rs.initiate({
+            _id: 'rs0',
+            members: [{
+              _id: 0,
+              host: '{{ .Values.labels.mongodb }}-headless.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.ports.internal.mongodb }}'
+            }]
+          });
+          print('Replica set initiated successfully.');
+        }
+      "
 
-mongodb://user:pass@mongodb-service.{{ mongo-namespace }}.svc.cluster.local:27017/db?authSource=admin&replicaSet=rs0&directConnection=true
+---
+# ── StatefulSet ──────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.labels.mongodb }}-deployment
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
+spec:
+  serviceName: {{ .Values.labels.mongodb }}-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.labels.mongodb }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.labels.mongodb }}
+    spec:
+      {{- if .Values.securityContext.mongodb.enable }}
+      securityContext:
+        runAsUser: {{ .Values.securityContext.mongodb.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.mongodb.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.mongodb.fsGroup }}
+      {{- end }}
+      containers:
+        - name: {{ .Values.labels.mongodb }}
+          image: {{ .Values.images.mongo }}
+          imagePullPolicy: {{ .Values.mongodb.imagePullPolicy | default "IfNotPresent" | quote }}
+          # docker-entrypoint.sh создаёт root-юзера из env-переменных,
+          # затем выполняет скрипты из /docker-entrypoint-initdb.d/
+          # args передаются в mongod через docker-entrypoint.sh
+          args:
+            - "--replSet=rs0"
+            - "--bind_ip_all"
+          ports:
+            - containerPort: {{ .Values.ports.internal.mongodb }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Values.labels.mongodb }}-config
+          resources:
+            limits:
+              cpu: {{ (((((.Values.configPods).mongodb).resources).limits).cpu) | default "2000m" }}
+              memory: {{ (((((.Values.configPods).mongodb).resources).limits).memory) | default "500Mi" }}
+            requests:
+              cpu: {{ (((((.Values.configPods).mongodb).resources).requests).cpu) | default "100m" }}
+              memory: {{ (((((.Values.configPods).mongodb).resources).requests).memory) | default "300Mi" }}
+          livenessProbe:
+            exec:
+              command:
+                - mongosh
+                - "--quiet"
+                - "--eval"
+                - "db.adminCommand('ping').ok"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  status=$(mongosh --quiet --eval "try { rs.status().ok } catch(e) { 0 }")
+                  [ "$status" = "1" ] && exit 0 || exit 1
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: initscripts
+              mountPath: /docker-entrypoint-initdb.d/
+      volumes:
+        - name: initscripts
+          configMap:
+            name: {{ .Values.labels.mongodb }}-config
+            # Монтируем только init-rs.sh, не весь ConfigMap
+            items:
+              - key: init-rs.sh
+                path: init-rs.sh
+            defaultMode: 0755
+      {{- if .Values.bindNode }}
+      nodeSelector:
+        kubernetes.io/hostname: {{ .Values.bindNode }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: {{ .Values.labels.mongodb }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: {{ .Values.mongodb.persistence.storageClass | default "nfs-csi" | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.persistence.size | default "5Gi" | quote }}
 
+---
+# ── Headless Service (для StatefulSet + RS discovery) ────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.labels.mongodb }}-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
+spec:
+  clusterIP: None
+  selector:
+    app: {{ .Values.labels.mongodb }}
+  ports:
+    - name: mongo
+      port: {{ .Values.ports.internal.mongodb }}
+      targetPort: {{ .Values.ports.internal.mongodb }}
 
-kubectl exec -it <app-pod> -n <app-namespace> -- python3 -c "
-import pymongo, os
-uri = os.environ.get('MONGO_URI', 'mongodb://user:pass@mongodb-service.mongo-ns.svc.cluster.local:27017/db?authSource=admin&replicaSet=rs0&directConnection=true')
-client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5000)
-print(client.admin.command('ping'))
-print('RS state:', client.admin.command('replSetGetStatus')['myState'])
-"
+---
+# ── ClusterIP / NodePort Service (для подключения приложений) ────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.labels.mongodb }}-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
+spec:
+  {{- if .Values.ports.external.mongodb }}
+  type: NodePort
+  {{- else }}
+  type: ClusterIP
+  {{- end }}
+  selector:
+    app: {{ .Values.labels.mongodb }}
+  ports:
+    - name: mongo
+      port: {{ .Values.ports.internal.mongodb }}
+      targetPort: {{ .Values.ports.internal.mongodb }}
+      {{- if .Values.ports.external.mongodb }}
+      nodePort: {{ .Values.ports.external.mongodb }}
+      {{- end }}
+
+{{- if eq .Values.NFS.service.mongodb false }}
+---
+# ── PersistentVolume (только при hostPath, без NFS) ──────────────────────────
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.labels.mongodb }}-{{ .Release.Namespace }}-pv-volume
+  labels:
+    app: {{ .Values.labels.mongodb }}
+spec:
+  storageClassName: ""
+  capacity:
+    storage: {{ .Values.mongodb.persistence.size | default "5Gi" | quote }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "{{ .Values.storageLocalPath }}/{{ .Release.Namespace }}/{{ .Values.labels.mongodb }}"
+    type: DirectoryOrCreate
+  {{- if .Values.bindNode }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - {{ .Values.bindNode }}
+  {{- end }}
+{{- end }}
+
+{{- end }}{{/* enableService.mongodb */}}
