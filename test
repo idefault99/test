@@ -1,33 +1,198 @@
-# В namespace: infra
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongodb-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
+data:
+  init.sh: |
+    #!/bin/bash
+    set -e
+    mongod --replSet rs0 --bind_ip_all "$@" &
+    MONGOD_PID=$!
+    echo "Waiting for MongoDB to start..."
+    until mongosh --quiet --eval "db.adminCommand('ping').ok" 2>/dev/null | grep -q 1; do
+      sleep 2
+    done
+    echo "Checking replica set status..."
+    mongosh --quiet --eval "
+      try {
+        rs.status();
+        print('Replica set already initiated.');
+      } catch(e) {
+        print('Initiating replica set...');
+        rs.initiate({
+          _id: 'rs0',
+          members: [{ _id: 0, host: 'mongodb-headless:27017' }]
+        });
+        print('Replica set initiated.');
+      }
+    "
+    wait $MONGOD_PID
+---
+{{ if eq .Values.enableService.mongodb true }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.labels.mongodb }}-deployment
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
+spec:
+  serviceName: mongodb-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.labels.mongodb }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.labels.mongodb }}
+    spec:
+      containers:
+        - name: {{ .Values.labels.mongodb }}
+          image: {{ .Values.images.mongo }}
+          imagePullPolicy: {{ .Values.mongodb.imagePullPolicy | default "IfNotPresent" | quote }}
+          command:
+            - /bin/bash
+            - -c
+            - /scripts/init.sh
+          args:
+            - --replSet=rs0
+            - --bind_ip_all
+          ports:
+            - containerPort: {{ .Values.ports.internal.mongodb }}
+          envFrom:
+            - configMapRef:
+                name: mongodb-config
+          resources:
+            limits:
+              cpu: {{ (((((.Values.configPods).mongodb).resources).limits).cpu) | default "2000m" }}
+              memory: {{ (((((.Values.configPods).mongodb).resources).limits).memory) | default "500Mi" }}
+            requests:
+              cpu: {{ (((((.Values.configPods).mongodb).resources).requests).cpu) | default "100m" }}
+              memory: {{ (((((.Values.configPods).mongodb).resources).requests).memory) | default "300Mi" }}
+          livenessProbe:
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - "db.adminCommand('ping').ok"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  status=$(mongosh --quiet --eval "try { rs.status().ok } catch { 0 }")
+                  if [ "$status" = "1" ]; then exit 0; else exit 1; fi
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: mongodb-config
+            defaultMode: 0755
+      {{- if .Values.bindNode }}
+      nodeSelector:
+        kubernetes.io/hostname: {{ .Values.bindNode }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: {{ .Values.labels.mongodb }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: {{ .Values.mongodb.persistence.storageClass | default "" | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.persistence.size | default "5Gi" | quote }}
+{{ end }}
+---
+{{ if eq .Values.enableService.mongodb true }}
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: app-proxy
-  namespace: infra
+  name: mongodb-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
 spec:
-  type: ExternalName
-  externalName: app-service.app-namespace.svc.cluster.local
+  clusterIP: None
+  selector:
+    app: {{ .Values.labels.mongodb }}
   ports:
-    - port: 80
-      targetPort: 8080  # порт сервиса в app-namespace
-
-
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+    - name: mongo
+      port: {{ .Values.ports.internal.mongodb }}
+      targetPort: {{ .Values.ports.internal.mongodb }}
+---
+apiVersion: v1
+kind: Service
 metadata:
-  name: infra-ingress
-  namespace: infra
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /app/$2
+  name: {{ .Values.labels.mongodb }}-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.labels.mongodb }}
 spec:
-  rules:
-    - host: your-host.example.com
-      http:
-        paths:
-          - path: /api/v1/app(/|$)(.*)
-            pathType: Prefix
-            backend:
-              service:
-                name: app-proxy
-                port:
-                  number: 80
+  {{- if .Values.ports.external.mongodb }}
+  type: NodePort
+  {{- else }}
+  type: ClusterIP
+  {{- end }}
+  selector:
+    app: {{ .Values.labels.mongodb }}
+  ports:
+    - name: mongo
+      port: {{ .Values.ports.internal.mongodb }}
+      targetPort: {{ .Values.ports.internal.mongodb }}
+      {{- if .Values.ports.external.mongodb }}
+      nodePort: {{ .Values.ports.external.mongodb }}
+      {{- end }}
+{{ end }}
+---
+{{ if eq .Values.enableService.mongodb true }}
+{{ if eq .Values.NFS.service.mongodb false }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.labels.mongodb }}-{{ .Release.Namespace }}-pv-volume
+  labels:
+    app: {{ .Values.labels.mongodb }}
+spec:
+  storageClassName: ""
+  capacity:
+    storage: {{ .Values.mongodb.persistence.size | default "5Gi" | quote }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "{{ .Values.storageLocalPath }}/{{ .Release.Namespace }}/{{ .Values.labels.mongodb }}"
+    type: DirectoryOrCreate
+{{ if .Values.bindNode }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - {{ .Values.bindNode }}
+{{ end }}
+{{ end }}
+{{ end }}
