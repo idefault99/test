@@ -1,3 +1,12 @@
 members: [{ _id: 0, host: 'mongodb-headless.{{ .Release.Namespace }}.svc.cluster.local:27017' }]
 
 mongodb://user:pass@mongodb-service.{{ mongo-namespace }}.svc.cluster.local:27017/db?authSource=admin&replicaSet=rs0&directConnection=true
+
+
+kubectl exec -it <app-pod> -n <app-namespace> -- python3 -c "
+import pymongo, os
+uri = os.environ.get('MONGO_URI', 'mongodb://user:pass@mongodb-service.mongo-ns.svc.cluster.local:27017/db?authSource=admin&replicaSet=rs0&directConnection=true')
+client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5000)
+print(client.admin.command('ping'))
+print('RS state:', client.admin.command('replSetGetStatus')['myState'])
+"
