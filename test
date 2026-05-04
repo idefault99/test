@@ -1,3 +1,277 @@
+# Vault + ESO + Helm: полный гайд
+
+## Обзор архитектуры
+
+```
+VM Ubuntu
+└── Vault 1.19.3 (Raft, TLS, домен vault.internal)
+
+MicroK8s
+├── namespace: external-secrets   ← ESO оператор + SA
+├── namespace: stand-test         ← SecretStore + ExternalSecrets (infra-сервисы)
+├── namespace: stand-test-appone  ← SecretStore + ExternalSecrets (app-сервисы)
+└── namespace: stand-test-apptwo  ← SecretStore + ExternalSecrets (app-сервисы)
+
+Vault paths:
+stands/stand-test/infra/minio
+stands/stand-test/infra/kafka
+stands/stand-test/infra/postgres
+stands/stand-test/appone/backend
+stands/stand-test/appone/worker
+stands/stand-test/apptwo/backend
+```
+
+-----
+
+## Шаг 1 — Vault на Ubuntu VM
+
+### 1.1 Подготовка
+
+Укажи свои значения в начале скрипта `install-vault.sh`:
+
+```bash
+VAULT_DOMAIN="vault.internal"    # ← домен который прописан в DNS
+VAULT_DATA_DIR="/opt/vault/data"
+VAULT_TLS_DIR="/opt/vault/tls"
+```
+
+### 1.2 Запуск
+
+```bash
+# Скопируй install-vault.sh на VM
+scp install-vault.sh user@vault-vm:~/
+ssh user@vault-vm
+
+# Запусти от root
+sudo bash install-vault.sh
+```
+
+Скрипт сделает:
+
+- Установит Vault 1.19.3 через apt (HashiCorp repo, правильный GPG)
+- Создаст пользователя vault, директории
+- Сгенерирует self-signed CA + cert с SAN для домена
+- Запишет конфиг с Raft storage и TLS
+- Запустит через systemd (unit из пакета)
+- Инициализирует и распечатает Vault
+- Сохранит init-данные в `/root/vault-init.json`
+
+После выполнения скрипт напечатает:
+
+```
+VAULT_ADDR, VAULT_TOKEN, путь к ca.crt
+```
+
+-----
+
+## Шаг 2 — Настройка Vault (политики, KV, Kubernetes Auth)
+
+### 2.1 Подготовь данные кластера MicroK8s
+
+Выполни **на ноде MicroK8s**:
+
+```bash
+# API server URL
+microk8s kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}'
+
+# CA cert кластера
+microk8s kubectl get cm kube-root-ca.crt -n kube-system -o jsonpath='{.data.ca\.crt}' > k8s-ca.crt
+```
+
+### 2.2 Запуск
+
+```bash
+# На Vault VM, от root
+export VAULT_ADDR="https://vault.internal:8200"
+export VAULT_CACERT="/opt/vault/tls/ca.crt"
+export VAULT_TOKEN="<root_token из /root/vault-init.json>"
+
+# Скопируй k8s-ca.crt на VM
+scp user@k8s-node:~/k8s-ca.crt /root/k8s-ca.crt
+
+bash setup-vault.sh
+```
+
+Скрипт сделает:
+
+- Включит KV v2 на пути `stands/`
+- Создаст placeholder-секреты для каждого сервиса
+- Создаст политики (каждый namespace читает только свой путь)
+- Настроит Kubernetes auth
+- Создаст роли для каждого namespace
+
+### 2.3 Заполни реальные секреты
+
+После выполнения скрипта замени placeholder-значения:
+
+```bash
+export VAULT_ADDR="https://vault.internal:8200"
+export VAULT_CACERT="/opt/vault/tls/ca.crt"
+export VAULT_TOKEN="<root_token>"
+
+# Пример для minio
+vault kv put stands/stand-test/infra/minio \
+  access-key="minioadmin" \
+  secret-key="supersecret" \
+  endpoint="http://minio.stand-test.svc.cluster.local:9000"
+
+# Пример для postgres
+vault kv put stands/stand-test/infra/postgres \
+  host="postgres.stand-test.svc.cluster.local" \
+  port="5432" \
+  username="app" \
+  password="supersecret" \
+  database="appdb"
+```
+
+-----
+
+## Шаг 3 — ESO в MicroK8s
+
+### 3.1 Скопируй CA cert с Vault VM
+
+```bash
+# На своей машине / ноде MicroK8s
+scp user@vault-vm:/opt/vault/tls/ca.crt ./vault-ca.crt
+```
+
+### 3.2 Запуск
+
+```bash
+bash install-eso.sh https://vault.internal:8200 ./vault-ca.crt
+```
+
+Скрипт сделает:
+
+- Создаст namespace `external-secrets`
+- Установит ESO через Helm
+- Создаст ServiceAccount `external-secrets` в ns `external-secrets`
+- Создаст long-lived SA token (Secret типа service-account-token)
+- Прокинет Vault CA cert как ConfigMap в ns `external-secrets`
+
+-----
+
+## Шаг 4 — Helm chart
+
+### 4.1 Структура
+
+```
+charts/stand-secrets/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+    ├── vault-ca-configmap.yaml
+    ├── secret-store.yaml
+    └── external-secret.yaml
+```
+
+### 4.2 Что поправить в values.yaml
+
+|Параметр               |Что изменить                          |
+|-----------------------|--------------------------------------|
+|`vault.address`        |домен/IP твоей Vault VM               |
+|`stand.name`           |имя стенда (`stand-test`)             |
+|`stand.infra.services` |список инфра-сервисов и ключи из Vault|
+|`stand.apps[].suffix`  |суффиксы app namespace-ов             |
+|`stand.apps[].services`|сервисы в каждом app namespace        |
+
+### 4.3 Деплой
+
+```bash
+# Скопируй CA cert
+scp user@vault-vm:/opt/vault/tls/ca.crt ./vault-ca.crt
+
+# Деплой
+helm upgrade --install stand-secrets ./charts/stand-secrets \
+  --namespace stand-test \
+  --values charts/stand-secrets/values.yaml \
+  --set-file vault.caCert=./vault-ca.crt
+
+# Проверка
+microk8s kubectl get secretstore -A
+microk8s kubectl get externalsecret -A
+microk8s kubectl get secret -n stand-test
+microk8s kubectl get secret -n stand-test-appone
+```
+
+### 4.4 Как использовать Secret в Deployment
+
+```yaml
+# Пример монтирования в Deployment
+envFrom:
+  - secretRef:
+      name: minio-vault-secret   # имя из values.yaml → secretName
+```
+
+-----
+
+## Шаг 5 — Как добавить новый стенд
+
+```bash
+# 1. Добавить секреты в Vault (на VM)
+vault kv put stands/stand-prod/infra/minio access-key="..." secret-key="..."
+
+# 2. Добавить политики и роли (setup-vault.sh можно перезапустить
+#    добавив стенд в массив STANDS внутри скрипта)
+
+# 3. В values.yaml добавить новый стенд или сделать отдельный values-stand-prod.yaml
+
+# 4. Деплой нового стенда
+helm upgrade --install stand-prod-secrets ./charts/stand-secrets \
+  --namespace stand-prod \
+  --values values-stand-prod.yaml \
+  --set-file vault.caCert=./vault-ca.crt
+```
+
+-----
+
+## Troubleshooting
+
+```bash
+# Статус ESO
+microk8s kubectl get pods -n external-secrets
+microk8s kubectl logs -n external-secrets -l app.kubernetes.io/name=external-secrets
+
+# Статус SecretStore
+microk8s kubectl describe secretstore vault-backend -n stand-test
+
+# Статус ExternalSecret
+microk8s kubectl describe externalsecret minio-vault-secret -n stand-test
+
+# Проверить что секрет создался
+microk8s kubectl get secret minio-vault-secret -n stand-test -o jsonpath='{.data}' | jq 'to_entries[] | {(.key): (.value | @base64d)}'
+
+# Проверить доступ из Vault напрямую
+export VAULT_ADDR="https://vault.internal:8200"
+export VAULT_CACERT="/opt/vault/tls/ca.crt"
+vault kv get stands/stand-test/infra/minio
+
+# Проверить политику
+vault policy read stand-test-infra
+
+# Проверить роль kubernetes auth
+vault read auth/kubernetes/role/stand-test-infra
+```
+
+-----
+
+## Unseal после перезагрузки VM
+
+Vault не распечатывается автоматически. После перезагрузки VM:
+
+```bash
+export VAULT_ADDR="https://vault.internal:8200"
+export VAULT_CACERT="/opt/vault/tls/ca.crt"
+
+# Нужно 3 ключа из /root/vault-init.json
+vault operator unseal <key1>
+vault operator unseal <key2>
+vault operator unseal <key3>
+
+vault status
+```
+
+------------------------------------------------------------------------------
 #!/bin/bash
 # install-vault.sh — Установка HashiCorp Vault на Ubuntu
 set -euo pipefail
