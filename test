@@ -1,16 +1,2 @@
-# 1. Роль в Vault существует?
-export VAULT_ADDR="https://vault.test.ru"
-export VAULT_CACERT="/opt/vault/tls/ca.crt"
-export VAULT_TOKEN="<root_token>"
-
-vault read auth/kubernetes/role/dev-devops
-
-# 2. Kubernetes auth настроен правильно?
-vault read auth/kubernetes/config
-
-# 3. SA токен существует в кластере?
-microk8s kubectl get secret external-secrets-token -n external-secrets -o yaml | grep -A3 "token:"
-
-# 4. Детальные логи ESO
-microk8s kubectl logs -n external-secrets \
-  -l app.kubernetes.io/name=external-secrets --tail=50 | grep -i "vault\|error\|auth"
+sudo -E vault read auth/kubernetes/role/dev-devops
+Error reading auth/kubernetes/role/dev-devops: Get "https://vault.test.ru/v1/auth/kubernetes/role/dev-devops": tls: failed to verify certificate: x509: certificate signed by unknown authority
