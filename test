@@ -1,7 +1,5 @@
-# На ноде K8s
-openssl s_client -connect vault.test.ru:443 2>/dev/null \
-  | openssl x509 -noout -text | grep -A2 "Subject Alternative Name"
-
----
+X509v3 Subject Alternative Name:
+                DNS:*.test.ru, DNS:test.ru
 microk8s kubectl get clustersecretstore vault-cluster-store-dev-devops \
   -o jsonpath='{.spec.provider.vault.server}'
+https://vault.test.ru
