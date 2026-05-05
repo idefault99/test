@@ -1,1 +1,78 @@
-Error: rendered manifests contain a resource that already exists. Unable to continue with install: ClusterSecretStore "vault-cluster-store-dev-devops" in namespace "" exists and cannot be imported into the current release: invalid ownership metadata; label validation error: missing key "app.kubernetes.io/managed-by": must be set to "Helm"; annotation validation error: missing key "meta.helm.sh/release-name": must be set to "vault-secrets"; annotation validation error: missing key "meta.helm.sh/release-namespace": must be set to "dev-devops"
+Name:         vault-cluster-store-dev-devops
+Namespace:
+Labels:       app.kubernetes.io/managed-by=Helm
+              app.kubernetes.io/version=1.0.0
+Annotations:  meta.helm.sh/release-name: vault-secrets
+              meta.helm.sh/release-namespace: dev-devops
+API Version:  external-secrets.io/v1beta1
+Kind:         ClusterSecretStore
+Metadata:
+  Creation Timestamp:  2026-05-05T11:37:01Z
+  Generation:          1
+  Resource Version:    44752042
+  UID:                 5cbd6a31-5aa5-4791-9860-1b388fe86206
+Spec:
+  Provider:
+    Vault:
+      Auth:
+        Kubernetes:
+          Mount Path:  kubernetes
+          Role:        dev-devops
+          Service Account Ref:
+            Name:       external-secrets
+            Namespace:  external-secrets
+      Ca Provider:
+        Key:        ca.crt
+        Name:       vault-ca
+        Namespace:  external-secrets
+        Type:       ConfigMap
+      Path:         stands
+      Server:       https://vault.test.ru
+      Version:      v2
+Status:
+  Conditions:
+    Last Transition Time:  2026-05-05T11:37:01Z
+    Message:               unable to create client
+    Reason:                InvalidProviderConfig
+    Status:                False
+    Type:                  Ready
+Events:                    <none>
+---
+Name:         test-app-vault-secret
+Namespace:    dev-devops-test-app
+Labels:       app.kubernetes.io/managed-by=Helm
+              app.kubernetes.io/version=1.0.0
+              vault-section=test-app
+              vault-service=test-app
+Annotations:  meta.helm.sh/release-name: vault-secrets
+              meta.helm.sh/release-namespace: dev-devops
+API Version:  external-secrets.io/v1beta1
+Kind:         ExternalSecret
+Metadata:
+  Creation Timestamp:  2026-05-05T11:37:01Z
+  Generation:          1
+  Resource Version:    44752053
+  UID:                 d6da98b8-fbc9-4cbb-8b1b-8c0fc7010705
+Spec:
+  Data From:
+    Extract:
+      Conversion Strategy:  Default
+      Decoding Strategy:    None
+      Key:                  dev-devops/test-app/test-app
+      Metadata Policy:      None
+  Refresh Interval:         5m
+  Secret Store Ref:
+    Kind:  ClusterSecretStore
+    Name:  vault-cluster-store-dev-devops
+  Target:
+    Creation Policy:  Owner
+    Deletion Policy:  Retain
+    Name:             test-app-vault-secret
+Status:
+  Conditions:
+    Last Transition Time:  2026-05-05T11:37:01Z
+    Message:               could not get secret data from provider
+    Reason:                SecretSyncedError
+    Status:                False
+    Type:                  Ready
+Events:                    <none>
