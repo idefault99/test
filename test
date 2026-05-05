@@ -1,2 +1,18 @@
-sudo -E vault read auth/kubernetes/role/dev-devops
-Error reading auth/kubernetes/role/dev-devops: Get "https://vault.test.ru/v1/auth/kubernetes/role/dev-devops": tls: failed to verify certificate: x509: certificate signed by unknown authority
+Key                                         Value
+---                                         -----
+alias_name_source                           serviceaccount_uid
+bound_service_account_names                 [external-secrets]
+bound_service_account_namespace_selector    n/a
+bound_service_account_namespaces            [external-secrets]
+max_ttl                                     24h
+policies                                    [dev-devops]
+token_bound_cidrs                           []
+token_explicit_max_ttl                      0s
+token_max_ttl                               24h
+token_no_default_policy                     false
+token_num_uses                              0
+token_period                                0s
+token_policies                              [dev-devops]
+token_ttl                                   1h
+token_type                                  default
+ttl                                         1h
