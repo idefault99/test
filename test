@@ -1,4 +1,38 @@
-{"level":"error","ts":1777982752.188166,"logger":"controllers.ExternalSecret","msg":"could not get secret data from provider","ExternalSecret":{"name":"s3minio-vault-secret","namespace":"dev-devops"},"error":"the desired SecretStore vault-cluster-store-dev-devops is not ready","stacktrace":"github.com/external-secrets/external-secrets/pkg/controllers/externalsecret.(*Reconciler).markAsFailed\n\t/home/runner/work/external-secrets/external-secrets/pkg/controllers/externalsecret/externalsecret_controller.go:360\ngithub.com/external-secrets/external-secrets/pkg/controllers/externalsecret.(*Reconciler).Reconcile\n\t/home/runner/work/external-secrets/external-secrets/pkg/controllers/externalsecret/externalsecret_controller.go:229\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).Reconcile\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:116\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).reconcileHandler\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:303\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).processNextWorkItem\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:263\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).Start.func2.2\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:224"}
-E0505 12:05:52.190789       1 event.go:359] "Server rejected event (will not retry!)" err="events \"s3minio-vault-secret.18aca9d0ad791fbe\" is forbidden: User \"system:serviceaccount:external-secrets:external-secrets\" cannot patch resource \"events\" in API group \"\" in the namespace \"dev-devops\"" event="&Event{ObjectMeta:{s3minio-vault-secret.18aca9d0ad791fbe  dev-devops    0 0001-01-01 00:00:00 +0000 UTC <nil> <nil> map[] map[] [] [] []},InvolvedObject:ObjectReference{Kind:ExternalSecret,Namespace:dev-devops,Name:s3minio-vault-secret,UID:806e6883-6dee-4d3d-b17f-e43fecc5eeb5,APIVersion:external-secrets.io/v1beta1,ResourceVersion:44752052,FieldPath:,},Reason:UpdateFailed,Message:the desired SecretStore vault-cluster-store-dev-devops is not ready,Source:EventSource{Component:external-secrets,Host:,},FirstTimestamp:2026-05-05 12:04:26.633191358 +0000 UTC m=+0.297562828,LastTimestamp:2026-05-05 12:05:52.188317155 +0000 UTC m=+85.852688635,Count:15,Type:Warning,EventTime:0001-01-01 00:00:00 +0000 UTC,Series:nil,Action:,Related:nil,ReportingController:external-secrets,ReportingInstance:,}"
-{"level":"error","ts":1777982752.1948445,"msg":"Reconciler error","controller":"externalsecret","controllerGroup":"external-secrets.io","controllerKind":"ExternalSecret","ExternalSecret":{"name":"s3minio-vault-secret","namespace":"dev-devops"},"namespace":"dev-devops","name":"s3minio-vault-secret","reconcileID":"6b4d87b1-a251-485b-b0c6-1e2d74aabee0","error":"the desired SecretStore vault-cluster-store-dev-devops is not ready","stacktrace":"sigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).reconcileHandler\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:316\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).processNextWorkItem\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:263\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).Start.func2.2\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:224"}
-{"level":"error","ts":1777982752.577828,"logger":"controllers.ExternalSecret","msg":"could not get secret data from provider","ExternalSecret":{"name":"approvals-vault-secret","namespace":"dev-devops-approvals"},"error":"the desired SecretStore vault-cluster-store-dev-devops is not ready","stacktrace":"github.com/external-secrets/external-secrets/pkg/controllers/externalsecret.(*Reconciler).markAsFailed\n\t/home/runner/work/external-secrets/external-secrets/pkg/controllers/externalsecret/externalsecret_controller.go:360\ngithub.com/external-secrets/external-secrets/pkg/controllers/externalsecret.(*Reconciler).Reconcile\n\t/home/runner/work/external-secrets/external-secrets/pkg/controllers/externalsecret/externalsecret_controller.go:229\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).Reconcile\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:116\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).reconcileHandler\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:303\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).processNextWorkItem\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:263\nsigs.k8s.io/controller-runtime/pkg/internal/controller.(*Controller[...]).Start.func2.2\n\t/home/runner/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.19.0/pkg/internal/controller/controller.go:224"}
+microk8s kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-secrets-controller
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["external-secrets.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: external-secrets-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: external-secrets-controller
+subjects:
+  - kind: ServiceAccount
+    name: external-secrets
+    namespace: external-secrets
+EOF
