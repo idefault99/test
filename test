@@ -1,1 +1,17 @@
-Warning  InvalidProviderConfig  9s (x13 over 30s)  cluster-secret-store  unable to log in to auth method: unable to log in with Kubernetes auth: Put "https://vault.test.ru/v1/auth/kubernetes/login": tls: failed to verify certificate: x509: certificate signed by unknown authority
+microk8s kubectl get configmap vault-ca -n external-secrets \
+  -o jsonpath='{.data.ca\.crt}'
+
+---
+cat /opt/vault/tls/ca.crt
+---
+# На ноде K8s
+scp root@vault-vm:/opt/vault/tls/ca.crt ./vault-ca.crt
+
+microk8s kubectl delete configmap vault-ca -n external-secrets
+
+microk8s kubectl create configmap vault-ca \
+  --from-file=ca.crt=./vault-ca.crt \
+  -n external-secrets
+
+# Рестарт ESO
+microk8s kubectl rollout restart deployment external-secrets -n external-secrets
