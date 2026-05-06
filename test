@@ -1,20 +1,13 @@
-# Проверить текущий UID SA
-microk8s kubectl get sa external-secrets -n external-secrets \
-  -o jsonpath='{.metadata.uid}'
+# На Vault VM — проверить доступность K8s API
+curl -sk https://192.168.0.132:16443/healthz
+
+# Проверить что SA токен валиден
+SA_TOKEN=$(ssh user@k8s-node "microk8s kubectl get secret external-secrets-token \
+  -n external-secrets -o jsonpath='{.data.token}' | base64 -d")
+
+curl -sk https://192.168.0.132:16443/api/v1/namespaces/external-secrets/serviceaccounts/external-secrets \
+  -H "Authorization: Bearer ${SA_TOKEN}"
 
 
-export VAULT_ADDR="https://127.0.0.1:8200"
-export VAULT_CACERT="/opt/vault/tls/ca.crt"
-export VAULT_TOKEN="$(jq -r .root_token /root/vault-init.json)"
-
-vault write auth/kubernetes/role/dev-devops \
-  bound_service_account_names="external-secrets" \
-  bound_service_account_namespaces="external-secrets" \
-  alias_name_source="serviceaccount_name" \
-  policies="dev-devops" \
-  ttl=1h \
-  max_ttl=24h
-
-
-microk8s kubectl rollout restart deployment external-secrets -n external-secrets
-microk8s kubectl get clustersecretstore vault-cluster-store-dev-devops
+microk8s kubectl auth can-i create tokenreviews \
+  --as=system:serviceaccount:external-secrets:external-secrets
