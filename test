@@ -1,42 +1,17 @@
-Name:         vault-cluster-store-dev-devops
-Namespace:
-Labels:       app.kubernetes.io/managed-by=Helm
-              app.kubernetes.io/version=1.0.0
-Annotations:  meta.helm.sh/release-name: vault-secrets
-              meta.helm.sh/release-namespace: dev-devops
-API Version:  external-secrets.io/v1beta1
-Kind:         ClusterSecretStore
-Metadata:
-  Creation Timestamp:  2026-05-05T11:37:01Z
-  Generation:          4
-  Resource Version:    46141090
-  UID:                 5cbd6a31-5aa5-4791-9860-1b388fe86206
-Spec:
-  Provider:
-    Vault:
-      Auth:
-        Kubernetes:
-          Mount Path:  kubernetes
-          Role:        dev-devops
-          Service Account Ref:
-            Name:       external-secrets
-            Namespace:  external-secrets
-      Ca Provider:
-        Key:        ca.crt
-        Name:       vault-ca-secret
-        Namespace:  external-secrets
-        Type:       Secret
-      Path:         stands
-      Server:       https://vault.test.ru:443
-      Version:      v2
-Status:
-  Conditions:
-    Last Transition Time:  2026-05-05T11:37:01Z
-    Message:               unable to create client
-    Reason:                InvalidProviderConfig
-    Status:                False
-    Type:                  Ready
-Events:
-  Type     Reason                 Age                 From                  Message
-  ----     ------                 ----                ----                  -------
-  Warning  InvalidProviderConfig  19s (x13 over 40s)  cluster-secret-store  unable to log in to auth method: unable to log in with Kubernetes auth: Put "https://vault.test.ru:443/v1/auth/kubernetes/login": tls: failed to verify certificate: x509: certificate signed by unknown authority
+# 1. Скопировать полный CA с Vault VM
+scp root@vault-vm:/tmp/vault-ca-full.pem ./vault-ca-full.pem
+
+# 2. Создать Secret (не ConfigMap) с CA cert
+microk8s kubectl delete secret vault-ca-secret -n external-secrets 2>/dev/null || true
+microk8s kubectl create secret generic vault-ca-secret \
+  --from-file=ca.crt=./vault-ca-full.pem \
+  -n external-secrets
+
+# 3. Убедиться что ClusterSecretStore ссылается на правильный ресурс
+microk8s kubectl get clustersecretstore vault-cluster-store-dev-devops \
+  -o jsonpath='{.spec.provider.vault.caProvider}'
+
+microk8s kubectl rollout restart deployment external-secrets -n external-secrets
+
+# Через 15 сек
+microk8s kubectl get clustersecretstore vault-cluster-store-dev-devops
