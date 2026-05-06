@@ -1,43 +1,25 @@
-Name:         vault-cluster-store-dev-devops
-Namespace:
-Labels:       app.kubernetes.io/managed-by=Helm
-              app.kubernetes.io/version=1.0.0
-Annotations:  meta.helm.sh/release-name: vault-secrets
-              meta.helm.sh/release-namespace: dev-devops
-API Version:  external-secrets.io/v1beta1
-Kind:         ClusterSecretStore
-Metadata:
-  Creation Timestamp:  2026-05-05T11:37:01Z
-  Generation:          4
-  Resource Version:    46141090
-  UID:                 5cbd6a31-5aa5-4791-9860-1b388fe86206
-Spec:
-  Provider:
-    Vault:
-      Auth:
-        Kubernetes:
-          Mount Path:  kubernetes
-          Role:        dev-devops
-          Service Account Ref:
-            Name:       external-secrets
-            Namespace:  external-secrets
-      Ca Provider:
-        Key:        ca.crt
-        Name:       vault-ca-secret
-        Namespace:  external-secrets
-        Type:       Secret
-      Path:         stands
-      Server:       https://vault.test.ru:443
-      Version:      v2
-Status:
-  Conditions:
-    Last Transition Time:  2026-05-05T11:37:01Z
-    Message:               unable to create client
-    Reason:                InvalidProviderConfig
-    Status:                False
-    Type:                  Ready
-Events:
-  Type     Reason                 Age                   From                  Message
-  ----     ------                 ----                  ----                  -------
-  Warning  InvalidProviderConfig  86s (x16 over 4m10s)  cluster-secret-store  unable to log in to auth method: unable to log in with Kubernetes auth: Put "https://vault.test.ru:443/v1/auth/kubernetes/login": tls: failed to verify certificate: x509: certificate signed by unknown authority
-  Warning  InvalidProviderConfig  6s (x12 over 17s)     cluster-secret-store  unable to log in to auth method: unable to log in with Kubernetes auth: Put "https://vault.test.ru:443/v1/auth/kubernetes/login": tls: failed to verify certificate: x509: certificate signed by unknown authority
+# Посмотреть кто реально подписал сертификат Vault
+openssl s_client -connect vault.test.ru:443 -showcerts 2>/dev/null | \
+  openssl x509 -noout -issuer -subject
+
+# Посмотреть что внутри vault-ca-full.pem на Vault VM
+ssh root@vault-vm "openssl x509 -noout -issuer -subject -in /tmp/vault-ca-full.pem"
+
+
+
+
+# Вытащить полную цепочку прямо с Vault
+openssl s_client -connect vault.test.ru:443 -showcerts 2>/dev/null | \
+  sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' \
+  > /tmp/vault-chain.pem
+
+# Проверить сколько сертов получили
+grep -c "BEGIN CERTIFICATE" /tmp/vault-chain.pem
+
+# Пересоздать Secret с реальной цепочкой
+microk8s kubectl delete secret vault-ca-secret -n external-secrets
+microk8s kubectl create secret generic vault-ca-secret \
+  --from-file=ca.crt=/tmp/vault-chain.pem \
+  -n external-secrets
+
+microk8s kubectl rollout restart deployment external-secrets -n external-secrets
