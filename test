@@ -1,13 +1,22 @@
-# На Vault VM — проверить доступность K8s API
-curl -sk https://192.168.0.132:16443/healthz
-
-# Проверить что SA токен валиден
-SA_TOKEN=$(ssh user@k8s-node "microk8s kubectl get secret external-secrets-token \
-  -n external-secrets -o jsonpath='{.data.token}' | base64 -d")
-
-curl -sk https://192.168.0.132:16443/api/v1/namespaces/external-secrets/serviceaccounts/external-secrets \
-  -H "Authorization: Bearer ${SA_TOKEN}"
+microk8s kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: external-secrets-tokenreview
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: external-secrets
+    namespace: external-secrets
+EOF
 
 
 microk8s kubectl auth can-i create tokenreviews \
   --as=system:serviceaccount:external-secrets:external-secrets
+# Должно быть: yes
+
+# Через 15 сек
+microk8s kubectl get clustersecretstore vault-cluster-store-dev-devops
