@@ -149,4 +149,3 @@ deploy:
         project_src: "{{ compose_dir }}"
         recreate: always
 ---
-
