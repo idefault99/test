@@ -1,3 +1,2 @@
-tmux set -g set-clipboard on && echo "OK"
-tmux show -g | grep -i clip
-tmux show -g | wc -l
+# Внутри tmux
+printf '\033]52;c;%s\007' "$(echo -n 'тест кириллица' | base64)"
