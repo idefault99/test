@@ -1,1 +1,5 @@
-tmux show-buffer | base64 | tr -d '\n' | xargs -I{} printf '\033]52;c;{}\a'
+# Выйди из tmux
+exit
+
+# В чистом bash:
+printf '\033]52;c;%s\007' "$(echo -n 'тест' | base64)"
