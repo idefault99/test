@@ -1,2 +1,3 @@
 echo $TERM
 tmux show -g | grep set-clipboard
+tmux-256color
