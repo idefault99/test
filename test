@@ -1,3 +1,4 @@
-echo $TERM
-tmux show -g | grep set-clipboard
-tmux-256color
+set -g default-terminal "tmux-256color"
+set -ga terminal-overrides ",*256col*:Tc"
+set -ga terminal-overrides ",xterm*:XT:Ms=\\E]52;c;%p2%s\\7"
+set -g set-clipboard on
