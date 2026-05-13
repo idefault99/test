@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  app:
+    image: registry.gitlab.example.com/group/project:latest   # <-- тег заменяется плейбуком
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# Ansible Inventory
+
+> Inventory передаётся инлайном в команде `ansible-playbook`, файл не нужен.
+> Хост берётся из GitLab переменной `DEPLOY_HOST`.
+
+```ini
+# ansible/inventory.ini — используется только при локальном запуске
+
+[deploy_targets]
+target ansible_host=192.168.1.100
+
+[deploy_targets:vars]
+ansible_connection=ssh
+ansible_user=deploy
+ansible_password=secret
+ansible_become=true
+ansible_become_password=secret
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+```
+
+## Локальный запуск (без GitLab CI)
+
+```bash
+ansible-playbook ansible/deploy.yml \
+  -i ansible/inventory.ini \
+  -e "deploy_image=registry.example.com/group/project" \
+  -e "deploy_tag=abc123.bin" \
+  -e "registry_user=myuser" \
+  -e "registry_password=mypassword" \
+  -e "registry_host=registry.example.com" \
+  -e "compose_dir=/opt/app" \
+  -e "compose_service=app"
+```
+
+## В пайплайне (инлайн, файл не нужен)
+
+```bash
+ansible-playbook ansible/deploy.yml \
+  -i "${DEPLOY_HOST}," \
+  -e "ansible_user=${DEPLOY_USER}" \
+  -e "ansible_password=${DEPLOY_PASSWORD}" \
+  -e "ansible_become_password=${DEPLOY_PASSWORD}" \
+  ...
+```
