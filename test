@@ -1,12 +1,2 @@
-# --------------------------------------------
-# КОПИРОВАНИЕ И ВСТАВКА (WSL-совместимое)
-# --------------------------------------------
-
-setw -g mode-keys vi
-
-bind -T copy-mode-vi v send-keys -X begin-selection
-bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "powershell.exe -command '\$input | Set-Clipboard'"
-bind -T copy-mode-vi Enter send-keys -X copy-pipe-and-cancel "powershell.exe -command '\$input | Set-Clipboard'"
-bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "powershell.exe -command '\$input | Set-Clipboard'"
-
-bind p paste-buffer
+tmux save-buffer - | powershell.exe -command "$input | Set-Clipboard"
+tmux save-buffer - | xxd | head -5
