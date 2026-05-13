@@ -1,2 +1,13 @@
 tmux save-buffer - | powershell.exe -command "$input | Set-Clipboard"
+:1 :2
++  | Set-Clipboard
++  ~
+    .
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : EmptyPipeElement
 tmux save-buffer - | xxd | head -5
+00000000: 2320 2d2d 2d2d 2d2d 2d2d 2d2d 2d2d 2d2d  # --------------
+00000010: 2d2d 2d2d 2d2d 2d2d 2d2d 2d2d 2d2d 2d2d  ----------------
+00000020: 2d2d 2d2d 2d2d 2d2d 2d2d 2d2d 2d2d 0a23  --------------.#
+00000030: 20d0 91d0 abd0 a1d0 a2d0 a0d0 abd0 9520   ..............
+00000040: d09a d09e d09c d090 d09d d094 d0ab 0a23  ...............#
