@@ -1,2 +1,1 @@
-echo $TERM
-printf '\033]52;c;%s\007' "$(echo -n 'тест кириллица' | base64)"
+grep -r tmux ~/.bash_profile ~/.profile ~/.bashrc_local 2>/dev/null
