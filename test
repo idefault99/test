@@ -1,10 +1,4 @@
-echo "тест кириллица" | iconv -f UTF-8 -t UTF-16LE | clip.exe
-
-
-# Копирование при отпускании мыши → clip.exe (через iconv UTF-16LE)
-bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "iconv -f UTF-8 -t UTF-16LE | clip.exe"
-bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "iconv -f UTF-8 -t UTF-16LE | clip.exe"
-bind -T copy-mode-vi Enter send-keys -X copy-pipe-and-cancel "iconv -f UTF-8 -t UTF-16LE | clip.exe"
-
-
-tmux source-file ~/.tmux.conf
+echo "тест кириллица" | powershell.exe -command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \$input | Set-Clipboard"
+cat /proc/version
+# и
+explorer.exe . 2>/dev/null; echo $?
