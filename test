@@ -1,4 +1,2 @@
-wsl --list
-Дистрибутивы подсистемы Windows для Linux:
-Ubuntu-24.04 (по умолчанию)
-docker-desktop
+echo $TERM
+printf '\033]52;c;%s\007' "$(echo -n 'тест кириллица' | base64)"
