@@ -1,13 +1,2 @@
-tmux save-buffer /tmp/tbuf && powershell.exe -command "Get-Content /tmp/tbuf -Encoding UTF8 | Set-Clipboard"
-# --------------------------------------------
-# КОПИРОВАНИЕ И ВСТАВКА (WSL-совместимое)
-# --------------------------------------------
-
-setw -g mode-keys vi
-
-bind -T copy-mode-vi v send-keys -X begin-selection
-bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "cat > /tmp/tbuf && powershell.exe -command \"Get-Content /tmp/tbuf -Encoding UTF8 | Set-Clipboard\""
-bind -T copy-mode-vi Enter send-keys -X copy-pipe-and-cancel "cat > /tmp/tbuf && powershell.exe -command \"Get-Content /tmp/tbuf -Encoding UTF8 | Set-Clipboard\""
-bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "cat > /tmp/tbuf && powershell.exe -command \"Get-Content /tmp/tbuf -Encoding UTF8 | Set-Clipboard\""
-
-bind p paste-buffer
+echo $TERM
+tmux show -g | grep set-clipboard
