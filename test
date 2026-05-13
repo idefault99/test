@@ -1,21 +1,10 @@
-# --------------------------------------------
-# КОПИРОВАНИЕ И ВСТАВКА (WSL-совместимое)
-# --------------------------------------------
+echo "тест кириллица" | iconv -f UTF-8 -t UTF-16LE | clip.exe
 
-setw -g mode-keys vi
 
-# Копирование в режиме vi → clip.exe (Windows clipboard)
-bind -T copy-mode-vi v send-keys -X begin-selection
-bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "clip.exe"
-bind -T copy-mode-vi Enter send-keys -X copy-pipe-and-cancel "clip.exe"
+# Копирование при отпускании мыши → clip.exe (через iconv UTF-16LE)
+bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "iconv -f UTF-8 -t UTF-16LE | clip.exe"
+bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "iconv -f UTF-8 -t UTF-16LE | clip.exe"
+bind -T copy-mode-vi Enter send-keys -X copy-pipe-and-cancel "iconv -f UTF-8 -t UTF-16LE | clip.exe"
 
-# Копирование при отпускании мыши → clip.exe
-bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "clip.exe"
-
-# Убрать лишний bind C-c с iconv (он тут не нужен)
-# bind C-c run "tmux save-buffer - | clip.exe"
-
-# Вставка из Windows clipboard
-bind p run "powershell.exe -command 'Get-Clipboard' | tmux load-buffer - && tmux paste-buffer"
 
 tmux source-file ~/.tmux.conf
