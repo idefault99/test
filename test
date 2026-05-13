@@ -1,138 +1,21 @@
-locale в wsl
-LANG=ru_RU.UTF-8
-LANGUAGE=
-LC_CTYPE="ru_RU.UTF-8"
-LC_NUMERIC="ru_RU.UTF-8"
-LC_TIME="ru_RU.UTF-8"
-LC_COLLATE="ru_RU.UTF-8"
-LC_MONETARY="ru_RU.UTF-8"
-LC_MESSAGES="ru_RU.UTF-8"
-LC_PAPER="ru_RU.UTF-8"
-LC_NAME="ru_RU.UTF-8"
-LC_ADDRESS="ru_RU.UTF-8"
-LC_TELEPHONE="ru_RU.UTF-8"
-LC_MEASUREMENT="ru_RU.UTF-8"
-LC_IDENTIFICATION="ru_RU.UTF-8"
-LC_ALL=ru_RU.UTF-8
-tmux.conf
-# Мышь (скролл, клик по панелям)
-set -g mouse on
-
-# Нумерация окон с 1
-set -g base-index 1
-
-# Историю скролла увеличить
-set -g history-limit 10000
-
-# Нумерация окон и панелей с 1 (а не с 0)
-set -g base-index 1
-set -w -g pane-base-index 1
-
 # --------------------------------------------
-# ВИЗУАЛЬНЫЕ НАСТРОЙКИ
+# КОПИРОВАНИЕ И ВСТАВКА (WSL-совместимое)
 # --------------------------------------------
 
-# Цветовая схема (темная)
-set -g default-terminal "tmux-256color"
-set -ga terminal-overrides ",*256col*:Tc"
-
-# Строка статуса
-set -g status-bg black
-set -g status-fg white
-set -g status-left-length 60
-set -g status-right-length 80
-
-# Формат статуса
-set -g status-left "#[fg=cyan] #S #[fg=white]|"
-set -g status-right "#[fg=yellow] %H:%M #[fg=white]| #[fg=green] %d.%m.%Y "
-
-# Подсветка активного окна (исправлено)
-set -wg window-status-current-style "bg=blue,fg=white"
-set -wg window-status-current-format " #I:#W "
-
-# Обычные окна (исправлено)
-set -wg window-status-style "bg=black,fg=white"
-set -wg window-status-format " #I:#W "
-
-# Оповещения в статусе
-set -wg monitor-bell on
-set -g visual-bell on
-
-# --------------------------------------------
-# УПРАВЛЕНИЕ ОКНАМИ
-# --------------------------------------------
-
-# Быстрое переключение между окнами (Alt + номер)
-bind -n M-1 select-window -t 1
-bind -n M-2 select-window -t 2
-bind -n M-3 select-window -t 3
-bind -n M-4 select-window -t 4
-bind -n M-5 select-window -t 5
-bind -n M-6 select-window -t 6
-bind -n M-7 select-window -t 7
-bind -n M-8 select-window -t 8
-bind -n M-9 select-window -t 9
-
-# --------------------------------------------
-# УПРАВЛЕНИЕ ПАНЕЛЯМИ
-# --------------------------------------------
-
-# Разбивка панелей (с префиксом | и -)
-bind | split-window -h
-bind - split-window -v
-
-# Изменение размера панелей (Shift + hjkl)
-bind -r H resize-pane -L 5
-bind -r J resize-pane -D 5
-bind -r K resize-pane -U 5
-bind -r L resize-pane -R 5
-
-
-# --------------------------------------------
-# КОПИРОВАНИЕ И ВСТАВКА
-# --------------------------------------------
-
-# Включение режима копирования как в vim
 setw -g mode-keys vi
 
-# Копирование с сохранением кодировки
+# Копирование в режиме vi → clip.exe (Windows clipboard)
 bind -T copy-mode-vi v send-keys -X begin-selection
-bind -T copy-mode-vi y send-keys -X copy-selection
-bind -T copy-mode-vi Enter send-keys -X copy-selection
+bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "clip.exe"
+bind -T copy-mode-vi Enter send-keys -X copy-pipe-and-cancel "clip.exe"
 
-# Вставка с сохранением кодировки
-bind p paste-buffer
+# Копирование при отпускании мыши → clip.exe
+bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "clip.exe"
 
-# Принудительная UTF-8 для буфера
-bind C-c run "tmux save-buffer - | iconv -f utf-8 -t utf-8 | xclip -selection clipboard"
+# Убрать лишний bind C-c с iconv (он тут не нужен)
+# bind C-c run "tmux save-buffer - | clip.exe"
 
-# # --------------------------------------------
-# # ПЛАГИНЫ (через TPM - Tmux Plugin Manager)
-# # --------------------------------------------
+# Вставка из Windows clipboard
+bind p run "powershell.exe -command 'Get-Clipboard' | tmux load-buffer - && tmux paste-buffer"
 
-# # Установка TPM:
-# # git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
-
-# # Список плагинов:
-set -g @plugin 'tmux-plugins/tpm'
-set -g @plugin 'tmux-plugins/tmux-sensible'
-set -g @plugin 'tmux-plugins/tmux-resurrect'    # Сохранение сессий
-set -g @plugin 'tmux-plugins/tmux-continuum'    # Автосохранение сессий
-#set -g @plugin 'tmux-plugins/tmux-yank'         # Улучшенное копирование
-set -g @plugin 'tmux-plugins/tmux-prefix-highlight'  # Подсветка префикса
-
-# # Настройки resurrect/continuum
-# set -g @resurrect-strategy-nvim 'session'
-set -g @continuum-restore 'on'
-set -g @continuum-save-interval '15'  # Сохранение каждые 15 минут
-
-# # Запуск TPM
-run '~/.tmux/plugins/tpm/tpm'
-
-# --------------------------------------------
-# БЫСТРЫЕ КОМАНДЫ
-# --------------------------------------------
-
-# Перезагрузка конфига
-bind r source-file ~/.tmux.conf \; display "Config reloaded!"
-set-hook -g client-detached 'run-shell ~/.tmux/plugins/tmux-resurrect/scripts/save.sh'
+tmux source-file ~/.tmux.conf
