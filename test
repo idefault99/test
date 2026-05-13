@@ -1,4 +1,14 @@
-set -g default-terminal "tmux-256color"
-set -ga terminal-overrides ",*256col*:Tc"
-set -ga terminal-overrides ",xterm*:XT:Ms=\\E]52;c;%p2%s\\7"
-set -g set-clipboard on
+# --------------------------------------------
+# КОПИРОВАНИЕ И ВСТАВКА
+# --------------------------------------------
+
+setw -g mode-keys vi
+
+bind -T copy-mode-vi v send-keys -X begin-selection
+bind -T copy-mode-vi y send-keys -X copy-selection
+bind -T copy-mode-vi Enter send-keys -X copy-selection
+bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection
+
+bind p paste-buffer
+
+tmux show -g | grep set-clipboard
