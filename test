@@ -1,38 +1,130 @@
-.deploy:
+# ─── ДЕПЛОЙ НА ХОСТ (docker-compose) ────────────────────────────────────────
+# Переменные GitLab CI (Settings → CI/CD → Variables):
+#   DEPLOY_HOST      — IP или hostname целевого сервера
+#   DEPLOY_USER      — SSH-пользователь
+#   DEPLOY_PASSWORD  — SSH-пароль (используется и для sudo)
+
+.deploy_host:
   stage: deploy
   tags:
     - docker
-  image:
-    name: registry.test.model.svo.aero/dpm/iac/infra:helm
-    pull_policy: [always, if-not-present]
-    entrypoint: [""]
+  image: alpine:3.19
   variables:
-    REGISTRY: "${CI_REGISTRY_IMAGE}"
-    IMAGE_POSTFIX: ".bin" # для фронта будем указывать "", для прочего просто менять эту переменную
+    IMAGE_POSTFIX: ".bin"
+    COMPOSE_DIR: "/opt/app"          # путь к docker-compose на хосте
+    COMPOSE_SERVICE: "app"           # имя сервиса в compose-файле
   before_script:
+    - apk add --no-cache ansible sshpass openssh-client py3-pip
+    - pip install --quiet --break-system-packages ansible
+    - ansible-galaxy collection install community.docker --quiet
     - export TAG=$(eval $TAG_SCRIPT)
-    - if [ -z "$VALUES" ]; then echo "Переменная VALUES не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - if [ -z "$NAMESPACE" ]; then echo "Переменная NAMESPACE не задана для ${CI_ENVIRONMENT_NAME}"; exit 1; fi
-    - git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-internal.code-discovery.ru/dpm/iac/dev-infra.git
-    - cp -r ./dev-infra/templates/utils ./Helm/templates
+    - mkdir -p ~/.ssh
+    - echo "StrictHostKeyChecking no" >> ~/.ssh/config
   script:
     - |
-      helm upgrade -i --history-max 2 -n $NAMESPACE ${RELEASE_NAME} ./Helm -f $VALUES \
-      --set "image=${REGISTRY}:${TAG}${IMAGE_POSTFIX}"
+      ansible-playbook ansible/deploy.yml \
+        -i "${DEPLOY_HOST}," \
+        -e "deploy_image=${CI_REGISTRY_IMAGE}" \
+        -e "deploy_tag=${TAG}${IMAGE_POSTFIX}" \
+        -e "registry_user=${CI_REGISTRY_USER}" \
+        -e "registry_password=${CI_REGISTRY_PASSWORD}" \
+        -e "registry_host=${CI_REGISTRY}" \
+        -e "compose_dir=${COMPOSE_DIR}" \
+        -e "compose_service=${COMPOSE_SERVICE}" \
+        -e "ansible_user=${DEPLOY_USER}" \
+        -e "ansible_password=${DEPLOY_PASSWORD}" \
+        -e "ansible_become_password=${DEPLOY_PASSWORD}" \
+        -e "ansible_connection=ssh"
   when: manual
   rules:
     - if: $CI_COMMIT_TAG
       when: manual
     - if: $CI_OPEN_MERGE_REQUESTS
       when: manual
-      # needs: ["linter", "test"]
     - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
       when: manual
     - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
       when: manual
 
-aos_develop:
-  extends: .deploy
-  environment: aos_dev
+# Конкретная джоба — добавляй по аналогии с aos_develop
+deploy_host_develop:
+  extends: .deploy_host
+  environment: host_dev
   variables:
-    NAMESPACE: develop
+    COMPOSE_DIR: "/opt/app"
+    COMPOSE_SERVICE: "app"
+  # DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASSWORD — из GitLab Variables
+  # либо переопределяй здесь через variables: если хостов несколько
+
+---
+
+---
+- name: Deploy docker-compose with new image tag
+  hosts: all
+  become: true
+
+  tasks:
+
+    # ── 1. Логин в GitLab Registry ──────────────────────────────────────────
+    - name: Login to container registry
+      community.docker.docker_login:
+        registry_url: "{{ registry_host }}"
+        username: "{{ registry_user }}"
+        password: "{{ registry_password }}"
+      no_log: true
+
+    # ── 2. Pull нового образа ───────────────────────────────────────────────
+    - name: Pull new image
+      community.docker.docker_image:
+        name: "{{ deploy_image }}:{{ deploy_tag }}"
+        source: pull
+        force_source: true
+
+    # ── 3. Обновить тег в docker-compose.yml ────────────────────────────────
+    - name: Update image tag in docker-compose.yml
+      ansible.builtin.replace:
+        path: "{{ compose_dir }}/docker-compose.yml"
+        regexp: '^(\s*image:\s*{{ deploy_image | regex_escape }}):[^\s]*$'
+        replace: '\1:{{ deploy_tag }}'
+
+    # ── 4. Пересоздать контейнеры с новым образом ───────────────────────────
+    - name: Apply docker-compose (up -d --force-recreate)
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        pull: never
+        recreate: always
+        remove_orphans: true
+      register: compose_result
+
+    # ── 5. Вывести изменения ────────────────────────────────────────────────
+    - name: Show compose result
+      ansible.builtin.debug:
+        var: compose_result
+
+    # ── 6. Healthcheck ──────────────────────────────────────────────────────
+    - name: Wait for container to be running and healthy
+      community.docker.docker_container_info:
+        name: "{{ compose_service }}"
+      register: container_info
+      until: >
+        container_info.container is defined and
+        container_info.container.State.Running == true and
+        (
+          container_info.container.State.Health is not defined or
+          container_info.container.State.Health.Status == 'healthy'
+        )
+      retries: 24
+      delay: 5
+
+    # ── 7. Удалить dangling образы ──────────────────────────────────────────
+    - name: Remove dangling images
+      community.docker.docker_prune:
+        images: true
+        images_filters:
+          dangling: true
+
+    # ── 8. Logout ───────────────────────────────────────────────────────────
+    - name: Logout from registry
+      community.docker.docker_login:
+        registry_url: "{{ registry_host }}"
+        state: absent
