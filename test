@@ -1,1 +1,2 @@
-tmux show -g | grep -E "default-terminal|set-clipboard|terminal"
+tmux set -g set-clipboard on
+tmux show -g | grep set-clipboard
