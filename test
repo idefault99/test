@@ -1,2 +1,3 @@
-tmux set -g set-clipboard on
-tmux show -g | grep set-clipboard
+tmux set -g set-clipboard on && echo "OK"
+tmux show -g | grep -i clip
+tmux show -g | wc -l
