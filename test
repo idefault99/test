@@ -1,25 +1,11 @@
-before_script:
-  - mkdir -p ~/.docker
-  - echo "$DOCKER_CONFIG_JSON" > ~/.docker/config.json
-
-before_script:
-  - apk add --no-cache ansible sshpass openssh-client
-  - export TAG=$(eval $TAG_SCRIPT)
-  - mkdir -p ~/.ssh
-  - echo "StrictHostKeyChecking no" >> ~/.ssh/config
-  # config.json для docker login на хосте
-  - mkdir -p ~/.docker
-  - echo "$DOCKER_CONFIG_JSON" > /tmp/docker-config.json
-
-- name: Copy docker config to host
-  ansible.builtin.shell: |
-    mkdir -p /root/.docker
-    cat > /root/.docker/config.json << 'DOCKERCFG'
-    {{ docker_config }}
-    DOCKERCFG
-  no_log: true
-
-- |
-  ansible-playbook ansible/deploy.yml \
-    -e "docker_config=$(cat /tmp/docker-config.json)" \
-    ...
+ALPN: offers h2
+* ALPN: offers http/1.1
+*  CAfile: /etc/pki/tls/certs/ca-bundle.crt
+*  CApath: none
+* TLSv1.0 (OUT), TLS header, Certificate Status (22):
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.0 (OUT), TLS header, Unknown (21):
+* TLSv1.3 (OUT), TLS alert, decode error (562):
+* error:0A000126:SSL routines::unexpected eof while reading
+* Closing connection 0
+curl: (35) error:0A000126:SSL routines::unexpected eof while reading
