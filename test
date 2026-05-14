@@ -1,61 +1,54 @@
-version: "3.9"
+---
+- name: Deploy docker-compose with new image tag
+  hosts: all
+  become: true
 
-services:
-  app:
-    image: registry.gitlab.example.com/group/project:latest   # <-- тег заменяется плейбуком
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - ENV=production
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+  tasks:
 
-# Ansible Inventory
+    # ── 1. Логин в registry ─────────────────────────────────────────────────
+    - name: Login to container registry
+      ansible.builtin.shell: |
+        echo "{{ registry_password }}" | docker login {{ registry_host }} \
+          -u {{ registry_user }} --password-stdin
+      no_log: true
 
-> Inventory передаётся инлайном в команде `ansible-playbook`, файл не нужен.
-> Хост берётся из GitLab переменной `DEPLOY_HOST`.
+    # ── 2. Pull нового образа ───────────────────────────────────────────────
+    - name: Pull new image
+      ansible.builtin.shell: |
+        docker pull {{ deploy_image }}:{{ deploy_tag }}
 
-```ini
-# ansible/inventory.ini — используется только при локальном запуске
+    # ── 3. Обновить тег в docker-compose.yml ────────────────────────────────
+    - name: Update image tag in docker-compose.yml
+      ansible.builtin.shell: |
+        sed -i "s|image: {{ deploy_image }}:.*|image: {{ deploy_image }}:{{ deploy_tag }}|g" \
+          {{ compose_dir }}/docker-compose.yml
 
-[deploy_targets]
-target ansible_host=192.168.1.100
+    # ── 4. Пересоздать контейнеры ───────────────────────────────────────────
+    - name: docker compose up
+      ansible.builtin.shell: |
+        cd {{ compose_dir }} && docker compose up -d --force-recreate --remove-orphans
+      register: compose_result
 
-[deploy_targets:vars]
-ansible_connection=ssh
-ansible_user=deploy
-ansible_password=secret
-ansible_become=true
-ansible_become_password=secret
-ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-```
+    # ── 5. Вывести результат ────────────────────────────────────────────────
+    - name: Show compose result
+      ansible.builtin.debug:
+        var: compose_result.stdout_lines
 
-## Локальный запуск (без GitLab CI)
+    # ── 6. Проверить что контейнер запущен ──────────────────────────────────
+    - name: Wait for container to be running
+      ansible.builtin.shell: |
+        docker inspect -f '{{ "{{.State.Running}}" }}' {{ compose_service }}
+      register: container_state
+      until: container_state.stdout == "true"
+      retries: 24
+      delay: 5
 
-```bash
-ansible-playbook ansible/deploy.yml \
-  -i ansible/inventory.ini \
-  -e "deploy_image=registry.example.com/group/project" \
-  -e "deploy_tag=abc123.bin" \
-  -e "registry_user=myuser" \
-  -e "registry_password=mypassword" \
-  -e "registry_host=registry.example.com" \
-  -e "compose_dir=/opt/app" \
-  -e "compose_service=app"
-```
+    # ── 7. Удалить dangling образы ──────────────────────────────────────────
+    - name: Remove dangling images
+      ansible.builtin.shell: |
+        docker image prune -f
 
-## В пайплайне (инлайн, файл не нужен)
-
-```bash
-ansible-playbook ansible/deploy.yml \
-  -i "${DEPLOY_HOST}," \
-  -e "ansible_user=${DEPLOY_USER}" \
-  -e "ansible_password=${DEPLOY_PASSWORD}" \
-  -e "ansible_become_password=${DEPLOY_PASSWORD}" \
-  ...
-```
+    # ── 8. Logout ───────────────────────────────────────────────────────────
+    - name: Logout from registry
+      ansible.builtin.shell: |
+        docker logout {{ registry_host }}
