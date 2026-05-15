@@ -1,11 +1,216 @@
-ALPN: offers h2
-* ALPN: offers http/1.1
-*  CAfile: /etc/pki/tls/certs/ca-bundle.crt
-*  CApath: none
-* TLSv1.0 (OUT), TLS header, Certificate Status (22):
-* TLSv1.3 (OUT), TLS handshake, Client hello (1):
-* TLSv1.0 (OUT), TLS header, Unknown (21):
-* TLSv1.3 (OUT), TLS alert, decode error (562):
-* error:0A000126:SSL routines::unexpected eof while reading
-* Closing connection 0
-curl: (35) error:0A000126:SSL routines::unexpected eof while reading
+У меня есть фронт который ходит по пути https://host.ru/ редиректит на auth?redirect=%2F и после нажатия на кнопку войти должен открываться фронт на /
+Также есть еще 4 бэкэнда которые ходят через сервис external по ручкам /api/backone /api/backtwo /api/backthree /api/backfour
+Вот текущие ингрессы, нужно настроить
+{{ if eq .Release.Namespace "default" }}
+{{- fail "Defaul namespace not avaliable for this helm chart"}}
+{{end}}
+{{ if empty .Values.ingressDomain }}
+{{- fail ".Values.ingressDomain shuld be present, empty not avaliable. Use --set for this"}}
+{{end}}
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-not-free
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    # nginx.ingress.kubernetes.io/auth-cache-key: "$cookie_access_token$http_authorization"
+    # nginx.ingress.kubernetes.io/auth-url: http://{{ .Values.labels.keycloak }}-service.{{ .Release.Namespace }}.svc.{{ .Values.localK8sDomain }}:{{ .Values.ports.internal.back }}/keycloak/realms/{{ .Values.realmName }}/protocol/openid-connect/userinfo
+    # TODO обернуть в if allow-origin и cors
+    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
+    # nginx.ingress.kubernetes.io/enable-cors: 'true'
+    # nginx.ingress.kubernetes.io/auth-snippet: |
+    #   if ($request_method = OPTIONS) {
+    #       add_header Access-Control-Allow-Origin "http://example.com";
+    #       add_header Access-Control-Allow-Methods "GET, OPTIONS";
+    #       add_header Access-Control-Allow-Headers "Authorization";
+    #       add_header Access-Control-Allow-Credentials "true";
+    #       add_header Content-Length 0;
+    #       add_header Content-Type text/plain;
+    #       return 200;
+    #   }
+    #   set $access_token "";
+    #   if ($cookie_access_token)  {
+    #     set $access_token "$cookie_token_type $cookie_access_token";
+    #   }
+    #   if ($http_authorization) {
+    #     set $access_token "$http_authorization";
+    #   }
+    #   proxy_set_header Authorization $access_token;
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{ if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{ end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+{{ if eq .Values.enableModules.mapserver true }}
+      - path: /api/v1/{{ .Values.labels.mapserver.share }}
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Release.Namespace }}-{{ .Values.labels.mapserver.share }}-cs
+            port:
+              number: {{ .Values.ports.internal.back }}
+{{ end }}
+
+---
+############### S3Minio Endpoints ###############
+{{ if eq .Values.enableService.s3minio true }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-s3minio
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{ if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{ end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+      - path: /api/s3minio(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Values.labels.s3minio }}-api-service
+            port:
+              number: {{ .Values.ports.internal.s3minioAPI }}
+      - path: /s3minio(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Values.labels.s3minio }}-console-service
+            port:
+              number: {{ .Values.ports.internal.s3minioConsole }}
+{{ end }}
+
+---
+############### Free ( not protected ) Endpoints ###############
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-free
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
+    # nginx.ingress.kubernetes.io/enable-cors: 'true'
+    # nginx.ingress.kubernetes.io/server-snippet: |
+    #   if ( $uri ~ ^/login(.*) ) {
+    #     return 302 https://{{ .Values.ingressDomain }}/keycloak/realms/{{ .Values.realmName }}/protocol/openid-connect/auth?response_type=code&client_id={{ .Values.realmClient }}&redirect_uri=https://{{ .Values.ingressDomain }}/api/v1/auth/browser;
+    #   }
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{ if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{ end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+      - path: /login
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Release.Namespace }}-{{ .Values.labels.auth.share }}-cs
+            port:
+              number: {{ .Values.ports.internal.back }}
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.Values.labels.front }}-service
+            port:
+              number: {{ .Values.ports.internal.front }}
+      # - path: /{{ .Values.labels.keycloak }}
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: {{ .Values.labels.keycloak }}-service
+      #       port:
+      #         number: {{ .Values.ports.internal.back }}
+      # - path: /api/v1/{{ .Values.labels.auth }}
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: {{ .Values.labels.auth }}-service
+      #       port:
+      #         number: {{ .Values.ports.internal.back }}
+      # - path: /api/{{ .Values.labels.auth }}/v2
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: {{ .Values.labels.auth }}-service
+      #       port:
+      #         number: {{ .Values.ports.internal.back }}
+      ---
+      {{ if eq .Release.Namespace "default" }}
+{{- fail "Default namespace not available for this helm chart"}}
+{{end}}
+{{ if empty .Values.ingressDomain }}
+{{- fail ".Values.ingressDomain should be present, cannot be empty. Use --set for this"}}
+{{end}}
+
+{{ if eq .Values.enableModules.auth true }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-auth-not-free
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{ if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{ end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+      - path: /api/auth/(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Release.Namespace }}-{{ .Values.labels.auth.share }}-cs
+            port:
+              number: {{ .Values.ports.internal.back }}
+{{ end }}
