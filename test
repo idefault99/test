@@ -1,13 +1,11 @@
-У меня есть фронт который ходит по пути https://host.ru/ редиректит на auth?redirect=%2F и после нажатия на кнопку войти должен открываться фронт на /
-Также есть еще 4 бэкэнда которые ходят через сервис external по ручкам /api/backone /api/backtwo /api/backthree /api/backfour
-Вот текущие ингрессы, нужно настроить
 {{ if eq .Release.Namespace "default" }}
-{{- fail "Defaul namespace not avaliable for this helm chart"}}
-{{end}}
+{{- fail "Default namespace not available for this helm chart"}}
+{{ end }}
 {{ if empty .Values.ingressDomain }}
-{{- fail ".Values.ingressDomain shuld be present, empty not avaliable. Use --set for this"}}
-{{end}}
+{{- fail ".Values.ingressDomain should be present, cannot be empty. Use --set for this"}}
+{{ end }}
 
+############### Protected Endpoints (with auth) ###############
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -18,29 +16,23 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
     nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
     nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    # nginx.ingress.kubernetes.io/auth-cache-key: "$cookie_access_token$http_authorization"
-    # nginx.ingress.kubernetes.io/auth-url: http://{{ .Values.labels.keycloak }}-service.{{ .Release.Namespace }}.svc.{{ .Values.localK8sDomain }}:{{ .Values.ports.internal.back }}/keycloak/realms/{{ .Values.realmName }}/protocol/openid-connect/userinfo
-    # TODO обернуть в if allow-origin и cors
     nginx.ingress.kubernetes.io/cors-allow-origin: '*'
-    # nginx.ingress.kubernetes.io/enable-cors: 'true'
-    # nginx.ingress.kubernetes.io/auth-snippet: |
-    #   if ($request_method = OPTIONS) {
-    #       add_header Access-Control-Allow-Origin "http://example.com";
-    #       add_header Access-Control-Allow-Methods "GET, OPTIONS";
-    #       add_header Access-Control-Allow-Headers "Authorization";
-    #       add_header Access-Control-Allow-Credentials "true";
-    #       add_header Content-Length 0;
-    #       add_header Content-Type text/plain;
-    #       return 200;
-    #   }
-    #   set $access_token "";
-    #   if ($cookie_access_token)  {
-    #     set $access_token "$cookie_token_type $cookie_access_token";
-    #   }
-    #   if ($http_authorization) {
-    #     set $access_token "$http_authorization";
-    #   }
-    #   proxy_set_header Authorization $access_token;
+    # Проверка токена через keycloak userinfo
+    nginx.ingress.kubernetes.io/auth-url: http://{{ .Values.labels.keycloak }}-service.{{ .Release.Namespace }}.svc.{{ .Values.localK8sDomain }}:{{ .Values.ports.internal.back }}/keycloak/realms/{{ .Values.realmName }}/protocol/openid-connect/userinfo
+    # Кэш по токену из cookie или заголовка
+    nginx.ingress.kubernetes.io/auth-cache-key: "$cookie_access_token$http_authorization"
+    # При 401 — редирект на /auth с возвратом на исходный URL
+    nginx.ingress.kubernetes.io/auth-signin: https://{{ .Values.ingressDomain }}/auth?redirect=$escaped_request_uri
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      # Пробрасываем токен из cookie или заголовка
+      set $access_token "";
+      if ($cookie_access_token) {
+        set $access_token "$cookie_token_type $cookie_access_token";
+      }
+      if ($http_authorization) {
+        set $access_token "$http_authorization";
+      }
+      proxy_set_header Authorization $access_token;
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
   {{ if eq .Values.TLS.enable true }}
@@ -53,7 +45,37 @@ spec:
   - host: {{ .Values.ingressDomain }}
     http:
       paths:
+      # ── 4 бэкенда через external-сервис ──────────────────────────────────
+      - path: /api/backone
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Values.labels.external }}-service
+            port:
+              number: {{ .Values.ports.internal.back }}
+      - path: /api/backtwo
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Values.labels.external }}-service
+            port:
+              number: {{ .Values.ports.internal.back }}
+      - path: /api/backthree
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Values.labels.external }}-service
+            port:
+              number: {{ .Values.ports.internal.back }}
+      - path: /api/backfour
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Values.labels.external }}-service
+            port:
+              number: {{ .Values.ports.internal.back }}
 {{ if eq .Values.enableModules.mapserver true }}
+      # ── Mapserver ─────────────────────────────────────────────────────────
       - path: /api/v1/{{ .Values.labels.mapserver.share }}
         pathType: Prefix
         backend:
@@ -64,7 +86,7 @@ spec:
 {{ end }}
 
 ---
-############### S3Minio Endpoints ###############
+############### S3 Minio Endpoints ###############
 {{ if eq .Values.enableService.s3minio true }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -92,7 +114,7 @@ spec:
     http:
       paths:
       - path: /api/s3minio(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: {{ .Values.labels.s3minio }}-api-service
@@ -108,7 +130,7 @@ spec:
 {{ end }}
 
 ---
-############### Free ( not protected ) Endpoints ###############
+############### Free (unprotected) Endpoints ###############
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -120,11 +142,6 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
     nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
     nginx.ingress.kubernetes.io/cors-allow-origin: '*'
-    # nginx.ingress.kubernetes.io/enable-cors: 'true'
-    # nginx.ingress.kubernetes.io/server-snippet: |
-    #   if ( $uri ~ ^/login(.*) ) {
-    #     return 302 https://{{ .Values.ingressDomain }}/keycloak/realms/{{ .Values.realmName }}/protocol/openid-connect/auth?response_type=code&client_id={{ .Values.realmClient }}&redirect_uri=https://{{ .Values.ingressDomain }}/api/v1/auth/browser;
-    #   }
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
   {{ if eq .Values.TLS.enable true }}
@@ -137,6 +154,17 @@ spec:
   - host: {{ .Values.ingressDomain }}
     http:
       paths:
+      # ── Auth-страница (логин) — открытая ──────────────────────────────────
+      # Фронт редиректит сюда неаутентифицированных: /auth?redirect=%2F
+      # После входа фронт сам делает redirect обратно на /
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Release.Namespace }}-{{ .Values.labels.auth.share }}-cs
+            port:
+              number: {{ .Values.ports.internal.back }}
+      # ── /login — алиас для совместимости (опционально) ───────────────────
       - path: /login
         pathType: Prefix
         backend:
@@ -144,42 +172,19 @@ spec:
             name: {{ .Release.Namespace }}-{{ .Values.labels.auth.share }}-cs
             port:
               number: {{ .Values.ports.internal.back }}
+      # ── Фронтенд — защищён через auth-url выше ───────────────────────────
+      # ВАЖНО: этот путь должен быть ПОСЛЕ /auth и /login,
+      # иначе Prefix "/" перехватит всё
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: {{.Values.labels.front }}-service
+            name: {{ .Values.labels.front }}-service
             port:
               number: {{ .Values.ports.internal.front }}
-      # - path: /{{ .Values.labels.keycloak }}
-      #   pathType: Prefix
-      #   backend:
-      #     service:
-      #       name: {{ .Values.labels.keycloak }}-service
-      #       port:
-      #         number: {{ .Values.ports.internal.back }}
-      # - path: /api/v1/{{ .Values.labels.auth }}
-      #   pathType: Prefix
-      #   backend:
-      #     service:
-      #       name: {{ .Values.labels.auth }}-service
-      #       port:
-      #         number: {{ .Values.ports.internal.back }}
-      # - path: /api/{{ .Values.labels.auth }}/v2
-      #   pathType: Prefix
-      #   backend:
-      #     service:
-      #       name: {{ .Values.labels.auth }}-service
-      #       port:
-      #         number: {{ .Values.ports.internal.back }}
-      ---
-      {{ if eq .Release.Namespace "default" }}
-{{- fail "Default namespace not available for this helm chart"}}
-{{end}}
-{{ if empty .Values.ingressDomain }}
-{{- fail ".Values.ingressDomain should be present, cannot be empty. Use --set for this"}}
-{{end}}
 
+---
+############### Auth module protected endpoints ###############
 {{ if eq .Values.enableModules.auth true }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
