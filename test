@@ -2,7 +2,7 @@ enableService:
   vault:
     enable: false
 
-# Базовый namespace стенда — используется везде вместо дублирования
+# Базовый namespace стенда
 baseNs: test-dev
 
 vault:
@@ -25,38 +25,24 @@ images:
   vault: "registry.example.com/vault-setup:latest"
 
 stand:
-  # Автоматически подставляется из baseNs в шаблонах через printf
-  # name здесь не нужен — используй baseNs
-
   infra:
-    services:
-      # Каждый сервис — отдельный путь в Vault: stands/<baseNs>/infra/<name>
-      # Если сервис не указан здесь — ExternalSecret для него не создаётся
-      # Приложение продолжает работать с ConfigMap
+    redis:
+      secretName: redis-vault-secret
 
-      - name: redis
-        secretName: redis-vault-secret
+    kafka:
+      secretName: kafka-vault-secret
 
-      - name: kafka
-        secretName: kafka-vault-secret
+    mongodb:
+      secretName: mongodb-vault-secret
 
-      - name: mongodb
-        secretName: mongodb-vault-secret
+    elasticsearch:
+      secretName: elasticsearch-vault-secret
 
-      - name: elasticsearch
-        secretName: elasticsearch-vault-secret
+    postgresql:
+      secretName: postgresql-vault-secret
 
-      - name: postgresql
-        secretName: postgresql-vault-secret
-
-      - name: s3minio
-        secretName: s3minio-vault-secret
-
-  # App namespace-ы стенда (используются vault-job для создания политик)
-  apps: []
-  # apps:
-  #   - suffix: "approvals"
-  #   - suffix: "audit"
+    s3minio:
+      secretName: s3minio-vault-secret
 ---
 {{- if eq .Values.enableService.vault.enable true }}
 {{- $vault := .Values.vault }}
@@ -64,11 +50,7 @@ stand:
 {{- $vaultRole := .Values.vault.roleName | default $stand }}
 
 {{/* ── Secret с переменными для vault-job ─────────────────────────────── */}}
-{{- $suffixes := list "infra" }}
-{{- range .Values.stand.apps }}
-  {{- $suffixes = concat $suffixes (list .suffix) }}
-{{- end }}
-{{- $standsStr := printf "%s:%s" $stand (join "," $suffixes) }}
+{{- $standsStr := printf "%s:infra" $stand }}
 ---
 apiVersion: v1
 kind: Secret
@@ -145,20 +127,7 @@ spec:
 {{- $stand := .Values.baseNs }}
 {{- $vault := .Values.vault }}
 {{- $storeName := printf "vault-cluster-store-%s" $stand }}
-
-{{/*
-  Ищем конфигурацию redis в .Values.stand.infra.services
-  Если сервис не найден или vault.enable=false — ExternalSecret не создаётся,
-  приложение продолжает работать с ConfigMap
-*/}}
-{{- $svc := dict }}
-{{- range .Values.stand.infra.services }}
-  {{- if eq .name "redis" }}
-    {{- $svc = . }}
-  {{- end }}
-{{- end }}
-
-{{- if $svc.secretName }}
+{{- $svc := .Values.stand.infra.redis }}
 ---
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
@@ -184,210 +153,4 @@ spec:
   dataFrom:
     - extract:
         key: {{ $stand }}/infra/redis
-{{- end }}
-{{- end }}
----
-{{- if eq .Values.enableService.vault.enable true }}
-{{- $stand := .Values.baseNs }}
-{{- $vault := .Values.vault }}
-{{- $storeName := printf "vault-cluster-store-%s" $stand }}
-
-{{- $svc := dict }}
-{{- range .Values.stand.infra.services }}
-  {{- if eq .name "kafka" }}
-    {{- $svc = . }}
-  {{- end }}
-{{- end }}
-
-{{- if $svc.secretName }}
----
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: {{ $svc.secretName }}
-  namespace: {{ $stand }}
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
-  labels:
-    vault-section: infra
-    vault-service: kafka
-spec:
-  refreshInterval: {{ $vault.refreshInterval }}
-  secretStoreRef:
-    name: {{ $storeName }}
-    kind: ClusterSecretStore
-  target:
-    name: {{ $svc.secretName }}
-    creationPolicy: Owner
-    deletionPolicy: Retain
-  dataFrom:
-    - extract:
-        key: {{ $stand }}/infra/kafka
-{{- end }}
-{{- end }}
----
-{{- if eq .Values.enableService.vault.enable true }}
-{{- $stand := .Values.baseNs }}
-{{- $vault := .Values.vault }}
-{{- $storeName := printf "vault-cluster-store-%s" $stand }}
-
-{{- $svc := dict }}
-{{- range .Values.stand.infra.services }}
-  {{- if eq .name "mongodb" }}
-    {{- $svc = . }}
-  {{- end }}
-{{- end }}
-
-{{- if $svc.secretName }}
----
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: {{ $svc.secretName }}
-  namespace: {{ $stand }}
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
-  labels:
-    vault-section: infra
-    vault-service: mongodb
-spec:
-  refreshInterval: {{ $vault.refreshInterval }}
-  secretStoreRef:
-    name: {{ $storeName }}
-    kind: ClusterSecretStore
-  target:
-    name: {{ $svc.secretName }}
-    creationPolicy: Owner
-    deletionPolicy: Retain
-  dataFrom:
-    - extract:
-        key: {{ $stand }}/infra/mongodb
-{{- end }}
-{{- end }}
----
-{{- if eq .Values.enableService.vault.enable true }}
-{{- $stand := .Values.baseNs }}
-{{- $vault := .Values.vault }}
-{{- $storeName := printf "vault-cluster-store-%s" $stand }}
-
-{{- $svc := dict }}
-{{- range .Values.stand.infra.services }}
-  {{- if eq .name "elasticsearch" }}
-    {{- $svc = . }}
-  {{- end }}
-{{- end }}
-
-{{- if $svc.secretName }}
----
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: {{ $svc.secretName }}
-  namespace: {{ $stand }}
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
-  labels:
-    vault-section: infra
-    vault-service: elasticsearch
-spec:
-  refreshInterval: {{ $vault.refreshInterval }}
-  secretStoreRef:
-    name: {{ $storeName }}
-    kind: ClusterSecretStore
-  target:
-    name: {{ $svc.secretName }}
-    creationPolicy: Owner
-    deletionPolicy: Retain
-  dataFrom:
-    - extract:
-        key: {{ $stand }}/infra/elasticsearch
-{{- end }}
-{{- end }}
----
-{{- if eq .Values.enableService.vault.enable true }}
-{{- $stand := .Values.baseNs }}
-{{- $vault := .Values.vault }}
-{{- $storeName := printf "vault-cluster-store-%s" $stand }}
-
-{{- $svc := dict }}
-{{- range .Values.stand.infra.services }}
-  {{- if eq .name "postgresql" }}
-    {{- $svc = . }}
-  {{- end }}
-{{- end }}
-
-{{- if $svc.secretName }}
----
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: {{ $svc.secretName }}
-  namespace: {{ $stand }}
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
-  labels:
-    vault-section: infra
-    vault-service: postgresql
-spec:
-  refreshInterval: {{ $vault.refreshInterval }}
-  secretStoreRef:
-    name: {{ $storeName }}
-    kind: ClusterSecretStore
-  target:
-    name: {{ $svc.secretName }}
-    creationPolicy: Owner
-    deletionPolicy: Retain
-  dataFrom:
-    - extract:
-        key: {{ $stand }}/infra/postgresql
-{{- end }}
-{{- end }}
----
-{{- if eq .Values.enableService.vault.enable true }}
-{{- $stand := .Values.baseNs }}
-{{- $vault := .Values.vault }}
-{{- $storeName := printf "vault-cluster-store-%s" $stand }}
-
-{{- $svc := dict }}
-{{- range .Values.stand.infra.services }}
-  {{- if eq .name "s3minio" }}
-    {{- $svc = . }}
-  {{- end }}
-{{- end }}
-
-{{- if $svc.secretName }}
----
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: {{ $svc.secretName }}
-  namespace: {{ $stand }}
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
-  labels:
-    vault-section: infra
-    vault-service: s3minio
-spec:
-  refreshInterval: {{ $vault.refreshInterval }}
-  secretStoreRef:
-    name: {{ $storeName }}
-    kind: ClusterSecretStore
-  target:
-    name: {{ $svc.secretName }}
-    creationPolicy: Owner
-    deletionPolicy: Retain
-  dataFrom:
-    - extract:
-        key: {{ $stand }}/infra/s3minio
-{{- end }}
 {{- end }}
