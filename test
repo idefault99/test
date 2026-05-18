@@ -1,189 +1,141 @@
-{{/*
-  deployment.yaml
-  Деплоит приложение с условным монтированием секретов из Vault.
-
-  Логика монтирования:
-  - envFrom[0]: ConfigMap — ВСЕГДА (базовая конфигурация)
-  - envFrom[1]: Secret    — ТОЛЬКО если vault.enabled=true
-
-  Порядок важен: если один и тот же ключ есть и в ConfigMap и в Secret,
-  Secret ПЕРЕЗАПИШЕТ значение из ConfigMap (envFrom применяется последовательно).
-  Это позволяет хранить дефолты в ConfigMap, а секреты переопределять из Vault.
-
-  Пример:
-    ConfigMap:  DB_PASSWORD=changeme   (дефолт для локальной разработки)
-    Secret:     DB_PASSWORD=real_prod_password  (реальное значение из Vault)
-    В поде будет: DB_PASSWORD=real_prod_password
-*/}}
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ .Values.app.name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: {{ .Values.app.name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-spec:
-  replicas: {{ .Values.app.replicas }}
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: {{ .Values.app.name }}
-      app.kubernetes.io/instance: {{ .Release.Name }}
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: {{ .Values.app.name }}
-        app.kubernetes.io/instance: {{ .Release.Name }}
-      {{- if .Values.vault.enabled }}
-      annotations:
-        # При изменении секрета в Vault ESO обновит K8s Secret.
-        # Чтобы под подхватил новые значения — нужен рестарт.
-        # Раскомментируй если хочешь автоматический рестарт при смене секрета:
-        # reloader.stakater.com/auto: "true"
-      {{- end }}
-    spec:
-      containers:
-        - name: {{ .Values.app.name }}
-          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
-          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: {{ .Values.app.port }}
-              protocol: TCP
-
-          # ── Переменные окружения ─────────────────────────────────────────
-          envFrom:
-            # 1. ConfigMap — базовая конфигурация, монтируется ВСЕГДА
-            - configMapRef:
-                name: {{ .Values.app.name }}-config
-
-            {{- if .Values.vault.enabled }}
-            # 2. Secret из Vault — монтируется ТОЛЬКО если vault.enabled=true
-            # Ключи из Secret перезапишут одноимённые ключи из ConfigMap выше
-            - secretRef:
-                name: {{ .Values.vault.secretName }}
-                # optional: true — если Secret ещё не создался (ESO не успел),
-                # под всё равно запустится и будет работать с ConfigMap
-                optional: true
-            {{- end }}
-
-          # ── Ресурсы (поправь под своё приложение) ───────────────────────
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-
-          # ── Liveness / Readiness (поправь под своё приложение) ──────────
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 30
-            periodSeconds: 10
-
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 5
+Поправь манифесты, нужно чтобы из чарта с инфрой создавался ClusterSecretStore (Он будет в templates/vault), а ExternalSecret был отдельно в каждом шаблоне - у меня есть templates/redis templates/kafka templates/mongodb templates/elasticsearch templates/postgresql templates/s3minio
+В values будут прописаны все значения в .Values.stand.infra.services
+И vault-job вероятно тоже должен запускаться отдельно для каждого приложения
+У меня есть манифест со всеми namespace где указаны хуки, учитывай их, они должны создаваться раньше всех
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-200"
+    "helm.sh/hook-delete-policy": before-hook-creation
+Потом вероятно общий ClusterSecretStore на стенд, потом vault-job, а потом ExternalSecret
+То есть логика такая чтобы приложение само ходило в vault, но если секрета нет, то приложение продолжит работать с configmap как раньше
+{{- if eq .Values.enableService.vault.enable true }}
+{{- $suffixes := list "infra" }}
+{{- range .Values.stand.apps }}
+  {{- $suffixes = concat $suffixes (list .suffix) }}
+{{- end }}
+{{- $standsStr := printf "%s:%s" .Values.stand.name (join "," $suffixes) }}
 ---
-{{/*
-  external-secret.yaml
-  Создаётся ТОЛЬКО если vault.enabled=true.
-
-  ESO читает все ключи из Vault пути и создаёт K8s Secret.
-  Secret автоматически синхронизируется каждые vault.refreshInterval.
-
-  Если vault.enabled=false — этот файл не создаёт ничего.
-*/}}
-{{- if .Values.vault.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-env
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-50"
+    "helm.sh/hook-delete-policy": before-hook-creation
+stringData:
+  VAULT_ADDR: {{ .Values.vault.address | quote }}
+  VAULT_TOKEN: {{ .Values.vault.token | quote }}
+  K8S_HOST: {{ .Values.kubernetes.host | quote }}
+  ESO_SA_NAME: {{ .Values.vault.serviceAccount.name | quote }}
+  ESO_SA_NAMESPACE: {{ .Values.vault.serviceAccount.namespace | quote }}
+  STANDS: {{ $standsStr | quote }}
+---
+apiVersion: batch/v1
+kind: Job                                 # На основе образа с Vault создает политику и роль в самом волте
+metadata:
+  name: vault
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-40"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret | quote }}
+      containers:
+        - name: vault
+          image: {{ .Values.images.vault | quote }}
+          envFrom:
+            - secretRef:
+                name: vault-env
+{{- end }}
+---
+{{- if eq .Values.enableService.vault.enable true }}
+{{- $stand := .Values.stand.name -}}
+{{- $vault := .Values.vault -}}
+{{- range .Values.stand.infra.services }}
+---
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
-  name: {{ .Values.vault.secretName }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ .secretName }}
+  namespace: {{ $stand }}
   labels:
-    app.kubernetes.io/name: {{ .Values.app.name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-  annotations:
-    # Описание для удобства отладки
-    vault.path: "stands/{{ .Values.vault.secretPath }}"
+    vault-section: infra
+    vault-service: {{ .name }}
 spec:
-  refreshInterval: {{ .Values.vault.refreshInterval }}
+  refreshInterval: {{ $vault.refreshInterval }}
   secretStoreRef:
-    name: {{ .Values.vault.clusterSecretStore }}
+    name: {{ $vault.clusterSecretStore.name }}
     kind: ClusterSecretStore
   target:
-    name: {{ .Values.vault.secretName }}
+    name: {{ .secretName }}
     creationPolicy: Owner
-    # Retain — не удалять Secret если ExternalSecret удалён
-    # Это защита: если чарт откатится, секреты останутся
     deletionPolicy: Retain
   dataFrom:
     - extract:
-        # Vault путь без префикса mount (stands/)
-        # Пример: dev-devops/approvals/backend
-        key: {{ .Values.vault.secretPath }}
+        key: {{ $stand }}/infra/{{ .name }}
+{{- end }}
 {{- end }}
 ---
-{{/*
-  configmap.yaml
-  Базовая конфигурация приложения.
-  Создаётся ВСЕГДА — независимо от vault.enabled.
-  Содержит не секретные настройки: порты, хосты, уровни логирования и т.д.
-*/}}
-apiVersion: v1
-kind: ConfigMap
+{{- if eq .Values.enableService.vault.enable true }}
+{{- $vault := .Values.vault -}}
+{{- $vaultRole := .Values.vault.roleName | default .Values.stand.name -}}
+
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
 metadata:
-  name: {{ .Values.app.name }}-config
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: {{ .Values.app.name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-data:
-  {{- range $key, $val := .Values.config }}
-  {{ $key }}: {{ $val | quote }}
-  {{- end }}
+  name: {{ $vault.clusterSecretStore.name }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-30"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  provider:
+    vault:
+      server: {{ $vault.address }}
+      path: {{ $vault.kvMount }}
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: {{ $vault.authPath }}
+          role: {{ $vaultRole }}
+          serviceAccountRef:
+            name: {{ $vault.serviceAccount.name }}
+            namespace: {{ $vault.serviceAccount.namespace }}
+      caProvider:
+        type: Secret
+        name: {{ $vault.caSecretName }}
+        key: ca.crt                 # Публичная часть корневого сертификата Vault, находится в секрете vault-ca-secret в ns external-secrets
+        namespace: {{ $vault.serviceAccount.namespace }}
+{{- end }}
 ---
-app:
-  name: "backend"
-  image:
-    repository: "myregistry/backend"
-    tag: "latest"
-    pullPolicy: IfNotPresent
-  replicas: 1
-  port: 8080
-
-# ConfigMap — используется всегда (базовая конфигурация приложения)
-config:
-  APP_ENV: "production"
-  APP_PORT: "8080"
-  LOG_LEVEL: "info"
-  DB_HOST: "postgres.stand-test.svc.cluster.local"
-  DB_PORT: "5432"
-
-# Vault интеграция — опциональна
-# enabled: false — ExternalSecret не создаётся, приложение работает только с ConfigMap
-# enabled: true  — создаётся ExternalSecret, Secret монтируется вместе с ConfigMap
+enableService:
+  vault:
+    enable: false
+baseNs: test-dev
 vault:
-  enabled: false
+  address: "https://vault.test.ru"
+  token: example
+  kvMount: "stands"
+  authPath: "kubernetes"
+  serviceAccount:
+    name: "external-secrets"
+    namespace: "external-secrets"
+  caSecretName: "vault-ca-secret"
+  refreshInterval: "5s"
+  clusterSecretStore:
+    name: vault-cluster-store-{{ .Values.baseNs }}
 
-  # Имя ClusterSecretStore (создаётся chart-ом vault-secrets)
-  clusterSecretStore: "vault-cluster-store-dev-devops"
+kubernetes:
+  host: https://192.168.0.111:16443
 
-  # Путь в Vault без префикса mount: stands/<stand>/<suffix>/<app>
-  # Пример: dev-devops/approvals/backend
-  secretPath: "dev-devops/approvals/backend"
-
-  # Имя K8s Secret который будет создан в namespace
-  secretName: "backend-vault-secret"
-
-  # Как часто синхронизировать из Vault
-  refreshInterval: "5m"
+stand:                                      
+  name: "{{ .Values.baseNs }}"
+  infra:
+    services:
+      - name: example
+        secretName: example-vault-secret
