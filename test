@@ -1,221 +1,189 @@
-{{ if eq .Release.Namespace "default" }}
-{{- fail "Default namespace not available for this helm chart"}}
-{{ end }}
-{{ if empty .Values.ingressDomain }}
-{{- fail ".Values.ingressDomain should be present, cannot be empty. Use --set for this"}}
-{{ end }}
+{{/*
+  deployment.yaml
+  Деплоит приложение с условным монтированием секретов из Vault.
 
-############### Protected Endpoints (with auth) ###############
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+  Логика монтирования:
+  - envFrom[0]: ConfigMap — ВСЕГДА (базовая конфигурация)
+  - envFrom[1]: Secret    — ТОЛЬКО если vault.enabled=true
+
+  Порядок важен: если один и тот же ключ есть и в ConfigMap и в Secret,
+  Secret ПЕРЕЗАПИШЕТ значение из ConfigMap (envFrom применяется последовательно).
+  Это позволяет хранить дефолты в ConfigMap, а секреты переопределять из Vault.
+
+  Пример:
+    ConfigMap:  DB_PASSWORD=changeme   (дефолт для локальной разработки)
+    Secret:     DB_PASSWORD=real_prod_password  (реальное значение из Vault)
+    В поде будет: DB_PASSWORD=real_prod_password
+*/}}
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: {{ .Values.ingressDomain }}-ingress-not-free
+  name: {{ .Values.app.name }}
   namespace: {{ .Release.Namespace }}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
-    # Проверка токена через keycloak userinfo
-    nginx.ingress.kubernetes.io/auth-url: http://{{ .Values.labels.keycloak }}-service.{{ .Release.Namespace }}.svc.{{ .Values.localK8sDomain }}:{{ .Values.ports.internal.back }}/keycloak/realms/{{ .Values.realmName }}/protocol/openid-connect/userinfo
-    # Кэш по токену из cookie или заголовка
-    nginx.ingress.kubernetes.io/auth-cache-key: "$cookie_access_token$http_authorization"
-    # При 401 — редирект на /auth с возвратом на исходный URL
-    nginx.ingress.kubernetes.io/auth-signin: https://{{ .Values.ingressDomain }}/auth?redirect=$escaped_request_uri
-    nginx.ingress.kubernetes.io/auth-snippet: |
-      # Пробрасываем токен из cookie или заголовка
-      set $access_token "";
-      if ($cookie_access_token) {
-        set $access_token "$cookie_token_type $cookie_access_token";
-      }
-      if ($http_authorization) {
-        set $access_token "$http_authorization";
-      }
-      proxy_set_header Authorization $access_token;
+  labels:
+    app.kubernetes.io/name: {{ .Values.app.name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  ingressClassName: {{ .Values.ingressClassName }}
-  {{ if eq .Values.TLS.enable true }}
-  tls:
-    - hosts:
-        - {{ .Values.ingressDomain }}
-      secretName: {{ tpl .Values.TLS.secret . }}
-  {{ end }}
-  rules:
-  - host: {{ .Values.ingressDomain }}
-    http:
-      paths:
-      # ── 4 бэкенда через external-сервис ──────────────────────────────────
-      - path: /api/backone
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Values.labels.external }}-service
-            port:
-              number: {{ .Values.ports.internal.back }}
-      - path: /api/backtwo
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Values.labels.external }}-service
-            port:
-              number: {{ .Values.ports.internal.back }}
-      - path: /api/backthree
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Values.labels.external }}-service
-            port:
-              number: {{ .Values.ports.internal.back }}
-      - path: /api/backfour
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Values.labels.external }}-service
-            port:
-              number: {{ .Values.ports.internal.back }}
-{{ if eq .Values.enableModules.mapserver true }}
-      # ── Mapserver ─────────────────────────────────────────────────────────
-      - path: /api/v1/{{ .Values.labels.mapserver.share }}
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Release.Namespace }}-{{ .Values.labels.mapserver.share }}-cs
-            port:
-              number: {{ .Values.ports.internal.back }}
-{{ end }}
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.app.name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.app.name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- if .Values.vault.enabled }}
+      annotations:
+        # При изменении секрета в Vault ESO обновит K8s Secret.
+        # Чтобы под подхватил новые значения — нужен рестарт.
+        # Раскомментируй если хочешь автоматический рестарт при смене секрета:
+        # reloader.stakater.com/auto: "true"
+      {{- end }}
+    spec:
+      containers:
+        - name: {{ .Values.app.name }}
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.port }}
+              protocol: TCP
 
+          # ── Переменные окружения ─────────────────────────────────────────
+          envFrom:
+            # 1. ConfigMap — базовая конфигурация, монтируется ВСЕГДА
+            - configMapRef:
+                name: {{ .Values.app.name }}-config
+
+            {{- if .Values.vault.enabled }}
+            # 2. Secret из Vault — монтируется ТОЛЬКО если vault.enabled=true
+            # Ключи из Secret перезапишут одноимённые ключи из ConfigMap выше
+            - secretRef:
+                name: {{ .Values.vault.secretName }}
+                # optional: true — если Secret ещё не создался (ESO не успел),
+                # под всё равно запустится и будет работать с ConfigMap
+                optional: true
+            {{- end }}
+
+          # ── Ресурсы (поправь под своё приложение) ───────────────────────
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          # ── Liveness / Readiness (поправь под своё приложение) ──────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
 ---
-############### S3 Minio Endpoints ###############
-{{ if eq .Values.enableService.s3minio true }}
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{ .Values.ingressDomain }}-ingress-s3minio
-  namespace: {{ .Release.Namespace }}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/use-regex: 'true'
-    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
-spec:
-  ingressClassName: {{ .Values.ingressClassName }}
-  {{ if eq .Values.TLS.enable true }}
-  tls:
-    - hosts:
-        - {{ .Values.ingressDomain }}
-      secretName: {{ tpl .Values.TLS.secret . }}
-  {{ end }}
-  rules:
-  - host: {{ .Values.ingressDomain }}
-    http:
-      paths:
-      - path: /api/s3minio(/|$)(.*)
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: {{ .Values.labels.s3minio }}-api-service
-            port:
-              number: {{ .Values.ports.internal.s3minioAPI }}
-      - path: /s3minio(/|$)(.*)
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: {{ .Values.labels.s3minio }}-console-service
-            port:
-              number: {{ .Values.ports.internal.s3minioConsole }}
-{{ end }}
+{{/*
+  external-secret.yaml
+  Создаётся ТОЛЬКО если vault.enabled=true.
 
----
-############### Free (unprotected) Endpoints ###############
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{ .Values.ingressDomain }}-ingress-free
-  namespace: {{ .Release.Namespace }}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
-spec:
-  ingressClassName: {{ .Values.ingressClassName }}
-  {{ if eq .Values.TLS.enable true }}
-  tls:
-    - hosts:
-        - {{ .Values.ingressDomain }}
-      secretName: {{ tpl .Values.TLS.secret . }}
-  {{ end }}
-  rules:
-  - host: {{ .Values.ingressDomain }}
-    http:
-      paths:
-      # ── Auth-страница (логин) — открытая ──────────────────────────────────
-      # Фронт редиректит сюда неаутентифицированных: /auth?redirect=%2F
-      # После входа фронт сам делает redirect обратно на /
-      - path: /auth
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Release.Namespace }}-{{ .Values.labels.auth.share }}-cs
-            port:
-              number: {{ .Values.ports.internal.back }}
-      # ── /login — алиас для совместимости (опционально) ───────────────────
-      - path: /login
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Release.Namespace }}-{{ .Values.labels.auth.share }}-cs
-            port:
-              number: {{ .Values.ports.internal.back }}
-      # ── Фронтенд — защищён через auth-url выше ───────────────────────────
-      # ВАЖНО: этот путь должен быть ПОСЛЕ /auth и /login,
-      # иначе Prefix "/" перехватит всё
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Values.labels.front }}-service
-            port:
-              number: {{ .Values.ports.internal.front }}
+  ESO читает все ключи из Vault пути и создаёт K8s Secret.
+  Secret автоматически синхронизируется каждые vault.refreshInterval.
 
----
-############### Auth module protected endpoints ###############
-{{ if eq .Values.enableModules.auth true }}
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+  Если vault.enabled=false — этот файл не создаёт ничего.
+*/}}
+{{- if .Values.vault.enabled }}
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
-  name: {{ .Values.ingressDomain }}-ingress-auth-not-free
+  name: {{ .Values.vault.secretName }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.app.name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    nginx.ingress.kubernetes.io/rewrite-target: /$1
-    nginx.ingress.kubernetes.io/use-regex: "true"
-    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
+    # Описание для удобства отладки
+    vault.path: "stands/{{ .Values.vault.secretPath }}"
 spec:
-  ingressClassName: {{ .Values.ingressClassName }}
-  {{ if eq .Values.TLS.enable true }}
-  tls:
-    - hosts:
-        - {{ .Values.ingressDomain }}
-      secretName: {{ tpl .Values.TLS.secret . }}
-  {{ end }}
-  rules:
-  - host: {{ .Values.ingressDomain }}
-    http:
-      paths:
-      - path: /api/auth/(.*)
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: {{ .Release.Namespace }}-{{ .Values.labels.auth.share }}-cs
-            port:
-              number: {{ .Values.ports.internal.back }}
-{{ end }}
+  refreshInterval: {{ .Values.vault.refreshInterval }}
+  secretStoreRef:
+    name: {{ .Values.vault.clusterSecretStore }}
+    kind: ClusterSecretStore
+  target:
+    name: {{ .Values.vault.secretName }}
+    creationPolicy: Owner
+    # Retain — не удалять Secret если ExternalSecret удалён
+    # Это защита: если чарт откатится, секреты останутся
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        # Vault путь без префикса mount (stands/)
+        # Пример: dev-devops/approvals/backend
+        key: {{ .Values.vault.secretPath }}
+{{- end }}
+---
+{{/*
+  configmap.yaml
+  Базовая конфигурация приложения.
+  Создаётся ВСЕГДА — независимо от vault.enabled.
+  Содержит не секретные настройки: порты, хосты, уровни логирования и т.д.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.app.name }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.app.name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  {{- range $key, $val := .Values.config }}
+  {{ $key }}: {{ $val | quote }}
+  {{- end }}
+---
+app:
+  name: "backend"
+  image:
+    repository: "myregistry/backend"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8080
+
+# ConfigMap — используется всегда (базовая конфигурация приложения)
+config:
+  APP_ENV: "production"
+  APP_PORT: "8080"
+  LOG_LEVEL: "info"
+  DB_HOST: "postgres.stand-test.svc.cluster.local"
+  DB_PORT: "5432"
+
+# Vault интеграция — опциональна
+# enabled: false — ExternalSecret не создаётся, приложение работает только с ConfigMap
+# enabled: true  — создаётся ExternalSecret, Secret монтируется вместе с ConfigMap
+vault:
+  enabled: false
+
+  # Имя ClusterSecretStore (создаётся chart-ом vault-secrets)
+  clusterSecretStore: "vault-cluster-store-dev-devops"
+
+  # Путь в Vault без префикса mount: stands/<stand>/<suffix>/<app>
+  # Пример: dev-devops/approvals/backend
+  secretPath: "dev-devops/approvals/backend"
+
+  # Имя K8s Secret который будет создан в namespace
+  secretName: "backend-vault-secret"
+
+  # Как часто синхронизировать из Vault
+  refreshInterval: "5m"
