@@ -1,16 +1,80 @@
-# Сначала распаковываем OCI Layout в директорию
-mkdir -p /tmp/k8s-oci
-tar -xzf /tmp/k8s/k8s-1.32.13.tar.gz -C /tmp/k8s-oci
-
-# Смотрим какие образы там лежат
-cat /tmp/k8s-oci/index.json | python3 -m json.tool
-
-# Импортируем каждый образ в containerd
-# skopeo копирует из OCI dir → containerd через ctr
-skopeo copy --dest-tls-verify=false \
-  oci:/tmp/k8s-oci:registry.k8s.io/kube-apiserver:v1.32.13 \
-  containers-storage:registry.k8s.io/kube-apiserver:v1.32.13
-
+    "schemaVersion": 2,
+    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "manifests": [
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:689bb84438cd48f1e72f9a1d5bbd5b65396645a0611ddc36638f38dd5452f01e",
+            "size": 554,
+            "annotations": {
+                "io.containerd.image.name": "ghcr.io/kube-vip/kube-vip:v0.9.2",
+                "org.opencontainers.image.ref.name": "v0.9.2"
+            }
+        },
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:e8e4e2589d52561b33ced0172ab87cd1857653fdb723e565095ca6f406fca14b",
+            "size": 2366,
+            "annotations": {
+                "io.containerd.image.name": "registry.k8s.io/kube-apiserver:v1.32.13",
+                "org.opencontainers.image.ref.name": "v1.32.13"
+            }
+        },
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:216244f5f39ea0a2a063a78bdd6bb4569149d301755eb8782cb5b6594a0139d1",
+            "size": 2366,
+            "annotations": {
+                "io.containerd.image.name": "registry.k8s.io/kube-controller-manager:v1.32.13",
+                "org.opencontainers.image.ref.name": "v1.32.13"
+            }
+        },
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:bf64c043772168ada19023073bfdce25b289c5653c259122c0989868b1411013",
+            "size": 2366,
+            "annotations": {
+                "io.containerd.image.name": "registry.k8s.io/kube-scheduler:v1.32.13",
+                "org.opencontainers.image.ref.name": "v1.32.13"
+            }
+        },
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:fdfa5eddf79aa626e8c6cb60945b4e96ef95a31abd2070e3ec28bc3ed325c471",
+            "size": 555,
+            "annotations": {
+                "io.containerd.image.name": "registry.k8s.io/kube-proxy:v1.32.13",
+                "org.opencontainers.image.ref.name": "v1.32.13"
+            }
+        },
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:39b394f0ed96b1439eb069747be1cae7a8a1e959b49bdd5bde9ca874cefc86c4",
+            "size": 2213,
+            "annotations": {
+                "io.containerd.image.name": "registry.k8s.io/coredns/coredns:v1.11.3",
+                "org.opencontainers.image.ref.name": "v1.11.3"
+            }
+        },
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:a883b8d67f5fe8ae50f857fb4c11c789913d31edff664135b9d4df44d3cb85cb",
+            "size": 399,
+            "annotations": {
+                "io.containerd.image.name": "registry.k8s.io/pause:3.10",
+                "org.opencontainers.image.ref.name": "3.10"
+            }
+        },
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:399a2cdd6509d087e297777ef05b084e481987580d7f18c45eda4168a119d70f",
+            "size": 2369,
+            "annotations": {
+                "io.containerd.image.name": "registry.k8s.io/etcd:3.5.16-0",
+                "org.opencontainers.image.ref.name": "3.5.16-0"
+            }
+        }
+    ]
+}
 ctr -n k8s.io images import /tmp/k8s/calico.cni:v3.29.5.tar.zip
-ctr -n k8s.io images import /tmp/k8s/calico.kube-controllers:v3.29.5.tar.zip
-ctr -n k8s.io images import /tmp/k8s/calico.node:v3.29.5.tar.zip
+WARN[0000] DEPRECATION: The `configs` property of `[plugins."io.containerd.grpc.v1.cri".registry]` is deprecated since containerd v1.5 and will be removed in containerd v2.1. Use `config_path` instead.
+ctr: archive/tar: invalid tar header
