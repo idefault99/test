@@ -3,7 +3,7 @@
 set -e  # останавливаемся при любой ошибке
 
 # --- Настройки ---
-OUTPUT_DIR="./longhorn-images"
+OUTPUT_DIR="./long-images"
 mkdir -p "$OUTPUT_DIR"
 
 # --- 1. Образы Kubernetes (core) ---
