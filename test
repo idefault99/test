@@ -27,7 +27,7 @@ CALICO_IMAGES=(
 
 # # --- 3. Longhorn v1.10.2 ---
 LONGHORN_IMAGES=(
-    "longhornio/longhorn-instance-manager:v1.10.2"
+    "longhornio/longhorn-share-manager:v1.10.2"
 )
 
 # --- 4. kube-vip v0.9.2 ---
@@ -36,7 +36,7 @@ LONGHORN_IMAGES=(
 # )
 
 # --- Объединяем все списки ---
-ALL_IMAGES=("${LONGHORN_IMAGES[@]}")
+ALL_IMAGES=("${CALICO_IMAGES[@]}" "${LONGHORN_IMAGES[@]}")
 
 echo "=== Начинаем pull образов ==="
 for image in "${ALL_IMAGES[@]}"; do
@@ -45,7 +45,7 @@ for image in "${ALL_IMAGES[@]}"; do
 done
 
 echo "=== Сохраняем все образы в один архив images.tar.gz ==="
-docker save "${ALL_IMAGES[@]}" | gzip > "$OUTPUT_DIR/longhorn-instance-manager:v1.10.2.tar.gz"
+docker save "${ALL_IMAGES[@]}" | gzip > "$OUTPUT_DIR/longhorn-share-manager:v1.10.2.tar.gz"
 
 echo "=== Готово ==="
 echo "Все архивы лежат в папке: $OUTPUT_DIR"
