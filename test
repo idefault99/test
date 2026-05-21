@@ -1,15 +1,28 @@
-# Что реально внутри
 file /tmp/k8s/k8s-1.32.13.tar.gz
-
-# Пробуем распаковать один уровень
-cd /tmp/k8s
-gunzip -k k8s-1.32.13.tar.gz
-# Получится k8s-1.32.13.tar — что в нём?
-file k8s-1.32.13.tar
-
-# Посмотреть содержимое без распаковки
-tar -tzvf k8s-1.32.13.tar.gz 2>&1 | head -20
-# или если gunzip выше уже отработал:
-tar -tvf k8s-1.32.13.tar | head -20
-
-file calico.cni:v3.29.5.tar.zip
+/tmp/k8s/k8s-1.32.13.tar.gz: gzip compressed data, from Unix, original size modulo 2^32 622007808
+[user@test test]# gunzip -k k8s-1.32.13.tar.gz
+[user@test test]# file k8s-1.32.13.tar
+k8s-1.32.13.tar: POSIX tar archive
+[user@test test]# tar -tvf k8s-1.32.13.tar | head -20
+drwxr-xr-x 0/0               0 2024-09-13 16:34 blobs/
+drwxr-xr-x 0/0               0 2026-05-21 12:36 blobs/sha256/
+-rw-r--r-- 0/0             482 2026-02-26 23:26 blobs/sha256/02c7294610a4ebe1da4aaceb806d2484d6b07d20b50e99af6f55ab576d1ef7b1
+-rw-r--r-- 0/0          217088 2024-07-29 20:30 blobs/sha256/06be1466c7d3000b828baff3e9f5ca8e7f123f72576619b7ff103db0c3153be1
+-rw-r--r-- 0/0             482 2026-02-26 23:26 blobs/sha256/0713dd58dcb9e1934b51e8d68a5bb97ed6b3fcc3ee51458d222d1320726808b0
+-rw-r--r-- 0/0             788 2024-05-23 23:42 blobs/sha256/0e0ac066b5434d360e3f188c8c259af5d71e25aa4c3728c917a7972b2ac0e91d
+-rw-r--r-- 0/0          102400 2026-02-26 23:26 blobs/sha256/114dde0fefebbca13165d0da9c500a66190e497a82a53dcaabc3172d630be1e9
+-rw-r--r-- 0/0        86799360 2026-02-26 23:26 blobs/sha256/135f60516c4fdb7c77ed873a73c85c9c02739df492170d822a0683ad08953ea2
+-rw-r--r-- 0/0             482 2024-09-13 16:34 blobs/sha256/17975d00f56718524153ba31c9b1a99fb8485a9391d53aa5f92329ad5a2d57e5
+-rw-r--r-- 0/0           10240 2026-02-26 23:26 blobs/sha256/1a73b54f556b477f0a8b939d13c504a3b4f4db71f7a09c63afbc10acb3de5849
+-rw-r--r-- 0/0            2903 2026-02-26 23:26 blobs/sha256/1ca64cd86eb37dd8ce56c72688055644b2303b93d583de8594592e5dadf9283e
+-rw-r--r-- 0/0            2366 1970-01-01 03:00 blobs/sha256/216244f5f39ea0a2a063a78bdd6bb4569149d301755eb8782cb5b6594a0139d1
+-rw-r--r-- 0/0        59038208 2024-07-29 20:30 blobs/sha256/21c2962c204299c738896a757fbcc4190df6d7992af7b31457fb71bbac86df7c
+-rw-r--r-- 0/0             406 2025-06-24 20:19 blobs/sha256/2216d45fd32540477a0fa8e06eaa4398d8027aa60fcc662f2a9db9ea78b136a6
+-rw-r--r-- 0/0          225280 2024-07-29 20:30 blobs/sha256/2388d21e8e2b74e055216652e6af384768e97513ad568e10c27bacec389b7f0a
+-rw-r--r-- 0/0        94004224 2026-02-26 23:26 blobs/sha256/244fa969a3649636a86fa380dac1491aeae75c49031b4fb1ea78352cdfa08e54
+-rw-r--r-- 0/0            1536 2024-07-29 20:30 blobs/sha256/2a92d6ac9e4fcc274d5168b217ca4458a9fec6f094ead68d99c77073f08caac1
+-rw-r--r-- 0/0            2752 2026-02-26 23:26 blobs/sha256/2fab0ac6a3f2b587f6a041ea510d2c9a7cc1ab5d124fe5f8a1358c730817eb41
+-rw-r--r-- 0/0         2342912 2024-09-13 16:34 blobs/sha256/2fda8262901e5471ccff9c6ae6c66b535ad5d0a386cd14f9c5b91de0a5ff336d
+-rw-r--r-- 0/0          241664 2026-02-26 23:26 blobs/sha256/33b37ab0b0901175c2699d81c10b0c887f0dff944de74763cca00c155904d6fb
+[user@test test]# file calico.cni:v3.29.5.tar.zip
+calico.cni:v3.29.5.tar.zip: gzip compressed data, from Unix, original size modulo 2^32 219891712
