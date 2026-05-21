@@ -1,11 +1,3 @@
-# Один образ
-ctr -n k8s.io images import /путь/к/образ.tar.gz
-
-# Все .tar.gz разом
-for f in /путь/*.tar.gz; do
-  echo "=== Импорт: $f ==="
-  ctr -n k8s.io images import "$f"
-done
-
-# Проверка что всё появилось
-ctr -n k8s.io images ls
+ctr -n k8s.io images import /tmp/k8s/k8s-1.32.13.tar.gz
+WARN[0000] DEPRECATION: The `configs` property of `[plugins."io.containerd.grpc.v1.cri".registry]` is deprecated since containerd v1.5 and will be removed in containerd v2.1. Use `config_path` instead.
+ctr: archive/tar: invalid tar header
