@@ -1,56 +1,11 @@
-#!/bin/bash
-#
-set -e  # останавливаемся при любой ошибке
-
-# --- Настройки ---
-OUTPUT_DIR="./longhorn-images"
-mkdir -p "$OUTPUT_DIR"
-
-# --- 1. Образы Kubernetes (core) ---
-# Для версии 1.32.13 стандартные теги:
-# K8S_IMAGES=(
-#     "registry.k8s.io/kube-apiserver:v1.32.13"
-#     "registry.k8s.io/kube-controller-manager:v1.32.13"
-#     "registry.k8s.io/kube-scheduler:v1.32.13"
-#     "registry.k8s.io/kube-proxy:v1.32.13"
-#     "registry.k8s.io/coredns/coredns:v1.11.3"
-#     "registry.k8s.io/pause:3.10"
-#     "registry.k8s.io/etcd:3.5.16-0"
-# )
-
-# # --- 2. Calico v3.29.5 ---
-CALICO_IMAGES=(
-    "docker.io/calico/cni:v3.29.5"
-    "docker.io/calico/node:v3.29.5"
-    "docker.io/calico/kube-controllers:v3.29.5"
-)
-
-# # --- 3. Longhorn v1.10.2 ---
-LONGHORN_IMAGES=(
-    "longhornio/longhorn-instance-manager:v1.10.x-head"
-)
-
-# --- 4. kube-vip v0.9.2 ---
-# VIP_IMAGES=(
-#     "ghcr.io/kube-vip/kube-vip:v0.9.2"
-# )
-
-# --- Объединяем все списки ---
-ALL_IMAGES=("${LONGHORN_IMAGES[@]}")
-
-echo "=== Начинаем pull образов ==="
-for image in "${ALL_IMAGES[@]}"; do
-    echo "Pull: $image"
-    docker pull "$image"
-done
-
-echo "=== Сохраняем все образы в один архив images.tar.gz ==="
-docker save "${ALL_IMAGES[@]}" | gzip > "$OUTPUT_DIR/longhorn-instance-manager:v1.10.x-head.tar.gz"
-
-echo "=== Готово ==="
-echo "Все архивы лежат в папке: $OUTPUT_DIR"
-echo "Общий размер:"
-du -sh "$OUTPUT_DIR"
-
-echo "=== Удаляем образы из Docker (освобождаем место) ==="
-docker rmi "${ALL_IMAGES[@]}" 2>/dev/null || true
+ 94M May 21 15:07 calico.cni:v3.29.5.tar.zip
+ 35M May 21 15:07 calico.kube-controllers:v3.29.5.tar.zip
+134M May 21 15:07 calico.node:v3.29.5.tar.zip
+186M May 21 15:07 k8s-1.32.13.tar.gz
+162M May 21 15:08 longhorn-engine_v1.10.2.tar.gz
+5.3K May 21 15:08 longhornio.longhorn-instance-manager:v1.10.2.tar.gz
+121M May 21 15:08 longhorn-manager_v1.10.2.tar.gz
+ 93M May 21 15:08 longhorn-share-manager_v1.10.2.tar.gz
+ 80M May 21 15:08 longhorn-ui_v1.10.2.tar.gz
+containerd --version
+containerd github.com/containerd/containerd 1.7.29
