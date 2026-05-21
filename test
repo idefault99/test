@@ -1,3 +1,15 @@
-ctr -n k8s.io images import /tmp/k8s/k8s-1.32.13.tar.gz
-WARN[0000] DEPRECATION: The `configs` property of `[plugins."io.containerd.grpc.v1.cri".registry]` is deprecated since containerd v1.5 and will be removed in containerd v2.1. Use `config_path` instead.
-ctr: archive/tar: invalid tar header
+# Что реально внутри
+file /tmp/k8s/k8s-1.32.13.tar.gz
+
+# Пробуем распаковать один уровень
+cd /tmp/k8s
+gunzip -k k8s-1.32.13.tar.gz
+# Получится k8s-1.32.13.tar — что в нём?
+file k8s-1.32.13.tar
+
+# Посмотреть содержимое без распаковки
+tar -tzvf k8s-1.32.13.tar.gz 2>&1 | head -20
+# или если gunzip выше уже отработал:
+tar -tvf k8s-1.32.13.tar | head -20
+
+file calico.cni:v3.29.5.tar.zip
