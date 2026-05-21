@@ -36,7 +36,7 @@ LONGHORN_IMAGES=(
 # )
 
 # --- Объединяем все списки ---
-ALL_IMAGES=("${CALICO_IMAGES[@]}" "${LONGHORN_IMAGES[@]}")
+ALL_IMAGES=("${LONGHORN_IMAGES[@]}")
 
 echo "=== Начинаем pull образов ==="
 for image in "${ALL_IMAGES[@]}"; do
