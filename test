@@ -1,23 +1,292 @@
-skopeo copy \
-  --insecure-policy \
-  oci:/tmp/oci-import/k8s:v1.32.13 \
-  oci-archive:/tmp/kube-apiserver.tar
-Getting image source signatures
-Copying blob a33ba213ad26 done   |
-Copying blob 8fa10c0194df done   |
-Copying blob 4840c7c54023 done   |
-Copying blob 114dde0fefeb done   |
-Copying blob 4d049f83d9cf done   |
-Copying blob af5aa97ebe6c done   |
-Copying blob 6f1cdceb6a31 done   |
-Copying blob bd3cdfae1d3f done   |
-Copying blob 4cde6b0bb6f5 done   |
-Copying blob 1a73b54f556b done   |
-Copying blob 6e7fbcf090d0 done   |
-Copying blob 33b37ab0b090 done   |
-Copying blob 3425d824b180 done   |
-Copying blob 244fa969a364 done   |
-Copying config 1ca64cd86e done   |
-Writing manifest to image destination
-ctr -n k8s.io images import /tmp/kube-apiserver.tar
-WARN[0000] DEPRECATION: The `configs` property of `[plugins."io.containerd.grpc.v1.cri".registry]` is deprecated since containerd v1.5 and will be removed in containerd v2.1. Use `config_path` instead.
+#!/bin/bash
+# =============================================================================
+# push-images-to-nodes.sh
+# Экспортирует образы из локального Docker, копирует на ноды по SSH,
+# импортирует в containerd namespace k8s.io, удаляет за собой.
+# =============================================================================
+
+set -euo pipefail
+
+# -----------------------------------------------------------------------------
+# НАСТРОЙКИ — заполни перед запуском
+# -----------------------------------------------------------------------------
+
+SSH_USER="user"
+SSH_PASS="СЮДА_ПАРОЛЬ"
+SSH_PORT="22"
+
+NODES=(
+  "172.16.175.19"
+  "172.16.175.21"
+  "172.16.175.23"
+  "172.16.175.25"
+  "172.16.175.27"
+  "172.16.175.29"
+)
+
+# Точные названия образов из docker images (вставь свои)
+IMAGES=(
+  "registry.k8s.io/kube-apiserver:v1.32.13"
+  "registry.k8s.io/kube-controller-manager:v1.32.13"
+  "registry.k8s.io/kube-scheduler:v1.32.13"
+  "registry.k8s.io/kube-proxy:v1.32.13"
+  "registry.k8s.io/etcd:3.5.16-0"
+  "registry.k8s.io/coredns/coredns:v1.11.3"
+  "registry.k8s.io/pause:3.10"
+  "ghcr.io/kube-vip/kube-vip:v0.9.2"
+  "docker.io/calico/cni:v3.29.5"
+  "docker.io/calico/kube-controllers:v3.29.5"
+  "docker.io/calico/node:v3.29.5"
+  "longhornio/longhorn-manager:v1.10.2"
+  "longhornio/longhorn-engine:v1.10.2"
+  "longhornio/longhorn-instance-manager:v1.10.2"
+  "longhornio/longhorn-share-manager:v1.10.2"
+  "longhornio/longhorn-ui:v1.10.2"
+)
+
+# Временная директория на удалённых нодах
+REMOTE_TMP="/tmp/ctr-import"
+
+# Временная директория локально для архивов
+LOCAL_TMP="/tmp/docker-export-$$"
+
+# -----------------------------------------------------------------------------
+# ЦВЕТА
+# -----------------------------------------------------------------------------
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+
+log()  { echo -e "${CYAN}[$(date '+%H:%M:%S')]${RESET} $*"; }
+ok()   { echo -e "${GREEN}[OK]${RESET} $*"; }
+warn() { echo -e "${YELLOW}[WARN]${RESET} $*"; }
+err()  { echo -e "${RED}[ERR]${RESET} $*"; }
+hdr()  { echo -e "\n${BOLD}${CYAN}══════════════════════════════════════════${RESET}"; \
+         echo -e "${BOLD}${CYAN}  $*${RESET}"; \
+         echo -e "${BOLD}${CYAN}══════════════════════════════════════════${RESET}"; }
+
+# -----------------------------------------------------------------------------
+# ЗАВИСИМОСТИ
+# -----------------------------------------------------------------------------
+check_deps() {
+  hdr "Проверка зависимостей"
+  local missing=0
+  for cmd in docker sshpass ssh scp; do
+    if command -v "$cmd" &>/dev/null; then
+      ok "$cmd найден"
+    else
+      err "$cmd не найден — установи: apt/dnf install $cmd"
+      missing=1
+    fi
+  done
+  [ $missing -eq 0 ] || { err "Установи недостающие утилиты и запусти снова"; exit 1; }
+}
+
+# -----------------------------------------------------------------------------
+# SSH-хелперы
+# -----------------------------------------------------------------------------
+ssh_cmd() {
+  local node="$1"; shift
+  sshpass -p "$SSH_PASS" ssh \
+    -o StrictHostKeyChecking=no \
+    -o ConnectTimeout=10 \
+    -p "$SSH_PORT" \
+    "${SSH_USER}@${node}" "$@"
+}
+
+scp_file() {
+  local src="$1" node="$2" dst="$3"
+  sshpass -p "$SSH_PASS" scp \
+    -o StrictHostKeyChecking=no \
+    -o ConnectTimeout=10 \
+    -P "$SSH_PORT" \
+    "$src" "${SSH_USER}@${node}:${dst}"
+}
+
+# -----------------------------------------------------------------------------
+# ЛОКАЛЬНЫЙ ЭКСПОРТ
+# -----------------------------------------------------------------------------
+export_images() {
+  hdr "Экспорт образов из Docker"
+  mkdir -p "$LOCAL_TMP"
+
+  local total=${#IMAGES[@]}
+  local idx=0
+
+  for image in "${IMAGES[@]}"; do
+    idx=$((idx + 1))
+    # Имя файла: заменяем / : на _ 
+    local fname
+    fname=$(echo "$image" | tr '/: ' '___').tar
+    local fpath="$LOCAL_TMP/$fname"
+
+    log "[$idx/$total] Экспорт: $image"
+
+    if ! docker image inspect "$image" &>/dev/null; then
+      err "Образ не найден в Docker: $image"
+      err "Проверь имя и повтори. Прерываем."
+      exit 1
+    fi
+
+    docker save "$image" -o "$fpath"
+    local size
+    size=$(du -sh "$fpath" | cut -f1)
+    ok "  → $fname ($size)"
+  done
+
+  log "Все образы экспортированы в $LOCAL_TMP"
+}
+
+# -----------------------------------------------------------------------------
+# ОБРАБОТКА ОДНОЙ НОДЫ
+# -----------------------------------------------------------------------------
+process_node() {
+  local node="$1"
+
+  hdr "Нода: $node"
+
+  # Проверка SSH
+  if ! ssh_cmd "$node" "true" 2>/dev/null; then
+    err "Нет SSH-доступа до $node — пропускаем"
+    return 1
+  fi
+  ok "SSH доступен"
+
+  # Создаём tmp на ноде
+  ssh_cmd "$node" "mkdir -p $REMOTE_TMP"
+
+  local total=${#IMAGES[@]}
+  local idx=0
+  local failed=()
+
+  for image in "${IMAGES[@]}"; do
+    idx=$((idx + 1))
+    local fname
+    fname=$(echo "$image" | tr '/: ' '___').tar
+    local local_path="$LOCAL_TMP/$fname"
+    local remote_path="$REMOTE_TMP/$fname"
+
+    log "[$idx/$total] $image"
+
+    # Проверяем — вдруг образ уже есть на ноде
+    if ssh_cmd "$node" "ctr -n k8s.io images ls -q 2>/dev/null | grep -qF '$image'" 2>/dev/null; then
+      warn "  уже есть в containerd, пропускаем"
+      continue
+    fi
+
+    # Копируем
+    log "  → scp $fname"
+    if ! scp_file "$local_path" "$node" "$remote_path"; then
+      err "  scp failed: $fname"
+      failed+=("$image")
+      continue
+    fi
+
+    # Импортируем
+    log "  → ctr import"
+    local import_out
+    if import_out=$(ssh_cmd "$node" "ctr -n k8s.io images import $remote_path 2>&1"); then
+      ok "  импортирован"
+    else
+      err "  ctr import failed: $import_out"
+      failed+=("$image")
+    fi
+
+    # Удаляем файл на ноде сразу после импорта (экономим место)
+    ssh_cmd "$node" "rm -f $remote_path" 2>/dev/null || true
+  done
+
+  # Удаляем tmp dir на ноде
+  ssh_cmd "$node" "rm -rf $REMOTE_TMP" 2>/dev/null || true
+
+  # Итог по ноде
+  echo ""
+  log "Образы в containerd на $node:"
+  ssh_cmd "$node" "ctr -n k8s.io images ls -q 2>/dev/null" | sort
+
+  if [ ${#failed[@]} -gt 0 ]; then
+    err "Не удалось импортировать на $node:"
+    for f in "${failed[@]}"; do err "  - $f"; done
+    return 1
+  fi
+
+  ok "Нода $node — все образы импортированы"
+}
+
+# -----------------------------------------------------------------------------
+# ЛОКАЛЬНАЯ ОЧИСТКА
+# -----------------------------------------------------------------------------
+cleanup_local() {
+  hdr "Локальная очистка"
+  if [ -d "$LOCAL_TMP" ]; then
+    rm -rf "$LOCAL_TMP"
+    ok "Удалена директория $LOCAL_TMP"
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# ИТОГОВЫЙ ОТЧЁТ
+# -----------------------------------------------------------------------------
+summary() {
+  hdr "Итоговый отчёт"
+  local ok_nodes=() fail_nodes=()
+
+  for node in "${NODES[@]}"; do
+    local count
+    count=$(sshpass -p "$SSH_PASS" ssh \
+      -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+      -p "$SSH_PORT" "${SSH_USER}@${node}" \
+      "ctr -n k8s.io images ls -q 2>/dev/null | wc -l" 2>/dev/null || echo 0)
+
+    if [ "$count" -ge "${#IMAGES[@]}" ]; then
+      ok_nodes+=("$node ($count образов)")
+    else
+      fail_nodes+=("$node ($count из ${#IMAGES[@]} образов)")
+    fi
+  done
+
+  echo ""
+  echo -e "${GREEN}${BOLD}Успешно:${RESET}"
+  for n in "${ok_nodes[@]:-}"; do [ -n "$n" ] && echo "  ✓ $n"; done
+
+  if [ ${#fail_nodes[@]} -gt 0 ]; then
+    echo ""
+    echo -e "${RED}${BOLD}Проблемы:${RESET}"
+    for n in "${fail_nodes[@]}"; do echo "  ✗ $n"; done
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# TRAP — чистим локальное при любом выходе
+# -----------------------------------------------------------------------------
+trap 'cleanup_local' EXIT
+
+# -----------------------------------------------------------------------------
+# MAIN
+# -----------------------------------------------------------------------------
+main() {
+  echo -e "${BOLD}${CYAN}"
+  echo "╔══════════════════════════════════════════╗"
+  echo "║   Docker → containerd image pusher       ║"
+  echo "║   Ноды: ${#NODES[@]}  Образы: ${#IMAGES[@]}                    ║"
+  echo "╚══════════════════════════════════════════╝"
+  echo -e "${RESET}"
+
+  check_deps
+  export_images
+
+  local node_errors=0
+  for node in "${NODES[@]}"; do
+    process_node "$node" || node_errors=$((node_errors + 1))
+  done
+
+  summary
+
+  if [ $node_errors -gt 0 ]; then
+    err "Завершено с ошибками на $node_errors нодах"
+    exit 1
+  fi
+
+  ok "Все ноды обработаны успешно"
+}
+
+main "$@"
