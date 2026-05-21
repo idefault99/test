@@ -1,11 +1,11 @@
- 94M May 21 15:07 calico.cni:v3.29.5.tar.zip
- 35M May 21 15:07 calico.kube-controllers:v3.29.5.tar.zip
-134M May 21 15:07 calico.node:v3.29.5.tar.zip
-186M May 21 15:07 k8s-1.32.13.tar.gz
-162M May 21 15:08 longhorn-engine_v1.10.2.tar.gz
-5.3K May 21 15:08 longhornio.longhorn-instance-manager:v1.10.2.tar.gz
-121M May 21 15:08 longhorn-manager_v1.10.2.tar.gz
- 93M May 21 15:08 longhorn-share-manager_v1.10.2.tar.gz
- 80M May 21 15:08 longhorn-ui_v1.10.2.tar.gz
-containerd --version
-containerd github.com/containerd/containerd 1.7.29
+# Один образ
+ctr -n k8s.io images import /путь/к/образ.tar.gz
+
+# Все .tar.gz разом
+for f in /путь/*.tar.gz; do
+  echo "=== Импорт: $f ==="
+  ctr -n k8s.io images import "$f"
+done
+
+# Проверка что всё появилось
+ctr -n k8s.io images ls
