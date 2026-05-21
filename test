@@ -1,12 +1,23 @@
-# Для одного образа — проверь сначала на k8s-1.32.13
-mkdir -p /tmp/oci-import/k8s
-tar -xzf /tmp/k8s/k8s-1.32.13.tar.gz -C /tmp/oci-import/k8s
-
-# Импортируем первый образ из архива (kube-apiserver)
 skopeo copy \
   --insecure-policy \
   oci:/tmp/oci-import/k8s:v1.32.13 \
   oci-archive:/tmp/kube-apiserver.tar
-
-# Теперь ctr import понимает oci-archive
+Getting image source signatures
+Copying blob a33ba213ad26 done   |
+Copying blob 8fa10c0194df done   |
+Copying blob 4840c7c54023 done   |
+Copying blob 114dde0fefeb done   |
+Copying blob 4d049f83d9cf done   |
+Copying blob af5aa97ebe6c done   |
+Copying blob 6f1cdceb6a31 done   |
+Copying blob bd3cdfae1d3f done   |
+Copying blob 4cde6b0bb6f5 done   |
+Copying blob 1a73b54f556b done   |
+Copying blob 6e7fbcf090d0 done   |
+Copying blob 33b37ab0b090 done   |
+Copying blob 3425d824b180 done   |
+Copying blob 244fa969a364 done   |
+Copying config 1ca64cd86e done   |
+Writing manifest to image destination
 ctr -n k8s.io images import /tmp/kube-apiserver.tar
+WARN[0000] DEPRECATION: The `configs` property of `[plugins."io.containerd.grpc.v1.cri".registry]` is deprecated since containerd v1.5 and will be removed in containerd v2.1. Use `config_path` instead.
