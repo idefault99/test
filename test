@@ -1,11 +1,2 @@
-[16:16:15]   → scp calico_cni_v3.29.5.tar
-[16:16:16]   → ctr import
-[ERR]   ctr import failed: time="2026-05-21T16:16:16+03:00" level=warning msg="DEPRECATION: The `configs` property of `[plugins.\"io.containerd.grpc.v1.cri\".registry]` is deprecated since containerd v1.5 and will be removed in containerd v2.1. Use `config_path` instead."
-unpacking docker.io/calico/cni:v3.29.5 (sha256:31ec637fab1909858138d67ff75f4dfc570cb507b657fc4e1320398c8947895d)...ctr: failed to resolve rootfs: content digest sha256:2b1c487ed9e0ffe4fc908737c529328f336b83075ae07baa2a80b8fe0171a922: not found
-[16:26:49]   → scp longhornio_longhorn-instance-manager_v1.10.2.tar
-[16:17:52]   → ctr import
-[ERR]   ctr import failed: time="2026-05-21T16:17:53+03:00" level=warning msg="DEPRECATION: The `configs` property of `[plugins.\"io.containerd.grpc.v1.cri\".registry]` is deprecated since containerd v1.5 and will be removed in containerd v2.1. Use `config_path` instead."
-unpacking docker.io/longhornio/longhorn-instance-manager:v1.10.2 (sha256:0657866bb9cf4a378a8ff27d1f2cca9bcc4491361873c5380cd1d5b70f00853b)...ctr: failed to resolve rootfs: content digest sha256:0532cbc3f4e20689f6ea9e945416f6eccfb64db5b0f0b091d9f22f8e4f1c92f1: not found
-[ERR] Не удалось импортировать
-[ERR]   - calico/cni:v3.29.5
-[ERR]   - longhornio/longhorn-instance-manager:v1.10.2
+docker pull registry.k8s.io/etcd:3.5.24-0
+docker save registry.k8s.io/etcd:3.5.24-0 -o etcd-3.5.24.tar
