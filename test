@@ -1,57 +1,502 @@
-[preflight] Pulling images required for setting up a Kubernetes cluster
-[preflight] This might take a minute or two, depending on the speed of your internet connection
-[preflight] You can also perform this action beforehand using 'kubeadm config images pull'
-[certs] Using certificateDir folder "/etc/kubernetes/pki"
-[certs] Generating "ca" certificate and key
-[certs] Generating "apiserver" certificate and key
-[certs] apiserver serving cert is signed for DNS names [coparking-5 k8s-api kubernetes kubernetes.default kubernetes.default.svc kubernetes.default.svc.cluster.local localhost] and IPs [10.96.0.1 172.16.175.19 172.16.175.20 172.16.175.21 172.16.175.23 127.0.0.1]
-[certs] Generating "apiserver-kubelet-client" certificate and key
-[certs] Generating "front-proxy-ca" certificate and key
-[certs] Generating "front-proxy-client" certificate and key
-[certs] Generating "etcd/ca" certificate and key
-[certs] Generating "etcd/server" certificate and key
-[certs] etcd/server serving cert is signed for DNS names [coparking-5 localhost] and IPs [172.16.175.19 127.0.0.1 ::1]
-[certs] Generating "etcd/peer" certificate and key
-[certs] etcd/peer serving cert is signed for DNS names [coparking-5 localhost] and IPs [172.16.175.19 127.0.0.1 ::1]
-[certs] Generating "etcd/healthcheck-client" certificate and key
-[certs] Generating "apiserver-etcd-client" certificate and key
-[certs] Generating "sa" key and public key
-[kubeconfig] Using kubeconfig folder "/etc/kubernetes"
-[kubeconfig] Writing "admin.conf" kubeconfig file
-[kubeconfig] Writing "super-admin.conf" kubeconfig file
-[kubeconfig] Writing "kubelet.conf" kubeconfig file
-[kubeconfig] Writing "controller-manager.conf" kubeconfig file
-[kubeconfig] Writing "scheduler.conf" kubeconfig file
-[etcd] Creating static Pod manifest for local etcd in "/etc/kubernetes/manifests"
-[control-plane] Using manifest folder "/etc/kubernetes/manifests"
-[control-plane] Creating static Pod manifest for "kube-apiserver"
-[control-plane] Creating static Pod manifest for "kube-controller-manager"
-[control-plane] Creating static Pod manifest for "kube-scheduler"
-[kubelet-start] Writing kubelet environment file with flags to file "/var/lib/kubelet/kubeadm-flags.env"
-[kubelet-start] Writing kubelet configuration to file "/var/lib/kubelet/config.yaml"
-[kubelet-start] Starting the kubelet
-[wait-control-plane] Waiting for the kubelet to boot up the control plane as static Pods from directory "/etc/kubernetes/manifests"
-[kubelet-check] Waiting for a healthy kubelet at http://127.0.0.1:10248/healthz. This can take up to 4m0s
-[kubelet-check] The kubelet is healthy after 502.040824ms
-[api-check] Waiting for a healthy API server. This can take up to 4m0s
-[api-check] The API server is not healthy after 4m0.001082006s
+## Фаза 3 — Kubernetes кластер
 
-Unfortunately, an error has occurred:
-        context deadline exceeded
+### Шаг 3.1 — kube-vip static pod
 
-This error is likely caused by:
-        - The kubelet is not running
-        - The kubelet is unhealthy due to a misconfiguration of the node in some way (required cgroups disabled)
+**[CP СЕРВЕРЫ: coparking-5, coparking-6, coparking-7]** — выполнить ДО kubeadm init/join
 
-If you are on a systemd-powered system, you can try to troubleshoot the error with the following commands:
-        - 'systemctl status kubelet'
-        - 'journalctl -xeu kubelet'
+```bash
+export VIP=172.16.175.20
+export INTERFACE=eno1
+export KVVERSION=v0.9.2
 
-Additionally, a control plane component may have crashed or exited when started by the container runtime.
-To troubleshoot, list all containers using your preferred container runtimes CLI.
-Here is one example how you may list all running Kubernetes containers by using crictl:
-        - 'crictl --runtime-endpoint unix:///run/containerd/containerd.sock ps -a | grep kube | grep -v pause'
-        Once you have found the failing container, you can inspect its logs with:
-        - 'crictl --runtime-endpoint unix:///run/containerd/containerd.sock logs CONTAINERID'
-error execution phase wait-control-plane: could not initialize a Kubernetes cluster
-To see the stack trace of this error execute with --v=5 or higher
+mkdir -p /etc/kubernetes/manifests
+
+ctr -n k8s.io run --rm --net-host \
+  registry.test.model.svo.aero/kube-vip/kube-vip:${KVVERSION} kv \
+  /kube-vip manifest pod \
+  --interface ${INTERFACE} \
+  --address ${VIP} \
+  --controlplane \
+  --arp \
+  --leaderElection \
+  | tee /etc/kubernetes/manifests/kube-vip.yaml
+
+sed -i 's#path: /etc/kubernetes/admin.conf#path: /etc/kubernetes/super-admin.conf#' \
+  /etc/kubernetes/manifests/kube-vip.yaml
+```
+
+-----
+
+### Шаг 3.2 — kubeadm init
+
+**[coparking-5]**
+
+```bash
+cat > /root/kubeadm-config.yaml <<'EOF'
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 172.16.175.19
+  bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+  - name: node-ip
+    value: "172.16.175.19"
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v1.32.13
+clusterName: k8s-prod
+controlPlaneEndpoint: "k8s-api:6443"
+networking:
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  dnsDomain: cluster.local
+apiServer:
+  certSANs:
+  - k8s-api
+  - kubernetes
+  - kubernetes.default.svc
+  - kubernetes.default.svc.cluster.local
+  - 172.16.175.20
+  - 172.16.175.19
+  - 172.16.175.21
+  - 172.16.175.23
+  - 127.0.0.1
+  - localhost
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+serverTLSBootstrap: true
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+mode: iptables
+EOF
+
+# Предварительно скачиваем образы (выявляет проблемы с proxy/registry заранее)
+kubeadm config images pull --config /root/kubeadm-config.yaml
+
+# Инициализация
+kubeadm init --config /root/kubeadm-config.yaml --upload-certs --ignore-preflight-errors=ImagePull 2>&1 \
+  | tee /root/kubeadm-init.log
+
+# Настраиваем kubectl
+mkdir -p $HOME/.kube
+cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+
+# ✦ ИСПРАВЛЕНО: ждём появления admin.conf перед откатом hack'а
+# (иначе kube-vip может перезапуститься с несуществующим файлом)
+until [ -f /etc/kubernetes/admin.conf ]; do sleep 2; done
+sleep 5
+
+# Откатываем super-admin.conf → admin.conf
+sed -i 's#path: /etc/kubernetes/super-admin.conf#path: /etc/kubernetes/admin.conf#' \
+  /etc/kubernetes/manifests/kube-vip.yaml
+
+# Проверяем VIP
+curl -k https://172.16.175.20:6443/healthz  # → ok
+ping -c 3 172.16.175.20                     # VIP отвечает
+```
+
+> **Сохраните из /root/kubeadm-init.log:**
+> 
+> - TOKEN и HASH (join воркеров)
+> - CERTIFICATE_KEY (join CP, живёт 2 часа)
+> 
+> Если certificate-key истёк:
+> 
+> ```bash
+> kubeadm init phase upload-certs --upload-certs
+> kubeadm token create --print-join-command
+> ```
+
+-----
+
+### Шаг 3.3 — Join coparking-6 и coparking-7 как CP
+
+**[coparking-6, coparking-7]** — сначала Фазы 1 и 2, потом kube-vip (шаг 3.1), затем:
+
+```bash
+# ✦ ИСПРАВЛЕНО: node-ip передаётся через nodeRegistration, не через drop-in
+# Для coparking-6 (172.16.175.21):
+cat > /root/kubeadm-join-cp.yaml <<'EOF'
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: "k8s-api:6443"
+    token: "<TOKEN>"
+    caCertHashes: ["sha256:<HASH>"]
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: 172.16.175.21   # ← .23 для coparking-7
+    bindPort: 6443
+  certificateKey: "<CERTIFICATE_KEY>"
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+  - name: node-ip
+    value: "172.16.175.21"            # ← .23 для coparking-7
+EOF
+
+kubeadm join --config /root/kubeadm-join-cp.yaml
+
+mkdir -p $HOME/.kube
+cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+```
+
+-----
+
+### Шаг 3.4 — Join воркеров coparking-8, coparking-9, coparking-10
+
+**[ВОРКЕРЫ]** — сначала Фазы 1 и 2, затем:
+
+```bash
+# ✦ ИСПРАВЛЕНО: node-ip через JoinConfiguration, а не drop-in после join
+# Это исключает старт kubelet без правильного node-ip
+# ✦ ИСПРАВЛЕНО: IP адреса — coparking-9=.27, coparking-10=.29 (не .25/.26 как в оригинале)
+
+# Для coparking-8 (172.16.175.25):
+cat > /root/kubeadm-join-worker.yaml <<'EOF'
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: "k8s-api:6443"
+    token: "<TOKEN>"
+    caCertHashes: ["sha256:<HASH>"]
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+  - name: node-ip
+    value: "172.16.175.25"            # .25 / .27 / .29 для каждого воркера
+EOF
+
+kubeadm join --config /root/kubeadm-join-worker.yaml
+```
+
+-----
+
+### Шаг 3.5 — Calico CNI (VXLAN, BGP disabled)
+
+**[coparking-5]**
+
+```bash
+# Запрет NetworkManager управлять интерфейсами Calico
+cat > /etc/NetworkManager/conf.d/calico.conf <<'EOF'
+[keyfile]
+unmanaged-devices=interface-name:cali*;interface-name:tunl*;interface-name:vxlan.calico
+EOF
+systemctl reload NetworkManager
+
+# Tigera Operator
+kubectl create -f \
+  https://raw.githubusercontent.com/projectcalico/calico/v3.29.5/manifests/tigera-operator.yaml
+
+# Installation
+cat <<'EOF' | kubectl apply -f -
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    bgp: Disabled
+    ipPools:
+    - name: default-ipv4-ippool
+      blockSize: 26
+      cidr: 10.244.0.0/16
+      encapsulation: VXLAN
+      natOutgoing: Enabled
+      nodeSelector: all()
+    nodeAddressAutodetectionV4:
+      interface: eno1
+    mtu: 1450
+---
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+spec: {}
+EOF
+
+kubectl -n calico-system rollout status ds/calico-node --timeout=300s
+```
+
+-----
+
+### Шаг 3.6 — Taint и лейблы
+
+**[coparking-5]**
+
+```bash
+# CP-ноды работают как воркеры — снимаем taint
+kubectl taint nodes coparking-5 coparking-6 coparking-7 \
+  node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+
+# GPU ноды
+for n in coparking-5 coparking-6 coparking-7 coparking-8; do
+  kubectl label node $n gpu=true --overwrite
+done
+
+# Storage ноды
+for n in coparking-9 coparking-10; do
+  kubectl label node $n storage=true --overwrite
+done
+
+# Longhorn — все 6 нод
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  kubectl label node $n node.longhorn.io/create-default-disk=true --overwrite
+done
+
+kubectl get nodes -o wide
+```
+
+-----
+
+### Шаг 3.7 — Helm
+
+**[coparking-5]**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+  | DESIRED_VERSION=v3.17.0 bash
+helm version
+```
+
+### Проверка Фазы 3
+
+```bash
+kubectl get nodes -o wide                  # 6 нод Ready
+kubectl get pods -A | grep -v Running      # только Completed или пусто
+curl -k https://k8s-api:6443/healthz       # ok
+ping -c3 172.16.175.20                     # VIP отвечает
+kubeadm certs check-expiration
+```
+
+-----
+
+## Фаза 4 — GPU Operator и time-slicing
+
+**[coparking-5]**
+
+```bash
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+helm repo update
+
+kubectl create namespace gpu-operator
+
+# ConfigMap: 4 слайса на Tesla T4
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: time-slicing-config
+  namespace: gpu-operator
+data:
+  tesla-t4: |-
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        resources:
+        - name: nvidia.com/gpu
+          replicas: 4
+EOF
+
+# ✦ ИСПРАВЛЕНО: toolkit.enabled=false — НЕ устанавливаем через operator,
+# nvidia-ctk уже настроен вручную (1.19.0).
+# driver.enabled=false — драйвер 570-open-DKMS установлен вручную.
+# cdi.enabled=true требует что CDI конфиг существует на нодах.
+# Проверяем перед установкой:
+for node in coparking-5 coparking-6 coparking-7 coparking-8; do
+  echo "=== $node ==="; ssh $node "ls /var/run/cdi/ 2>/dev/null || echo 'CDI dir missing'"
+done
+
+# Если /var/run/cdi/ пустой — генерируем CDI конфиг на каждой GPU-ноде:
+# nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# (выполнить на каждой GPU-ноде если CDI dir missing)
+
+helm install gpu-operator nvidia/gpu-operator \
+  --namespace gpu-operator \
+  --version v26.3.1 \
+  --set driver.enabled=false \
+  --set toolkit.enabled=false \
+  --set devicePlugin.config.name=time-slicing-config \
+  --set devicePlugin.config.default=tesla-t4 \
+  --set cdi.enabled=true \
+  --set cdi.default=true
+
+kubectl -n gpu-operator rollout status ds/nvidia-device-plugin-daemonset --timeout=300s
+
+# Активируем time-slicing на GPU нодах
+kubectl label node -l gpu=true \
+  nvidia.com/device-plugin.config=tesla-t4 --overwrite
+```
+
+### Проверка Фазы 4
+
+```bash
+kubectl get nodes -o json \
+  | jq -r '.items[] | select(.metadata.labels.gpu=="true") | .metadata.name + ": " + .status.capacity["nvidia.com/gpu"]'
+# coparking-5: 4
+# coparking-6: 4
+# coparking-7: 4
+# coparking-8: 4
+
+# Тест GPU-пода
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-test
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    gpu: "true"
+  containers:
+  - name: cuda
+    image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+EOF
+
+kubectl wait pod/gpu-test --for=condition=Succeeded --timeout=120s
+kubectl logs gpu-test   # Test PASSED
+kubectl delete pod gpu-test
+```
+
+-----
+
+## Фаза 5 — Longhorn v1.10.2
+
+**[coparking-5]**
+
+```bash
+helm repo add longhorn https://charts.longhorn.io
+helm repo update
+
+# SELinux workaround для iscsid на RHEL-совместимых
+kubectl apply -f \
+  https://raw.githubusercontent.com/longhorn/longhorn/v1.10.2/deploy/prerequisite/longhorn-iscsi-selinux-workaround.yaml
+
+kubectl create namespace longhorn-system
+
+cat > /root/longhorn-values.yaml <<'EOF'
+defaultSettings:
+  defaultDataPath: "/var/lib/longhorn"
+  defaultReplicaCount: 2
+  createDefaultDiskLabeledNodes: true
+  storageMinimalAvailablePercentage: 10
+  storageOverProvisioningPercentage: 100
+  # ✦ ИСПРАВЛЕНО: soft anti-affinity включён — при падении ноды Longhorn
+  # сможет разместить реплику на уже занятой ноде (у нас 3 CP = 3 ноды,
+  # строгое anti-affinity может заблокировать балансировку)
+  replicaSoftAntiAffinity: true
+  replicaAutoBalance: "best-effort"
+  defaultDataLocality: "disabled"
+  nodeDownPodDeletionPolicy: "delete-both-statefulset-and-deployment-pod"
+  v2DataEngine: false
+persistence:
+  defaultClass: false
+  defaultFsType: xfs
+  reclaimPolicy: Delete
+csi:
+  kubeletRootDir: /var/lib/kubelet
+longhornUI:
+  replicas: 2
+EOF
+
+helm install longhorn longhorn/longhorn \
+  --namespace longhorn-system \
+  --version 1.10.2 \
+  -f /root/longhorn-values.yaml
+
+kubectl -n longhorn-system rollout status ds/longhorn-manager --timeout=600s
+
+# StorageClasses
+cat <<'EOF' | kubectl apply -f -
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "2880"
+  fsType: "xfs"
+  dataLocality: "disabled"
+  replicaAutoBalance: "best-effort"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-single
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "2880"
+  fsType: "xfs"
+  dataLocality: "strict-local"
+EOF
+
+kubectl get storageclass
+```
+
+### Проверка Фазы 5
+
+```bash
+# Тест PVC
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+spec:
+  storageClassName: longhorn
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
+kubectl get pvc test-pvc -w   # → Bound за 10-30 сек
+kubectl delete pvc test-pvc
+
+# Longhorn UI
+kubectl -n longhorn-system port-forward svc/longhorn-frontend 8080:80 &
+# http://localhost:8080 — все 6 нод Ready, диск ~18 TB на каждой
+```
+
+-----
+
+## Итоговый чеклист перед Фазой 6
+
+```bash
+kubectl get nodes -o wide                          # 6×Ready
+kubectl get pods -A | grep -Ev 'Running|Completed' # пусто
+kubectl get storageclass                            # longhorn (default), longhorn-single
+kubectl get nodes -o json | jq -r \
+  '.items[] | select(.metadata.labels.gpu=="true") | .metadata.name + ": " + .status.capacity["nvidia.com/gpu"]'
+# 4 ноды × 4 GPU = 16 виртуальных GPU
+```
