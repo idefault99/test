@@ -1,9 +1,50 @@
-CALICO_YAML=/root/calico-v3.29.5.yaml
-
-sed -i 's#192.168.0.0/16#10.244.0.0/16#g' "$CALICO_YAML"
-
-kubectl apply -f "$CALICO_YAML"
-
-kubectl -n kube-system rollout status ds/calico-node --timeout=300s
-kubectl get nodes -o wide
-kubectl get pods -A -o wide
+poddisruptionbudget.policy/calico-kube-controllers created
+serviceaccount/calico-kube-controllers created
+serviceaccount/calico-node created
+serviceaccount/calico-cni-plugin created
+configmap/calico-config created
+customresourcedefinition.apiextensions.k8s.io/bgpconfigurations.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/bgpfilters.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/bgppeers.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/blockaffinities.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/caliconodestatuses.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/clusterinformations.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/felixconfigurations.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/globalnetworkpolicies.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/globalnetworksets.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/hostendpoints.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/ipamblocks.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/ipamconfigs.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/ipamhandles.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/ippools.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/ipreservations.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/kubecontrollersconfigurations.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/networkpolicies.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/networksets.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/tiers.crd.projectcalico.org created
+customresourcedefinition.apiextensions.k8s.io/adminnetworkpolicies.policy.networking.k8s.io created
+clusterrole.rbac.authorization.k8s.io/calico-kube-controllers created
+clusterrole.rbac.authorization.k8s.io/calico-node created
+clusterrole.rbac.authorization.k8s.io/calico-cni-plugin created
+clusterrole.rbac.authorization.k8s.io/calico-tier-getter created
+clusterrolebinding.rbac.authorization.k8s.io/calico-kube-controllers created
+clusterrolebinding.rbac.authorization.k8s.io/calico-node created
+clusterrolebinding.rbac.authorization.k8s.io/calico-cni-plugin created
+clusterrolebinding.rbac.authorization.k8s.io/calico-tier-getter created
+daemonset.apps/calico-node created
+deployment.apps/calico-kube-controllers created
+Waiting for daemon set "calico-node" rollout to finish: 0 of 1 updated pods are available...
+daemon set "calico-node" successfully rolled out
+NAME          STATUS   ROLES           AGE    VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE     KERNEL-VERSION           CONTAINER-RUNTIME
+coparking-5   Ready    control-plane   2d2h   v1.32.13   172.16.175.19   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+NAMESPACE     NAME                                      READY   STATUS              RESTARTS   AGE    IP              NODE          NOMINATED NODE   READINESS GATES
+kube-system   calico-kube-controllers-6d5bc68bd-2s7df   0/1     ContainerCreating   0          17s    <none>          coparking-5   <none>           <none>
+kube-system   calico-node-gx7lw                         1/1     Running             0          17s    172.16.175.19   coparking-5   <none>           <none>
+kube-system   coredns-668d6bf9bc-9ljmt                  0/1     ContainerCreating   0          13m    <none>          coparking-5   <none>           <none>
+kube-system   coredns-668d6bf9bc-flf96                  0/1     ContainerCreating   0          13m    <none>          coparking-5   <none>           <none>
+kube-system   etcd-coparking-5                          1/1     Running             1          2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-apiserver-coparking-5                1/1     Running             305        2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-controller-manager-coparking-5       1/1     Running             2          2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-proxy-gppsl                          1/1     Running             0          13m    172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-scheduler-coparking-5                1/1     Running             2          2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-vip-coparking-5                      1/1     Running             0          2d2h   172.16.175.19   coparking-5   <none>           <none>
