@@ -1,72 +1,415 @@
-redact() {
-  sed -E \
-    -e 's/[a-z0-9]{6}\.[a-z0-9]{16}/<TOKEN>/g' \
-    -e 's/sha256:[a-f0-9]{64}/sha256:<HASH>/g' \
-    -e 's/(certificate-key|--certificate-key)[ =:]?[a-f0-9]{64}/\1 <CERT_KEY>/g' \
-    -e 's/(token: )[A-Za-z0-9._-]+/\1<REDACTED>/g' \
-    -e 's/(bearerToken: )[A-Za-z0-9._-]+/\1<REDACTED>/g' \
-    -e 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1<REDACTED>/g' \
-    -e 's/(client-certificate-data: ).*/\1<REDACTED>/g' \
-    -e 's/(client-key-data: ).*/\1<REDACTED>/g' \
-    -e 's/(certificate-authority-data: ).*/\1<REDACTED>/g'
-}
+== kubeadm log ==
+[init] Using Kubernetes version: v1.32.13
+[preflight] Running pre-flight checks
+        [WARNING Firewalld]: firewalld is active, please ensure ports [6443 10250] are open or your cluster may not function correctly
+        [WARNING FileExisting-ethtool]: ethtool not found in system path
+        [WARNING FileExisting-tc]: tc not found in system path
+[preflight] Pulling images required for setting up a Kubernetes cluster
+[preflight] This might take a minute or two, depending on the speed of your internet connection
+[preflight] You can also perform this action beforehand using 'kubeadm config images pull'
+[certs] Using certificateDir folder "/etc/kubernetes/pki"
+[certs] Generating "ca" certificate and key
+[certs] Generating "apiserver" certificate and key
+[certs] apiserver serving cert is signed for DNS names [coparking-5 k8s-api kubernetes kubernetes.default kubernetes.default.svc kubernetes.default.svc.cluster.local localhost] and IPs [10.96.0.1 172.16.175.19 172.16.175.20 172.16.175.21 172.16.175.23 127.0.0.1]
+[certs] Generating "apiserver-kubelet-client" certificate and key
+[certs] Generating "front-proxy-ca" certificate and key
+[certs] Generating "front-proxy-client" certificate and key
+[certs] Generating "etcd/ca" certificate and key
+[certs] Generating "etcd/server" certificate and key
+[certs] etcd/server serving cert is signed for DNS names [coparking-5 localhost] and IPs [172.16.175.19 127.0.0.1 ::1]
+[certs] Generating "etcd/peer" certificate and key
+[certs] etcd/peer serving cert is signed for DNS names [coparking-5 localhost] and IPs [172.16.175.19 127.0.0.1 ::1]
+[certs] Generating "etcd/healthcheck-client" certificate and key
+[certs] Generating "apiserver-etcd-client" certificate and key
+[certs] Generating "sa" key and public key
+[kubeconfig] Using kubeconfig folder "/etc/kubernetes"
+[kubeconfig] Writing "admin.conf" kubeconfig file
+[kubeconfig] Writing "super-admin.conf" kubeconfig file
+[kubeconfig] Writing "kubelet.conf" kubeconfig file
+[kubeconfig] Writing "controller-manager.conf" kubeconfig file
+[kubeconfig] Writing "scheduler.conf" kubeconfig file
+[etcd] Creating static Pod manifest for local etcd in "/etc/kubernetes/manifests"
+[control-plane] Using manifest folder "/etc/kubernetes/manifests"
+[control-plane] Creating static Pod manifest for "kube-apiserver"
+[control-plane] Creating static Pod manifest for "kube-controller-manager"
+[control-plane] Creating static Pod manifest for "kube-scheduler"
+[kubelet-start] Writing kubelet environment file with flags to file "/var/lib/kubelet/kubeadm-flags.env"
+[kubelet-start] Writing kubelet configuration to file "/var/lib/kubelet/config.yaml"
+[kubelet-start] Starting the kubelet
+[wait-control-plane] Waiting for the kubelet to boot up the control plane as static Pods from directory "/etc/kubernetes/manifests"
+[kubelet-check] Waiting for a healthy kubelet at http://127.0.0.1:10248/healthz. This can take up to 4m0s
+[kubelet-check] The kubelet is healthy after 502.040824ms
+[api-check] Waiting for a healthy API server. This can take up to 4m0s
+[api-check] The API server is not healthy after 4m0.001082006s
 
-echo "== kubeadm log =="
-tail -n 160 /root/kubeadm-init.log 2>&1 | redact
+Unfortunately, an error has occurred:
+        context deadline exceeded
 
-echo "== kubelet status =="
-systemctl status kubelet --no-pager -l 2>&1 | redact
+This error is likely caused by:
+        - The kubelet is not running
+        - The kubelet is unhealthy due to a misconfiguration of the node in some way (required cgroups disabled)
 
-echo "== kubelet recent logs =="
-journalctl -u kubelet -n 120 --no-pager 2>&1 | redact
+If you are on a systemd-powered system, you can try to troubleshoot the error with the following commands:
+        - 'systemctl status kubelet'
+        - 'journalctl -xeu kubelet'
 
-echo "== manifests =="
-ls -l /etc/kubernetes/manifests 2>&1 | redact
-grep -n "path: /etc/kubernetes" /etc/kubernetes/manifests/kube-vip.yaml 2>&1 | redact
+Additionally, a control plane component may have crashed or exited when started by the container runtime.
+To troubleshoot, list all containers using your preferred container runtimes CLI.
+Here is one example how you may list all running Kubernetes containers by using crictl:
+        - 'crictl --runtime-endpoint unix:///run/containerd/containerd.sock ps -a | grep kube | grep -v pause'
+        Once you have found the failing container, you can inspect its logs with:
+        - 'crictl --runtime-endpoint unix:///run/containerd/containerd.sock logs CONTAINERID'
+error execution phase wait-control-plane: could not initialize a Kubernetes cluster
+To see the stack trace of this error execute with --v=5 or higher
+== kubelet status ==
+● kubelet.service - Kubernetes Kubelet Server
+     Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled; preset: disabled)
+    Drop-In: /usr/lib/systemd/system/service.d
+             └─10-timeout-abort.conf
+             /etc/systemd/system/kubelet.service.d
+             └─kubeadm.conf
+     Active: active (running) since Fri 2026-05-22 19:24:23 MSK; 2 days ago
+       Docs: https://kubernetes.io/docs/concepts/overview/components/#kubelet
+             https://kubernetes.io/docs/reference/generated/kubelet/
+   Main PID: 49387 (kubelet)
+      Tasks: 89 (limit: 154133)
+     Memory: 68.8M
+        CPU: 2h 1min 35.662s
+     CGroup: /system.slice/kubelet.service
+             └─49387 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --fail-swap-on=false --pod-manifest-path=/etc/kubernetes/manifests --cluster-dns=10.96.0.10 --cluster-domain=cluster.local --authorization-mode=Webhook --client-ca-file=/etc/kubernetes/pki/ca.crt --cgroup-driver=systemd --container-runtime-endpoint=unix:///run/containerd/containerd.sock --pod-infra-container-image=registry.k8s.io/pause:3.10 --node-ip=172.16.175.19
 
-echo "== kube-vip manifest =="
-sed -n '1,160p' /etc/kubernetes/manifests/kube-vip.yaml 2>&1 | redact
+May 24 21:33:21 coparking-5 kubelet[49387]: W0524 21:33:21.087934   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.CSIDriver: Get "https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:33:21 coparking-5 kubelet[49387]: E0524 21:33:21.088119   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.CSIDriver: failed to list *v1.CSIDriver: Get \"https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:33:23 coparking-5 kubelet[49387]: E0524 21:33:23.665643   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:33:27 coparking-5 kubelet[49387]: I0524 21:33:27.103663   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:27 coparking-5 kubelet[49387]: E0524 21:33:27.103678   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="failed to patch status \"{\\\"status\\\":{\\\"$setElementOrder/conditions\\\":[{\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"type\\\":\\\"DiskPressure\\\"},{\\\"type\\\":\\\"PIDPressure\\\"},{\\\"type\\\":\\\"Ready\\\"}],\\\"conditions\\\":[{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"DiskPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"PIDPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"Ready\\\"}]}}\" for node \"coparking-5\": Patch \"https://k8s-api:6443/api/v1/nodes/coparking-5/status?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:28 coparking-5 kubelet[49387]: E0524 21:33:28.666957   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:33:30 coparking-5 kubelet[49387]: E0524 21:33:30.175756   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:30 coparking-5 kubelet[49387]: W0524 21:33:30.175774   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.Service: Get "https://k8s-api:6443/api/v1/services?fieldSelector=spec.clusterIP%21%3DNone&resourceVersion=2529": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:33:30 coparking-5 kubelet[49387]: E0524 21:33:30.175751   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:33:30 coparking-5 kubelet[49387]: E0524 21:33:30.175895   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.Service: failed to list *v1.Service: Get \"https://k8s-api:6443/api/v1/services?fieldSelector=spec.clusterIP%21%3DNone&resourceVersion=2529\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+== kubelet recent logs ==
+May 24 21:31:18 coparking-5 kubelet[49387]: E0524 21:31:18.622367   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:20 coparking-5 kubelet[49387]: E0524 21:31:20.895719   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="failed to patch status \"{\\\"status\\\":{\\\"$setElementOrder/conditions\\\":[{\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"type\\\":\\\"DiskPressure\\\"},{\\\"type\\\":\\\"PIDPressure\\\"},{\\\"type\\\":\\\"Ready\\\"}],\\\"conditions\\\":[{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:19Z\\\",\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:19Z\\\",\\\"type\\\":\\\"DiskPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:19Z\\\",\\\"type\\\":\\\"PIDPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:19Z\\\",\\\"type\\\":\\\"Ready\\\"}]}}\" for node \"coparking-5\": Patch \"https://k8s-api:6443/api/v1/nodes/coparking-5/status?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:20 coparking-5 kubelet[49387]: W0524 21:31:20.895722   49387 reflector.go:569] pkg/kubelet/config/apiserver.go:66: failed to list *v1.Pod: Get "https://k8s-api:6443/api/v1/pods?fieldSelector=spec.nodeName%3Dcoparking-5&resourceVersion=2632": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:31:20 coparking-5 kubelet[49387]: E0524 21:31:20.895876   49387 reflector.go:166] "Unhandled Error" err="pkg/kubelet/config/apiserver.go:66: Failed to watch *v1.Pod: failed to list *v1.Pod: Get \"https://k8s-api:6443/api/v1/pods?fieldSelector=spec.nodeName%3Dcoparking-5&resourceVersion=2632\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:31:23 coparking-5 kubelet[49387]: E0524 21:31:23.623889   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:23 coparking-5 kubelet[49387]: E0524 21:31:23.967731   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:27 coparking-5 kubelet[49387]: E0524 21:31:27.039945   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:27 coparking-5 kubelet[49387]: E0524 21:31:27.039946   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:31:27 coparking-5 kubelet[49387]: I0524 21:31:27.039945   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:28 coparking-5 kubelet[49387]: E0524 21:31:28.625984   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:30 coparking-5 kubelet[49387]: E0524 21:31:30.111672   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:33 coparking-5 kubelet[49387]: E0524 21:31:33.183638   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:33 coparking-5 kubelet[49387]: E0524 21:31:33.183674   49387 kubelet_node_status.go:535] "Unable to update node status" err="update node status exceeds retry count"
+May 24 21:31:33 coparking-5 kubelet[49387]: W0524 21:31:33.183619   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.CSIDriver: Get "https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:31:33 coparking-5 kubelet[49387]: E0524 21:31:33.183734   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.CSIDriver: failed to list *v1.CSIDriver: Get \"https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:31:33 coparking-5 kubelet[49387]: E0524 21:31:33.627607   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:37 coparking-5 kubelet[49387]: E0524 21:31:37.151995   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:31:37 coparking-5 kubelet[49387]: I0524 21:31:37.151997   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:37 coparking-5 kubelet[49387]: W0524 21:31:37.151999   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.Node: Get "https://k8s-api:6443/api/v1/nodes?fieldSelector=metadata.name%3Dcoparking-5&resourceVersion=2609": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:31:37 coparking-5 kubelet[49387]: E0524 21:31:37.152264   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.Node: failed to list *v1.Node: Get \"https://k8s-api:6443/api/v1/nodes?fieldSelector=metadata.name%3Dcoparking-5&resourceVersion=2609\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:31:38 coparking-5 kubelet[49387]: E0524 21:31:38.629858   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:42 coparking-5 kubelet[49387]: W0524 21:31:42.847805   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.RuntimeClass: Get "https://k8s-api:6443/apis/node.k8s.io/v1/runtimeclasses?resourceVersion=2665": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:31:42 coparking-5 kubelet[49387]: E0524 21:31:42.847944   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.RuntimeClass: failed to list *v1.RuntimeClass: Get \"https://k8s-api:6443/apis/node.k8s.io/v1/runtimeclasses?resourceVersion=2665\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:31:43 coparking-5 kubelet[49387]: E0524 21:31:43.631772   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:46 coparking-5 kubelet[49387]: I0524 21:31:46.303844   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:46 coparking-5 kubelet[49387]: E0524 21:31:46.303861   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="failed to patch status \"{\\\"status\\\":{\\\"$setElementOrder/conditions\\\":[{\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"type\\\":\\\"DiskPressure\\\"},{\\\"type\\\":\\\"PIDPressure\\\"},{\\\"type\\\":\\\"Ready\\\"}],\\\"conditions\\\":[{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:43Z\\\",\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:43Z\\\",\\\"type\\\":\\\"DiskPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:43Z\\\",\\\"type\\\":\\\"PIDPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:31:43Z\\\",\\\"type\\\":\\\"Ready\\\"}]}}\" for node \"coparking-5\": Patch \"https://k8s-api:6443/api/v1/nodes/coparking-5/status?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:46 coparking-5 kubelet[49387]: E0524 21:31:46.303895   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:31:46 coparking-5 kubelet[49387]: W0524 21:31:46.303868   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.Service: Get "https://k8s-api:6443/api/v1/services?fieldSelector=spec.clusterIP%21%3DNone&resourceVersion=2529": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:31:46 coparking-5 kubelet[49387]: E0524 21:31:46.304373   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.Service: failed to list *v1.Service: Get \"https://k8s-api:6443/api/v1/services?fieldSelector=spec.clusterIP%21%3DNone&resourceVersion=2529\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:31:48 coparking-5 kubelet[49387]: E0524 21:31:48.633298   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:49 coparking-5 kubelet[49387]: E0524 21:31:49.375680   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:52 coparking-5 kubelet[49387]: E0524 21:31:52.447758   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:53 coparking-5 kubelet[49387]: E0524 21:31:53.634351   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:31:55 coparking-5 kubelet[49387]: E0524 21:31:55.519654   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:55 coparking-5 kubelet[49387]: W0524 21:31:55.519695   49387 reflector.go:569] pkg/kubelet/config/apiserver.go:66: failed to list *v1.Pod: Get "https://k8s-api:6443/api/v1/pods?fieldSelector=spec.nodeName%3Dcoparking-5&resourceVersion=2632": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:31:55 coparking-5 kubelet[49387]: E0524 21:31:55.519758   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:31:55 coparking-5 kubelet[49387]: I0524 21:31:55.519727   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:55 coparking-5 kubelet[49387]: E0524 21:31:55.519785   49387 reflector.go:166] "Unhandled Error" err="pkg/kubelet/config/apiserver.go:66: Failed to watch *v1.Pod: failed to list *v1.Pod: Get \"https://k8s-api:6443/api/v1/pods?fieldSelector=spec.nodeName%3Dcoparking-5&resourceVersion=2632\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:31:58 coparking-5 kubelet[49387]: E0524 21:31:58.591690   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:31:58 coparking-5 kubelet[49387]: E0524 21:31:58.591764   49387 kubelet_node_status.go:535] "Unable to update node status" err="update node status exceeds retry count"
+May 24 21:31:58 coparking-5 kubelet[49387]: E0524 21:31:58.636214   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:32:03 coparking-5 kubelet[49387]: E0524 21:32:03.637974   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:32:05 coparking-5 kubelet[49387]: I0524 21:32:05.631626   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:32:05 coparking-5 kubelet[49387]: E0524 21:32:05.631646   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:32:05 coparking-5 kubelet[49387]: W0524 21:32:05.631651   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.CSIDriver: Get "https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:32:05 coparking-5 kubelet[49387]: E0524 21:32:05.631735   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.CSIDriver: failed to list *v1.CSIDriver: Get \"https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:32:08 coparking-5 kubelet[49387]: E0524 21:32:08.639672   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:32:11 coparking-5 kubelet[49387]: E0524 21:32:11.839755   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="failed to patch status \"{\\\"status\\\":{\\\"$setElementOrder/conditions\\\":[{\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"type\\\":\\\"DiskPressure\\\"},{\\\"type\\\":\\\"PIDPressure\\\"},{\\\"type\\\":\\\"Ready\\\"}],\\\"conditions\\\":[{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:32:08Z\\\",\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:32:08Z\\\",\\\"type\\\":\\\"DiskPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:32:08Z\\\",\\\"type\\\":\\\"PIDPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:32:08Z\\\",\\\"type\\\":\\\"Ready\\\"}]}}\" for node \"coparking-5\": Patch \"https://k8s-api:6443/api/v1/nodes/coparking-5/status?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:32:12 coparking-5 kubelet[49387]: I0524 21:32:12.049122   49387 kubelet.go:3177] "Trying to delete pod" pod="kube-system/kube-vip-coparking-5" podUID="5708b9d4-fde3-4f72-83dc-0b187359fb01"
+May 24 21:32:13 coparking-5 kubelet[49387]: E0524 21:32:13.641635   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:32:14 coparking-5 kubelet[49387]: E0524 21:32:14.911815   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:32:14 coparking-5 kubelet[49387]: E0524 21:32:14.911848   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:32:14 coparking-5 kubelet[49387]: I0524 21:32:14.911808   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:32:14 coparking-5 kubelet[49387]: E0524 21:32:14.911819   49387 mirror_client.go:138] "Failed deleting a mirror pod" err="Delete \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host" pod="kube-system/kube-vip-coparking-5"
+May 24 21:32:17 coparking-5 kubelet[49387]: E0524 21:32:17.983666   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:32:17 coparking-5 kubelet[49387]: W0524 21:32:17.983687   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.Node: Get "https://k8s-api:6443/api/v1/nodes?fieldSelector=metadata.name%3Dcoparking-5&resourceVersion=2609": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:32:17 coparking-5 kubelet[49387]: E0524 21:32:17.983776   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.Node: failed to list *v1.Node: Get \"https://k8s-api:6443/api/v1/nodes?fieldSelector=metadata.name%3Dcoparking-5&resourceVersion=2609\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:33:12 coparking-5 kubelet[49387]: E0524 21:33:12.319711   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:33:12 coparking-5 kubelet[49387]: W0524 21:33:12.319722   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.RuntimeClass: Get "https://k8s-api:6443/apis/node.k8s.io/v1/runtimeclasses?resourceVersion=2665": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:33:12 coparking-5 kubelet[49387]: E0524 21:33:12.319820   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.RuntimeClass: failed to list *v1.RuntimeClass: Get \"https://k8s-api:6443/apis/node.k8s.io/v1/runtimeclasses?resourceVersion=2665\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:33:12 coparking-5 kubelet[49387]: E0524 21:33:12.319727   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:13 coparking-5 kubelet[49387]: E0524 21:33:13.662923   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:33:15 coparking-5 kubelet[49387]: E0524 21:33:15.392584   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:15 coparking-5 kubelet[49387]: E0524 21:33:15.392637   49387 kubelet_node_status.go:535] "Unable to update node status" err="update node status exceeds retry count"
+May 24 21:33:15 coparking-5 kubelet[49387]: I0524 21:33:15.392647   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:18 coparking-5 kubelet[49387]: E0524 21:33:18.664076   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:33:21 coparking-5 kubelet[49387]: E0524 21:33:21.087922   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:33:21 coparking-5 kubelet[49387]: W0524 21:33:21.087934   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.CSIDriver: Get "https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:33:21 coparking-5 kubelet[49387]: E0524 21:33:21.088119   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.CSIDriver: failed to list *v1.CSIDriver: Get \"https://k8s-api:6443/apis/storage.k8s.io/v1/csidrivers?resourceVersion=2569\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+May 24 21:33:23 coparking-5 kubelet[49387]: E0524 21:33:23.665643   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:33:27 coparking-5 kubelet[49387]: I0524 21:33:27.103663   49387 status_manager.go:890] "Failed to get status for pod" podUID="9e721426c2bdc1e8e4bf9fa389e053c3" pod="kube-system/kube-vip-coparking-5" err="Get \"https://k8s-api:6443/api/v1/namespaces/kube-system/pods/kube-vip-coparking-5\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:27 coparking-5 kubelet[49387]: E0524 21:33:27.103678   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="failed to patch status \"{\\\"status\\\":{\\\"$setElementOrder/conditions\\\":[{\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"type\\\":\\\"DiskPressure\\\"},{\\\"type\\\":\\\"PIDPressure\\\"},{\\\"type\\\":\\\"Ready\\\"}],\\\"conditions\\\":[{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"MemoryPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"DiskPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"PIDPressure\\\"},{\\\"lastHeartbeatTime\\\":\\\"2026-05-24T18:33:25Z\\\",\\\"type\\\":\\\"Ready\\\"}]}}\" for node \"coparking-5\": Patch \"https://k8s-api:6443/api/v1/nodes/coparking-5/status?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:28 coparking-5 kubelet[49387]: E0524 21:33:28.666957   49387 kubelet.go:3002] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized"
+May 24 21:33:30 coparking-5 kubelet[49387]: E0524 21:33:30.175756   49387 kubelet_node_status.go:548] "Error updating node status, will retry" err="error getting node \"coparking-5\": Get \"https://k8s-api:6443/api/v1/nodes/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host"
+May 24 21:33:30 coparking-5 kubelet[49387]: W0524 21:33:30.175774   49387 reflector.go:569] k8s.io/client-go/informers/factory.go:160: failed to list *v1.Service: Get "https://k8s-api:6443/api/v1/services?fieldSelector=spec.clusterIP%21%3DNone&resourceVersion=2529": dial tcp 172.16.175.20:6443: connect: no route to host
+May 24 21:33:30 coparking-5 kubelet[49387]: E0524 21:33:30.175751   49387 controller.go:145] "Failed to ensure lease exists, will retry" err="Get \"https://k8s-api:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases/coparking-5?timeout=10s\": dial tcp 172.16.175.20:6443: connect: no route to host" interval="7s"
+May 24 21:33:30 coparking-5 kubelet[49387]: E0524 21:33:30.175895   49387 reflector.go:166] "Unhandled Error" err="k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.Service: failed to list *v1.Service: Get \"https://k8s-api:6443/api/v1/services?fieldSelector=spec.clusterIP%21%3DNone&resourceVersion=2529\": dial tcp 172.16.175.20:6443: connect: no route to host" logger="UnhandledError"
+== manifests ==
+total 24
+-rw-------. 1 root root 2551 May 22 19:24 etcd.yaml
+-rw-------. 1 root root 4273 May 22 19:24 kube-apiserver.yaml
+-rw-------. 1 root root 3777 May 22 19:24 kube-controller-manager.yaml
+-rw-------. 1 root root 2332 May 22 19:24 kube-scheduler.yaml
+-rw-r--r--. 1 root root 1386 May 22 19:41 kube-vip.yaml
+65:      path: /etc/kubernetes/admin.conf
+== kube-vip manifest ==
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  name: kube-vip
+  namespace: kube-system
+spec:
+  containers:
+  - args:
+    - manager
+    env:
+    - name: vip_arp
+      value: "true"
+    - name: port
+      value: "6443"
+    - name: vip_nodename
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+    - name: vip_interface
+      value: eno1
+    - name: vip_subnet
+      value: "32"
+    - name: dns_mode
+      value: first
+    - name: cp_enable
+      value: "true"
+    - name: cp_namespace
+      value: kube-system
+    - name: vip_leaderelection
+      value: "true"
+    - name: vip_leasename
+      value: plndr-cp-lock
+    - name: vip_leaseduration
+      value: "5"
+    - name: vip_renewdeadline
+      value: "3"
+    - name: vip_retryperiod
+      value: "1"
+    - name: address
+      value: 172.16.175.20
+    - name: prometheus_server
+      value: :2112
+    image: ghcr.io/kube-vip/kube-vip:v0.9.2
+    imagePullPolicy: IfNotPresent
+    name: kube-vip
+    resources: {}
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - NET_RAW
+        drop:
+        - ALL
+    volumeMounts:
+    - mountPath: /etc/kubernetes/admin.conf
+      name: kubeconfig
+  hostAliases:
+  - hostnames:
+    - kubernetes
+    ip: 127.0.0.1
+  hostNetwork: true
+  volumes:
+  - hostPath:
+      path: /etc/kubernetes/admin.conf
+    name: kubeconfig
+status: {}
 
-echo "== containerd/crictl =="
-systemctl is-active containerd 2>&1 | redact
-crictl pods 2>&1 | redact
-crictl ps -a 2>&1 | redact
+== containerd/crictl ==
+active
+POD ID              CREATED             STATE               NAME                                  NAMESPACE           ATTEMPT             RUNTIME
+69d60213d73de       2 days ago          Ready               kube-vip-coparking-5                  kube-system         0                   (default)
+3ab2c1061511b       2 days ago          Ready               etcd-coparking-5                      kube-system         0                   (default)
+ef89461c7d750       2 days ago          Ready               kube-scheduler-coparking-5            kube-system         0                   (default)
+13d4a0d68d31b       2 days ago          Ready               kube-controller-manager-coparking-5   kube-system         0                   (default)
+eb22f1940147f       2 days ago          Ready               kube-apiserver-coparking-5            kube-system         0                   (default)
+CONTAINER           IMAGE               CREATED             STATE               NAME                      ATTEMPT             POD ID              POD                                   NAMESPACE
+4f9b9abef995d       d8bc73bdd55e9       2 days ago          Running             kube-vip                  0                   69d60213d73de       kube-vip-coparking-5                  kube-system
+14b0968a7d433       8cb12dd0c3e42       2 days ago          Running             etcd                      1                   3ab2c1061511b       etcd-coparking-5                      kube-system
+250b250749410       2fab0ac6a3f2b       2 days ago          Running             kube-scheduler            2                   ef89461c7d750       kube-scheduler-coparking-5            kube-system
+f8cfd629c915e       59a2147964ea7       2 days ago          Running             kube-controller-manager   2                   13d4a0d68d31b       kube-controller-manager-coparking-5   kube-system
+b92e89d5e0590       1ca64cd86eb37       2 days ago          Running             kube-apiserver            305                 eb22f1940147f       kube-apiserver-coparking-5            kube-system
+---
+E0524 18:27:24.606435       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
+2026/05/24 18:27:24 INFO [UPNP] Refreshing Instances "number of instances"=0
+E0524 18:27:26.434848       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
+E0524 18:27:28.197413       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
+== apiserver logs tail ==
+I0522 16:24:26.625521       1 instance.go:233] Using reconciler: lease
+I0522 16:24:26.666544       1 handler.go:286] Adding GroupVersion apiextensions.k8s.io v1 to ResourceManager
+W0522 16:24:26.666599       1 genericapiserver.go:767] Skipping API apiextensions.k8s.io/v1beta1 because it has no resources.
+I0522 16:24:26.865499       1 handler.go:286] Adding GroupVersion  v1 to ResourceManager
+I0522 16:24:26.865949       1 apis.go:106] API group "internal.apiserver.k8s.io" is not enabled, skipping.
+I0522 16:24:27.071836       1 apis.go:106] API group "storagemigration.k8s.io" is not enabled, skipping.
+I0522 16:24:27.195535       1 apis.go:106] API group "resource.k8s.io" is not enabled, skipping.
+I0522 16:24:27.248764       1 handler.go:286] Adding GroupVersion storage.k8s.io v1 to ResourceManager
+W0522 16:24:27.249033       1 genericapiserver.go:767] Skipping API storage.k8s.io/v1beta1 because it has no resources.
+W0522 16:24:27.249048       1 genericapiserver.go:767] Skipping API storage.k8s.io/v1alpha1 because it has no resources.
+I0522 16:24:27.253718       1 handler.go:286] Adding GroupVersion flowcontrol.apiserver.k8s.io v1 to ResourceManager
+W0522 16:24:27.253756       1 genericapiserver.go:767] Skipping API flowcontrol.apiserver.k8s.io/v1beta3 because it has no resources.
+W0522 16:24:27.253766       1 genericapiserver.go:767] Skipping API flowcontrol.apiserver.k8s.io/v1beta2 because it has no resources.
+W0522 16:24:27.253771       1 genericapiserver.go:767] Skipping API flowcontrol.apiserver.k8s.io/v1beta1 because it has no resources.
+I0522 16:24:27.258261       1 handler.go:286] Adding GroupVersion apps v1 to ResourceManager
+W0522 16:24:27.258288       1 genericapiserver.go:767] Skipping API apps/v1beta2 because it has no resources.
+W0522 16:24:27.258297       1 genericapiserver.go:767] Skipping API apps/v1beta1 because it has no resources.
+I0522 16:24:27.260358       1 handler.go:286] Adding GroupVersion admissionregistration.k8s.io v1 to ResourceManager
+W0522 16:24:27.260371       1 genericapiserver.go:767] Skipping API admissionregistration.k8s.io/v1beta1 because it has no resources.
+W0522 16:24:27.260378       1 genericapiserver.go:767] Skipping API admissionregistration.k8s.io/v1alpha1 because it has no resources.
+I0522 16:24:27.261002       1 handler.go:286] Adding GroupVersion events.k8s.io v1 to ResourceManager
+W0522 16:24:27.261015       1 genericapiserver.go:767] Skipping API events.k8s.io/v1beta1 because it has no resources.
+I0522 16:24:27.272250       1 handler.go:286] Adding GroupVersion apiregistration.k8s.io v1 to ResourceManager
+W0522 16:24:27.272293       1 genericapiserver.go:767] Skipping API apiregistration.k8s.io/v1beta1 because it has no resources.
+I0522 16:24:27.701470       1 dynamic_cafile_content.go:161] "Starting controller" name="request-header::/etc/kubernetes/pki/front-proxy-ca.crt"
+I0522 16:24:27.701472       1 dynamic_cafile_content.go:161] "Starting controller" name="client-ca-bundle::/etc/kubernetes/pki/ca.crt"
+I0522 16:24:27.701730       1 dynamic_serving_content.go:135] "Starting controller" name="serving-cert::/etc/kubernetes/pki/apiserver.crt::/etc/kubernetes/pki/apiserver.key"
+I0522 16:24:27.702423       1 secure_serving.go:213] Serving securely on [::]:6443
+I0522 16:24:27.702589       1 local_available_controller.go:156] Starting LocalAvailability controller
+I0522 16:24:27.702582       1 tlsconfig.go:243] "Starting DynamicServingCertificateController"
+I0522 16:24:27.702604       1 cache.go:32] Waiting for caches to sync for LocalAvailability controller
+I0522 16:24:27.702714       1 remote_available_controller.go:411] Starting RemoteAvailability controller
+I0522 16:24:27.702794       1 cache.go:32] Waiting for caches to sync for RemoteAvailability controller
+I0522 16:24:27.702913       1 apf_controller.go:377] Starting API Priority and Fairness config controller
+I0522 16:24:27.703020       1 apiservice_controller.go:100] Starting APIServiceRegistrationController
+I0522 16:24:27.703105       1 cache.go:32] Waiting for caches to sync for APIServiceRegistrationController controller
+I0522 16:24:27.703049       1 system_namespaces_controller.go:66] Starting system namespaces controller
+I0522 16:24:27.703411       1 gc_controller.go:78] Starting apiserver lease garbage collector
+I0522 16:24:27.703479       1 aggregator.go:169] waiting for initial CRD sync...
+I0522 16:24:27.703522       1 controller.go:78] Starting OpenAPI AggregationController
+I0522 16:24:27.703592       1 controller.go:80] Starting OpenAPI V3 AggregationController
+I0522 16:24:27.703564       1 dynamic_serving_content.go:135] "Starting controller" name="aggregator-proxy-cert::/etc/kubernetes/pki/front-proxy-client.crt::/etc/kubernetes/pki/front-proxy-client.key"
+I0522 16:24:27.703875       1 customresource_discovery_controller.go:292] Starting DiscoveryController
+I0522 16:24:27.703900       1 controller.go:119] Starting legacy_token_tracking_controller
+I0522 16:24:27.704040       1 shared_informer.go:313] Waiting for caches to sync for configmaps
+I0522 16:24:27.704117       1 controller.go:142] Starting OpenAPI controller
+I0522 16:24:27.704292       1 controller.go:90] Starting OpenAPI V3 controller
+I0522 16:24:27.704360       1 apiapproval_controller.go:189] Starting KubernetesAPIApprovalPolicyConformantConditionController
+I0522 16:24:27.704357       1 nonstructuralschema_controller.go:195] Starting NonStructuralSchemaConditionController
+I0522 16:24:27.704323       1 crdregistration_controller.go:114] Starting crd-autoregister controller
+I0522 16:24:27.704472       1 shared_informer.go:313] Waiting for caches to sync for crd-autoregister
+I0522 16:24:27.704480       1 naming_controller.go:294] Starting NamingConditionController
+I0522 16:24:27.704424       1 crd_finalizer.go:269] Starting CRDFinalizer
+I0522 16:24:27.704568       1 establishing_controller.go:81] Starting EstablishingController
+I0522 16:24:27.713750       1 dynamic_cafile_content.go:161] "Starting controller" name="client-ca-bundle::/etc/kubernetes/pki/ca.crt"
+I0522 16:24:27.713732       1 cluster_authentication_trust_controller.go:462] Starting cluster_authentication_trust_controller controller
+I0522 16:24:27.713814       1 dynamic_cafile_content.go:161] "Starting controller" name="request-header::/etc/kubernetes/pki/front-proxy-ca.crt"
+I0522 16:24:27.713958       1 shared_informer.go:313] Waiting for caches to sync for cluster_authentication_trust_controller
+E0522 16:24:27.779193       1 controller.go:145] "Failed to ensure lease exists, will retry" err="namespaces \"kube-system\" not found" interval="200ms"
+I0522 16:24:27.802925       1 cache.go:39] Caches are synced for LocalAvailability controller
+I0522 16:24:27.803033       1 cache.go:39] Caches are synced for RemoteAvailability controller
+I0522 16:24:27.803095       1 apf_controller.go:382] Running API Priority and Fairness config worker
+I0522 16:24:27.803113       1 apf_controller.go:385] Running API Priority and Fairness periodic rebalancing process
+I0522 16:24:27.803678       1 cache.go:39] Caches are synced for APIServiceRegistrationController controller
+I0522 16:24:27.803730       1 handler_discovery.go:451] Starting ResourceDiscoveryManager
+I0522 16:24:27.804123       1 shared_informer.go:320] Caches are synced for configmaps
+I0522 16:24:27.804632       1 shared_informer.go:320] Caches are synced for crd-autoregister
+I0522 16:24:27.804666       1 aggregator.go:171] initial CRD sync complete...
+I0522 16:24:27.804676       1 autoregister_controller.go:144] Starting autoregister controller
+I0522 16:24:27.804684       1 cache.go:32] Waiting for caches to sync for autoregister controller
+I0522 16:24:27.804691       1 cache.go:39] Caches are synced for autoregister controller
+I0522 16:24:27.804719       1 shared_informer.go:320] Caches are synced for node_authorizer
+I0522 16:24:27.814961       1 shared_informer.go:320] Caches are synced for cluster_authentication_trust_controller
+I0522 16:24:27.817798       1 shared_informer.go:320] Caches are synced for *generic.policySource[*k8s.io/api/admissionregistration/v1.ValidatingAdmissionPolicy,*k8s.io/api/admissionregistration/v1.ValidatingAdmissionPolicyBinding,k8s.io/apiserver/pkg/admission/plugin/policy/validating.Validator]
+I0522 16:24:27.817829       1 policy_source.go:240] refreshing policies
+I0522 16:24:27.818263       1 controller.go:615] quota admission added evaluator for: namespaces
+I0522 16:24:27.982245       1 controller.go:615] quota admission added evaluator for: leases.coordination.k8s.io
+I0522 16:24:28.708454       1 storage_scheduling.go:95] created PriorityClass system-node-critical with value 2000001000
+I0522 16:24:28.712988       1 storage_scheduling.go:95] created PriorityClass system-cluster-critical with value 2000000000
+I0522 16:24:28.713014       1 storage_scheduling.go:111] all system priority classes are created successfully or already exist.
+I0522 16:24:29.208049       1 controller.go:615] quota admission added evaluator for: roles.rbac.authorization.k8s.io
+I0522 16:24:29.249794       1 controller.go:615] quota admission added evaluator for: rolebindings.rbac.authorization.k8s.io
+I0522 16:24:29.309854       1 alloc.go:330] "allocated clusterIPs" service="default/kubernetes" clusterIPs={"IPv4":"10.96.0.1"}
+W0522 16:24:29.316561       1 lease.go:265] Resetting endpoints for master service "kubernetes" to [172.16.175.19]
+I0522 16:24:29.317695       1 controller.go:615] quota admission added evaluator for: endpoints
+I0522 16:24:29.323798       1 controller.go:615] quota admission added evaluator for: endpointslices.discovery.k8s.io
+I0522 16:24:31.256648       1 controller.go:615] quota admission added evaluator for: serviceaccounts
+== api health ==
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100     2  100     2    0     0    220      0 --:--:-- --:--:-- --:--:--   222
+ok
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100     2  100     2    0     0    271      0 --:--:-- --:--:-- --:--:--   285
+ok
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (7) Failed to connect to 172.16.175.20 port 6443 after 800 ms: Couldn't connect to server
 
-echo "== kube-vip logs =="
-VIP_CONTAINER="$(crictl ps -a --name kube-vip -q | head -n1)"
-if [ -n "$VIP_CONTAINER" ]; then
-  crictl logs "$VIP_CONTAINER" 2>&1 | redact
-else
-  echo "no kube-vip container found"
-fi
+== vip/network ==
+2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+    link/ether 30:56:0f:19:98:10 brd ff:ff:ff:ff:ff:ff
+    altname enp97s0f0
+    inet 10.96.183.237/24 brd 10.96.183.255 scope global noprefixroute eno1
+       valid_lft forever preferred_lft forever
+    inet 172.16.175.19/24 brd 172.16.175.255 scope global noprefixroute eno1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::3256:fff:fe19:9810/64 scope link noprefixroute
+       valid_lft forever preferred_lft forever
+default via 10.96.183.1 dev eno1 proto static metric 100
+10.96.183.0/24 dev eno1 proto kernel scope link src 10.96.183.237 metric 100
+172.16.175.0/24 dev eno1 proto kernel scope link src 172.16.175.19 metric 100
+172.16.175.24 FAILED
+10.96.183.1 lladdr 00:00:5e:00:01:08 REACHABLE
+172.16.175.23 lladdr 10:ff:e0:ee:3e:5c STALE
+10.96.183.134 lladdr 30:56:0f:36:72:18 REACHABLE
+172.16.175.21 lladdr 30:56:0f:19:98:54 STALE
+172.16.175.20 INCOMPLETE
+172.16.175.29 lladdr 00:15:b2:b3:18:f4 STALE
+10.96.183.200 lladdr 30:56:0f:36:71:0b STALE
+10.96.183.253 lladdr ec:b1:e0:fa:51:40 STALE
+172.16.175.27 lladdr 00:15:b2:b3:19:48 STALE
+172.16.175.25 lladdr 30:56:0f:19:98:a8 STALE
+PING 172.16.175.20 (172.16.175.20) 56(84) bytes of data.
+From 172.16.175.19 icmp_seq=1 Destination Host Unreachable
+From 172.16.175.19 icmp_seq=2 Destination Host Unreachable
+From 172.16.175.19 icmp_seq=3 Destination Host Unreachable
 
-echo "== apiserver logs tail =="
-APISERVER_CONTAINER="$(crictl ps -a --name kube-apiserver -q | head -n1)"
-if [ -n "$APISERVER_CONTAINER" ]; then
-  crictl logs --tail=120 "$APISERVER_CONTAINER" 2>&1 | redact
-else
-  echo "no kube-apiserver container found"
-fi
-
-echo "== api health =="
-curl -k --max-time 5 https://127.0.0.1:6443/healthz 2>&1 | redact
-echo
-curl -k --max-time 5 https://172.16.175.19:6443/healthz 2>&1 | redact
-echo
-curl -k --max-time 5 https://172.16.175.20:6443/healthz 2>&1 | redact
-echo
-
-echo "== vip/network =="
-ip addr show eno1 2>&1 | redact
-ip route 2>&1 | redact
-ip neigh show dev eno1 2>&1 | redact
-ping -c 3 172.16.175.20 2>&1 | redact
-
-echo "== kubeconfig server only =="
-grep 'server:' /etc/kubernetes/admin.conf 2>&1 | redact
-grep 'server:' /etc/kubernetes/super-admin.conf 2>&1 | redact
-grep k8s-api /etc/hosts 2>&1 | redact
-
-echo "== kubectl =="
-KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o wide 2>&1 | redact
-KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods -A -o wide 2>&1 | redact
+--- 172.16.175.20 ping statistics ---
+3 packets transmitted, 0 received, +3 errors, 100% packet loss, time 2080ms
+pipe 3
+== kubeconfig server only ==
+    server: https://k8s-api:6443
+    server: https://k8s-api:6443
+172.16.175.20  k8s-api
+== kubectl ==
+E0524 21:27:43.331994   61881 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.349332   61881 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.364313   61881 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.375973   61881 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.386367   61881 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+Unable to connect to the server: Access violation
+E0524 21:27:43.471623   61899 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.484173   61899 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.496189   61899 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.508368   61899 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:27:43.520240   61899 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+Unable to connect to the server: Access violation
