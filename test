@@ -19,3 +19,18 @@ echo "== checks via admin =="
 KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o wide
 KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods -A -o wide
 curl -k --max-time 5 https://172.16.175.20:6443/healthz
+---
+sed -i 's#path: /etc/kubernetes/super-admin.conf#path: /etc/kubernetes/admin.conf#g' \
+  /etc/kubernetes/manifests/kube-vip.yaml
+
+sleep 25
+
+echo "== VIP still alive =="
+ip addr show eno1 | grep 172.16.175.20 || true
+curl -k --max-time 5 https://172.16.175.20:6443/healthz || true
+
+echo "== kube-vip logs tail =="
+crictl logs --tail=60 "$(crictl ps -a --name kube-vip -q | head -n1)"
+---
+sed -i 's#path: /etc/kubernetes/admin.conf#path: /etc/kubernetes/super-admin.conf#g' \
+  /etc/kubernetes/manifests/kube-vip.yaml
