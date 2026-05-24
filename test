@@ -1,28 +1,39 @@
-error execution phase upload-config/kubeadm: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: client rate limiter Wait returned an error: context deadline exceeded
-To see the stack trace of this error execute with --v=5 or higher
-W0524 21:53:35.464891   62529 version.go:109] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": EOF
-W0524 21:53:35.465068   62529 version.go:110] falling back to the local client version: v1.32.13
-error execution phase upload-certs: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: client rate limiter Wait returned an error: rate: Wait(n=1) would exceed context deadline
-To see the stack trace of this error execute with --v=5 or higher
-error execution phase mark-control-plane: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: client rate limiter Wait returned an error: context deadline exceeded
-To see the stack trace of this error execute with --v=5 or higher
-W0524 21:55:35.651559   62569 version.go:109] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": EOF
-W0524 21:55:35.651665   62569 version.go:110] falling back to the local client version: v1.32.13
-error execution phase bootstrap-token: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: Post "https://k8s-api:6443/apis/rbac.authorization.k8s.io/v1/clusterrolebindings?timeout=10s": Access violation
-To see the stack trace of this error execute with --v=5 or higher
-W0524 21:56:35.778142   62591 version.go:109] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": EOF
-W0524 21:56:35.778255   62591 version.go:110] falling back to the local client version: v1.32.13
-error execution phase addon/coredns: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: Post "https://k8s-api:6443/apis/rbac.authorization.k8s.io/v1/clusterrolebindings?timeout=10s": Access violation
-To see the stack trace of this error execute with --v=5 or higher
-E0524 21:57:35.929922   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:35.941379   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:35.951470   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:35.960445   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:35.969567   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-Unable to connect to the server: Access violation
-E0524 21:57:36.053937   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:36.063759   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:36.073491   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:36.083644   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-E0524 21:57:36.092255   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
-Unable to connect to the server: Access violation
+export NO_PROXY="localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local"
+export no_proxy="$NO_PROXY"
+
+unset HTTP_PROXY
+unset HTTPS_PROXY
+unset http_proxy
+unset https_proxy
+
+echo "== proxy env =="
+env | grep -i proxy || true
+
+echo "== API direct by name =="
+curl -k --max-time 5 https://k8s-api:6443/healthz
+
+echo "== kubectl via super-admin =="
+KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get --raw=/healthz
+KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get nodes -o wide
+---
+kubeadm init phase upload-config all --config /root/kubeadm-config.yaml
+kubeadm init phase upload-certs --upload-certs --config /root/kubeadm-config.yaml
+kubeadm init phase mark-control-plane --config /root/kubeadm-config.yaml
+kubeadm init phase bootstrap-token --config /root/kubeadm-config.yaml
+kubeadm init phase kubelet-finalize all
+kubeadm init phase addon all --config /root/kubeadm-config.yaml
+
+mkdir -p /root/.kube
+cp -f /etc/kubernetes/admin.conf /root/.kube/config
+chmod 600 /root/.kube/config
+
+KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o wide
+KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods -A -o wide
+---
+grep -q '^NO_PROXY=' /etc/environment && \
+  sed -i 's#^NO_PROXY=.*#NO_PROXY=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local#' /etc/environment || \
+  echo 'NO_PROXY=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local' >> /etc/environment
+
+grep -q '^no_proxy=' /etc/environment && \
+  sed -i 's#^no_proxy=.*#no_proxy=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local#' /etc/environment || \
+  echo 'no_proxy=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local' >> /etc/environment
