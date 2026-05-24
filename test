@@ -1,5 +1,28 @@
-echo "== required kubeadm images =="
-kubeadm config images list --config /root/kubeadm-config.yaml
-
-echo "== local images =="
-crictl images | egrep 'kube-apiserver|kube-controller-manager|kube-scheduler|kube-proxy|etcd|coredns|pause|kube-vip|calico|tigera' || true
+registry.k8s.io/kube-apiserver:v1.32.13
+registry.k8s.io/kube-controller-manager:v1.32.13
+registry.k8s.io/kube-scheduler:v1.32.13
+registry.k8s.io/kube-proxy:v1.32.13
+registry.k8s.io/coredns/coredns:v1.11.3
+registry.k8s.io/pause:3.10
+registry.k8s.io/etcd:3.5.24-0
+[root@coparking-5 coparking]# crictl images | egrep 'kube-apiserver|kube-controller-manager|kube-scheduler|kube-proxy|etcd|coredns|pause|kube-vip|calico|tigera' || true
+docker.io/calico/cni                                   v3.29.5             2b1c487ed9e0f       99.3MB
+docker.io/calico/kube-controllers                      v3.29.5             fef102d0f353c       82.5MB
+docker.io/calico/node                                  v3.29.5             4d440810bc03b       381MB
+ghcr.io/kube-vip/kube-vip                              v0.9.2              d8bc73bdd55e9       58.6MB
+registry.test/kube-vip/kube-vip         v0.9.2              d8bc73bdd55e9       58.6MB
+registry.k8s.io/coredns/coredns                        v1.11.3             c69fa2e9cbf5f       63.3MB
+registry.test/coredns/coredns           v1.11.3             c69fa2e9cbf5f       63.3MB
+registry.k8s.io/etcd                                   3.5.16-0            a9e7e6b294baf       151MB
+registry.test/etcd                      3.5.16-0            a9e7e6b294baf       151MB
+registry.k8s.io/etcd                                   3.5.24-0            8cb12dd0c3e42       66.2MB
+registry.k8s.io/kube-apiserver                         v1.32.13            1ca64cd86eb37       99MB
+registry.test/kube-apiserver            v1.32.13            1ca64cd86eb37       99MB
+registry.k8s.io/kube-controller-manager                v1.32.13            59a2147964ea7       91.8MB
+registry.test/kube-controller-manager   v1.32.13            59a2147964ea7       91.8MB
+registry.k8s.io/kube-proxy                             v1.32.13            e9078246da346       95.9MB
+registry.test/kube-proxy                v1.32.13            e9078246da346       95.9MB
+registry.k8s.io/kube-scheduler                         v1.32.13            2fab0ac6a3f2b       71.6MB
+registry.test/kube-scheduler            v1.32.13            2fab0ac6a3f2b       71.6MB
+registry.k8s.io/pause                                  3.10                873ed75102791       739kB
+registry.test/pause                     3.10                873ed75102791       739kB
