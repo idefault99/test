@@ -1,26 +1,28 @@
-kubeadm init phase upload-config all --config /root/kubeadm-config.yaml
-kubeadm init phase upload-certs --upload-certs
-kubeadm init phase mark-control-plane --config /root/kubeadm-config.yaml
-kubeadm init phase bootstrap-token
-kubeadm init phase kubelet-finalize all
-kubeadm init phase addon all --config /root/kubeadm-config.yaml
-
-mkdir -p /root/.kube
-cp -f /etc/kubernetes/admin.conf /root/.kube/config
-chmod 600 /root/.kube/config
-
-KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get nodes -o wide
-KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get pods -A -o wide
----
-export KUBECONFIG=/etc/kubernetes/super-admin.conf
----
-find /root /opt /srv /tmp -maxdepth 4 -type f \( -iname '*calico*.yaml' -o -iname '*tigera*.yaml' \) 2>/dev/null
----
-grep -n "192.168.0.0/16\\|10.244.0.0/16\\|CALICO_IPV4POOL_CIDR" /path/to/calico.yaml
-
-sed -i 's#192.168.0.0/16#10.244.0.0/16#g' /path/to/calico.yaml
-
-kubectl apply -f /path/to/calico.yaml
-kubectl -n kube-system rollout status ds/calico-node --timeout=300s
-kubectl get nodes -o wide
----
+error execution phase upload-config/kubeadm: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: client rate limiter Wait returned an error: context deadline exceeded
+To see the stack trace of this error execute with --v=5 or higher
+W0524 21:53:35.464891   62529 version.go:109] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": EOF
+W0524 21:53:35.465068   62529 version.go:110] falling back to the local client version: v1.32.13
+error execution phase upload-certs: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: client rate limiter Wait returned an error: rate: Wait(n=1) would exceed context deadline
+To see the stack trace of this error execute with --v=5 or higher
+error execution phase mark-control-plane: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: client rate limiter Wait returned an error: context deadline exceeded
+To see the stack trace of this error execute with --v=5 or higher
+W0524 21:55:35.651559   62569 version.go:109] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": EOF
+W0524 21:55:35.651665   62569 version.go:110] falling back to the local client version: v1.32.13
+error execution phase bootstrap-token: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: Post "https://k8s-api:6443/apis/rbac.authorization.k8s.io/v1/clusterrolebindings?timeout=10s": Access violation
+To see the stack trace of this error execute with --v=5 or higher
+W0524 21:56:35.778142   62591 version.go:109] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": EOF
+W0524 21:56:35.778255   62591 version.go:110] falling back to the local client version: v1.32.13
+error execution phase addon/coredns: could not bootstrap the admin user in file admin.conf: unable to create ClusterRoleBinding: Post "https://k8s-api:6443/apis/rbac.authorization.k8s.io/v1/clusterrolebindings?timeout=10s": Access violation
+To see the stack trace of this error execute with --v=5 or higher
+E0524 21:57:35.929922   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:35.941379   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:35.951470   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:35.960445   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:35.969567   62633 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+Unable to connect to the server: Access violation
+E0524 21:57:36.053937   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:36.063759   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:36.073491   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:36.083644   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+E0524 21:57:36.092255   62651 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://k8s-api:6443/api?timeout=32s\": Access violation"
+Unable to connect to the server: Access violation
