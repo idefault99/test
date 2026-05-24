@@ -1,36 +1,5 @@
-echo "== kubectl via super-admin =="
-KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get nodes -o wide
-KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get pods -A -o wide
+echo "== required kubeadm images =="
+kubeadm config images list --config /root/kubeadm-config.yaml
 
-echo "== finish kubeadm phases =="
-kubeadm init phase upload-config all --config /root/kubeadm-config.yaml
-kubeadm init phase upload-certs --upload-certs
-kubeadm init phase mark-control-plane --config /root/kubeadm-config.yaml
-kubeadm init phase bootstrap-token
-kubeadm init phase kubelet-finalize all
-kubeadm init phase addon all --config /root/kubeadm-config.yaml
-
-echo "== admin kubeconfig =="
-mkdir -p /root/.kube
-cp -f /etc/kubernetes/admin.conf /root/.kube/config
-chmod 600 /root/.kube/config
-
-echo "== checks via admin =="
-KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o wide
-KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods -A -o wide
-curl -k --max-time 5 https://172.16.175.20:6443/healthz
----
-sed -i 's#path: /etc/kubernetes/super-admin.conf#path: /etc/kubernetes/admin.conf#g' \
-  /etc/kubernetes/manifests/kube-vip.yaml
-
-sleep 25
-
-echo "== VIP still alive =="
-ip addr show eno1 | grep 172.16.175.20 || true
-curl -k --max-time 5 https://172.16.175.20:6443/healthz || true
-
-echo "== kube-vip logs tail =="
-crictl logs --tail=60 "$(crictl ps -a --name kube-vip -q | head -n1)"
----
-sed -i 's#path: /etc/kubernetes/admin.conf#path: /etc/kubernetes/super-admin.conf#g' \
-  /etc/kubernetes/manifests/kube-vip.yaml
+echo "== local images =="
+crictl images | egrep 'kube-apiserver|kube-controller-manager|kube-scheduler|kube-proxy|etcd|coredns|pause|kube-vip|calico|tigera' || true
