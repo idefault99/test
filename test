@@ -1,22 +1,9 @@
-export NO_PROXY="localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local"
-export no_proxy="$NO_PROXY"
-
-unset HTTP_PROXY
-unset HTTPS_PROXY
-unset http_proxy
-unset https_proxy
-
-echo "== proxy env =="
-env | grep -i proxy || true
-
-echo "== API direct by name =="
-curl -k --max-time 5 https://k8s-api:6443/healthz
-
-echo "== kubectl via super-admin =="
-KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get --raw=/healthz
+[root@coparking-5 coparking]# curl -k --max-time 5 https://k8s-api:6443/healthz
+ok[root@coparking-5 coparking]KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get --raw=/healthzhz
 KUBECONFIG=/etc/kubernetes/super-admin.conf kubectl get nodes -o wide
----
-kubeadm init phase upload-config all --config /root/kubeadm-config.yaml
+okNAME          STATUS     ROLES    AGE    VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE     KERNEL-VERSION           CONTAINER-RUNTIME
+coparking-5   NotReady   <none>   2d2h   v1.32.13   172.16.175.19   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+[root@coparking-5 coparking]# kubeadm init phase upload-config all --config /root/kubeadm-config.yaml
 kubeadm init phase upload-certs --upload-certs --config /root/kubeadm-config.yaml
 kubeadm init phase mark-control-plane --config /root/kubeadm-config.yaml
 kubeadm init phase bootstrap-token --config /root/kubeadm-config.yaml
@@ -29,11 +16,33 @@ chmod 600 /root/.kube/config
 
 KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o wide
 KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods -A -o wide
----
-grep -q '^NO_PROXY=' /etc/environment && \
-  sed -i 's#^NO_PROXY=.*#NO_PROXY=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local#' /etc/environment || \
-  echo 'NO_PROXY=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local' >> /etc/environment
+[upload-config] Storing the configuration used in ConfigMap "kubeadm-config" in the "kube-system" Namespace
+[kubelet] Creating a ConfigMap "kubelet-config" in namespace kube-system with the configuration for the kubelets in the cluster
+[upload-certs] Storing the certificates in Secret "kubeadm-certs" in the "kube-system" Namespace
+[upload-certs] Using certificate key:
 
-grep -q '^no_proxy=' /etc/environment && \
-  sed -i 's#^no_proxy=.*#no_proxy=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local#' /etc/environment || \
-  echo 'no_proxy=localhost,127.0.0.1,k8s-api,172.16.175.20,172.16.175.19,172.16.175.21,172.16.175.23,172.16.175.25,172.16.175.27,172.16.175.29,172.16.175.0/24,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local' >> /etc/environment
+[mark-control-plane] Marking the node coparking-5 as control-plane by adding the labels: [node-role.kubernetes.io/control-plane node.kubernetes.io/exclude-from-external-load-balancers]
+[mark-control-plane] Marking the node coparking-5 as control-plane by adding the taints [node-role.kubernetes.io/control-plane:NoSchedule]
+[bootstrap-token] Using token: 
+[bootstrap-token] Configuring bootstrap tokens, cluster-info ConfigMap, RBAC Roles
+[bootstrap-token] Configured RBAC rules to allow Node Bootstrap tokens to get nodes
+[bootstrap-token] Configured RBAC rules to allow Node Bootstrap tokens to post CSRs in order for nodes to get long term certificate credentials
+[bootstrap-token] Configured RBAC rules to allow the csrapprover controller automatically approve CSRs from a Node Bootstrap Token
+[bootstrap-token] Configured RBAC rules to allow certificate rotation for all node client certificates in the cluster
+[bootstrap-token] Creating the "cluster-info" ConfigMap in the "kube-public" namespace
+W0524 22:03:30.966199   62816 version.go:109] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": EOF
+W0524 22:03:30.966383   62816 version.go:110] falling back to the local client version: v1.32.13
+[addons] Applied essential addon: CoreDNS
+[addons] Applied essential addon: kube-proxy
+cp: overwrite '/root/.kube/config'? yes
+NAME          STATUS     ROLES           AGE    VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE     KERNEL-VERSION           CONTAINER-RUNTIME
+coparking-5   NotReady   control-plane   2d2h   v1.32.13   172.16.175.19   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+NAMESPACE     NAME                                  READY   STATUS    RESTARTS   AGE    IP              NODE          NOMINATED NODE   READINESS GATES
+kube-system   coredns-668d6bf9bc-9ljmt              0/1     Pending   0          6s     <none>          <none>        <none>           <none>
+kube-system   coredns-668d6bf9bc-flf96              0/1     Pending   0          6s     <none>          <none>        <none>           <none>
+kube-system   etcd-coparking-5                      1/1     Running   1          2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-apiserver-coparking-5            1/1     Running   305        2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-controller-manager-coparking-5   1/1     Running   2          2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-proxy-gppsl                      1/1     Running   0          6s     172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-scheduler-coparking-5            1/1     Running   2          2d2h   172.16.175.19   coparking-5   <none>           <none>
+kube-system   kube-vip-coparking-5                  1/1     Running   0          2d2h   172.16.175.19   coparking-5   <none>           <none>
