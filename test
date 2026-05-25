@@ -1,149 +1,128 @@
-total 70572
-drwxr-xr-x.  2 root root    4096 Apr 22 13:00 .
-drwxr-xr-x. 34 root root    4096 May 21 17:19 ..
--rwxr-xr-x.  1 root root 3521880 Jan 28  2025 bandwidth
--rwxr-xr-x.  1 root root 4003408 Jan 28  2025 bridge
--rwxr-xr-x.  1 root root 9865016 Jan 28  2025 dhcp
--rwxr-xr-x.  1 root root 3643088 Jan 28  2025 dummy
--rwxr-xr-x.  1 root root 4003640 Jan 28  2025 firewall
--rwxr-xr-x.  1 root root 3594152 Jan 28  2025 host-device
--rwxr-xr-x.  1 root root 2964824 Jan 28  2025 host-local
--rwxr-xr-x.  1 root root 3659600 Jan 28  2025 ipvlan
--rwxr-xr-x.  1 root root 3079480 Jan 28  2025 loopback
--rwxr-xr-x.  1 root root 3688520 Jan 28  2025 macvlan
--rwxr-xr-x.  1 root root 3560856 Jan 28  2025 portmap
--rwxr-xr-x.  1 root root 3829760 Jan 28  2025 ptp
--rwxr-xr-x.  1 root root 3007096 Jan 28  2025 sample
--rwxr-xr-x.  1 root root 3256576 Jan 28  2025 sbr
--rwxr-xr-x.  1 root root 2669464 Jan 28  2025 static
--rwxr-xr-x.  1 root root 3701336 Jan 28  2025 tap
--rwxr-xr-x.  1 root root 3149560 Jan 28  2025 tuning
--rwxr-xr-x.  1 root root 3659512 Jan 28  2025 vlan
--rwxr-xr-x.  1 root root 3363568 Jan 28  2025 vrf
-total 157832
-lrwxrwxrwx. 1 root root       18 Apr 22 10:35 '*' -> '/usr/libexec/cni/*'
-drwxr-xr-x. 2 root root     4096 May 24 22:16  .
-drwxr-xr-x. 3 root root     4096 Apr 22 10:35  ..
--rwxr-xr-x. 1 root root  4437516 May 24 22:16  bandwidth
--rwxr-xr-x. 1 root root 68873047 May 24 22:16  calico
--rwxr-xr-x. 1 root root 68873047 May 24 22:16  calico-ipam
--rwxr-xr-x. 1 root root  2798181 May 24 22:16  flannel
--rwxr-xr-x. 1 root root  3939329 May 24 22:16  host-local
--rwxr-xr-x. 1 root root  4009900 May 24 22:16  loopback
--rwxr-xr-x. 1 root root  4498118 May 24 22:16  portmap
--rwxr-xr-x. 1 root root  4158724 May 24 22:16  tuning
-NAME                                      READY   STATUS              RESTARTS   AGE     IP              NODE          NOMINATED NODE   READINESS GATES
-calico-kube-controllers-6d5bc68bd-2s7df   0/1     ContainerCreating   0          11h     <none>          coparking-5   <none>           <none>
-calico-node-gx7lw                         1/1     Running             0          11h     172.16.175.19   coparking-5   <none>           <none>
-coredns-668d6bf9bc-9ljmt                  0/1     ContainerCreating   0          11h     <none>          coparking-5   <none>           <none>
-coredns-668d6bf9bc-flf96                  0/1     ContainerCreating   0          11h     <none>          coparking-5   <none>           <none>
-etcd-coparking-5                          1/1     Running             1          2d13h   172.16.175.19   coparking-5   <none>           <none>
-kube-apiserver-coparking-5                1/1     Running             305        2d13h   172.16.175.19   coparking-5   <none>           <none>
-kube-controller-manager-coparking-5       1/1     Running             2          2d13h   172.16.175.19   coparking-5   <none>           <none>
-kube-proxy-gppsl                          1/1     Running             0          11h     172.16.175.19   coparking-5   <none>           <none>
-kube-scheduler-coparking-5                1/1     Running             2          2d13h   172.16.175.19   coparking-5   <none>           <none>
-kube-vip-coparking-5                      1/1     Running             0          2d13h   172.16.175.19   coparking-5   <none>           <none>
-NAME          DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
-calico-node   1         1         1       1            1           kubernetes.io/os=linux   11h
-kube-proxy    1         1         1       1            1           kubernetes.io/os=linux   11h
-Defaulted container "calico-node" out of: calico-node, upgrade-ipam (init), install-cni (init), mount-bpffs (init)
-2026-05-25 05:28:53.918 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 05:28:53.918 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m2.6s: avg=5ms longest=13ms (resync-ipsets-v4)
-2026-05-25 05:29:00.276 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:29:58.783 [INFO][91] felix/summary.go 100: Summarising 6 dataplane reconciliation loops over 1m4.9s: avg=11ms longest=16ms ()
-2026-05-25 05:30:00.290 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:31:00.333 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:31:02.111 [INFO][91] felix/summary.go 100: Summarising 2 dataplane reconciliation loops over 1m3.3s: avg=9ms longest=16ms ()
-2026-05-25 05:32:00.350 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:32:27.005 [INFO][91] felix/summary.go 100: Summarising 2 dataplane reconciliation loops over 1m24.9s: avg=13ms longest=14ms (resync-ipsets-v4)
-2026-05-25 05:33:00.374 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:33:59.413 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 05:33:59.414 [INFO][91] felix/summary.go 100: Summarising 6 dataplane reconciliation loops over 1m32.4s: avg=10ms longest=18ms ()
-2026-05-25 05:34:00.388 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:35:00.428 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:35:27.010 [INFO][91] felix/summary.go 100: Summarising 4 dataplane reconciliation loops over 1m27.6s: avg=13ms longest=24ms ()
-2026-05-25 05:36:00.443 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:37:00.480 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:37:10.918 [INFO][91] felix/summary.go 100: Summarising 6 dataplane reconciliation loops over 1m43.9s: avg=11ms longest=20ms ()
-2026-05-25 05:38:00.495 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:38:27.013 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m16.1s: avg=14ms longest=21ms ()
-2026-05-25 05:39:00.534 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:39:06.866 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 05:39:32.868 [INFO][91] felix/summary.go 100: Summarising 6 dataplane reconciliation loops over 1m5.9s: avg=10ms longest=18ms ()
-2026-05-25 05:40:00.547 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:41:00.586 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:41:07.932 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m35.1s: avg=12ms longest=19ms ()
-2026-05-25 05:42:00.599 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:42:38.300 [INFO][91] felix/summary.go 100: Summarising 6 dataplane reconciliation loops over 1m30.4s: avg=13ms longest=20ms ()
-2026-05-25 05:43:00.623 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:44:00.639 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:44:08.374 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m30.1s: avg=11ms longest=19ms ()
-2026-05-25 05:44:13.131 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 05:45:00.675 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:45:08.423 [INFO][91] felix/summary.go 100: Summarising 5 dataplane reconciliation loops over 1m0s: avg=12ms longest=17ms ()
-2026-05-25 05:46:00.691 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:46:46.479 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m38.1s: avg=6ms longest=14ms (resync-ipsets-v4)
-2026-05-25 05:47:00.732 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:48:00.747 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:48:19.049 [INFO][91] felix/summary.go 100: Summarising 6 dataplane reconciliation loops over 1m32.6s: avg=15ms longest=20ms ()
-2026-05-25 05:49:00.783 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:49:20.096 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 05:49:20.096 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m1s: avg=5ms longest=13ms (resync-ipsets-v4)
-2026-05-25 05:50:00.798 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:50:27.037 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m6.9s: avg=11ms longest=19ms ()
-2026-05-25 05:51:00.836 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:52:00.852 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:52:06.802 [INFO][91] felix/summary.go 100: Summarising 7 dataplane reconciliation loops over 1m39.8s: avg=12ms longest=22ms ()
-2026-05-25 05:53:00.892 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:53:27.043 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m20.2s: avg=11ms longest=20ms ()
-2026-05-25 05:54:00.908 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:54:26.082 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 05:54:32.105 [INFO][91] felix/summary.go 100: Summarising 6 dataplane reconciliation loops over 1m5.1s: avg=12ms longest=20ms ()
-2026-05-25 05:55:00.944 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:56:00.960 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:56:09.110 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m37s: avg=12ms longest=21ms ()
-2026-05-25 05:57:00.971 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:57:43.510 [INFO][91] felix/summary.go 100: Summarising 7 dataplane reconciliation loops over 1m34.4s: avg=12ms longest=20ms ()
-2026-05-25 05:58:00.988 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:59:01.028 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 05:59:16.345 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m32.8s: avg=6ms longest=13ms (resync-ipsets-v4)
-2026-05-25 05:59:32.836 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 06:00:01.043 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:00:50.815 [INFO][91] felix/summary.go 100: Summarising 8 dataplane reconciliation loops over 1m34.5s: avg=13ms longest=20ms ()
-2026-05-25 06:01:01.056 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:02:01.072 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:02:27.061 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m36.2s: avg=10ms longest=14ms (resync-ipsets-v4)
-2026-05-25 06:03:01.098 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:04:00.284 [INFO][91] felix/summary.go 100: Summarising 7 dataplane reconciliation loops over 1m33.2s: avg=13ms longest=20ms ()
-2026-05-25 06:04:01.112 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:04:38.897 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 06:05:01.133 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:05:27.067 [INFO][91] felix/summary.go 100: Summarising 4 dataplane reconciliation loops over 1m26.8s: avg=7ms longest=13ms (resync-ipsets-v4)
-2026-05-25 06:06:01.147 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:07:01.173 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:07:10.565 [INFO][91] felix/summary.go 100: Summarising 7 dataplane reconciliation loops over 1m43.5s: avg=14ms longest=23ms ()
-2026-05-25 06:08:01.188 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:08:27.071 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m16.5s: avg=8ms longest=12ms (resync-ipsets-v4)
-2026-05-25 06:09:01.226 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:09:44.319 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 06:09:44.319 [INFO][91] felix/summary.go 100: Summarising 7 dataplane reconciliation loops over 1m17.2s: avg=11ms longest=23ms ()
-2026-05-25 06:10:01.243 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:11:01.283 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:11:01.475 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m17.2s: avg=12ms longest=20ms ()
-2026-05-25 06:12:01.298 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:12:39.175 [INFO][91] felix/summary.go 100: Summarising 7 dataplane reconciliation loops over 1m37.7s: avg=11ms longest=18ms ()
-2026-05-25 06:13:01.339 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:14:01.355 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:14:10.971 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m31.8s: avg=10ms longest=16ms ()
-2026-05-25 06:14:50.538 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 06:15:01.394 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:15:41.054 [INFO][91] felix/summary.go 100: Summarising 8 dataplane reconciliation loops over 1m30.1s: avg=10ms longest=17ms ()
-2026-05-25 06:16:01.408 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:17:01.433 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:17:12.265 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m31.2s: avg=12ms longest=21ms ()
-2026-05-25 06:18:01.448 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:18:48.654 [INFO][91] felix/summary.go 100: Summarising 7 dataplane reconciliation loops over 1m36.4s: avg=12ms longest=22ms ()
-2026-05-25 06:19:01.468 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
-2026-05-25 06:19:56.638 [INFO][91] felix/int_dataplane.go 2041: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:"coparking-5" ipv4_addr:"10.96.183.237/24" labels:<key:"beta.kubernetes.io/arch" value:"amd64" > labels:<key:"beta.kubernetes.io/os" value:"linux" > labels:<key:"kubernetes.io/arch" value:"amd64" > labels:<key:"kubernetes.io/hostname" value:"coparking-5" > labels:<key:"kubernetes.io/os" value:"linux" > labels:<key:"node-role.kubernetes.io/control-plane" value:"" > labels:<key:"node.kubernetes.io/exclude-from-external-load-balancers" value:"" >
-2026-05-25 06:19:56.638 [INFO][91] felix/summary.go 100: Summarising 3 dataplane reconciliation loops over 1m8s: avg=7ms longest=20ms ()
-2026-05-25 06:20:01.484 [INFO][98] monitor-addresses/autodetection_methods.go 103: Using autodetected IPv4 address on interface eno1: 10.96.183.237/24
+Name:                 coredns-668d6bf9bc-9ljmt
+Namespace:            kube-system
+Priority:             2000000000
+Priority Class Name:  system-cluster-critical
+Service Account:      coredns
+Node:                 coparking-5/172.16.175.19
+Start Time:           Sun, 24 May 2026 22:16:49 +0300
+Labels:               k8s-app=kube-dns
+                      pod-template-hash=668d6bf9bc
+Annotations:          <none>
+Status:               Pending
+IP:
+IPs:                  <none>
+Controlled By:        ReplicaSet/coredns-668d6bf9bc
+Containers:
+  coredns:
+    Container ID:
+    Image:         registry.k8s.io/coredns/coredns:v1.11.3
+    Image ID:
+    Ports:         53/UDP, 53/TCP, 9153/TCP
+    Host Ports:    0/UDP, 0/TCP, 0/TCP
+    Args:
+      -conf
+      /etc/coredns/Corefile
+    State:          Waiting
+      Reason:       ContainerCreating
+    Ready:          False
+    Restart Count:  0
+    Limits:
+      memory:  170Mi
+    Requests:
+      cpu:        100m
+      memory:     70Mi
+    Liveness:     http-get http://:8080/health delay=60s timeout=5s period=10s #success=1 #failure=5
+    Readiness:    http-get http://:8181/ready delay=0s timeout=1s period=10s #success=1 #failure=3
+    Environment:  <none>
+    Mounts:
+      /etc/coredns from config-volume (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-r99w9 (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   False
+  Initialized                 True
+  Ready                       False
+  ContainersReady             False
+  PodScheduled                True
+Volumes:
+  config-volume:
+    Type:      ConfigMap (a volume populated by a ConfigMap)
+    Name:      coredns
+    Optional:  false
+  kube-api-access-r99w9:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              kubernetes.io/os=linux
+Tolerations:                 CriticalAddonsOnly op=Exists
+                             node-role.kubernetes.io/control-plane:NoSchedule
+                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason                  Age                     From     Message
+  ----     ------                  ----                    ----     -------
+  Normal   SandboxChanged          2m4s (x38851 over 11h)  kubelet  Pod sandbox changed, it will be killed and re-created.
+  Warning  FailedCreatePodSandBox  2m4s (x38843 over 11h)  kubelet  (combined from similar events): Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "e54423ec3347e563f738262cbe12420561ff0e7f7438d217592a88bf7880c2aa": plugin type="calico" failed (add): failed to find plugin "calico" in path [/usr/libexec/cni]
+---
+Name:                 calico-kube-controllers-6d5bc68bd-2s7df
+Namespace:            kube-system
+Priority:             2000000000
+Priority Class Name:  system-cluster-critical
+Service Account:      calico-kube-controllers
+Node:                 coparking-5/172.16.175.19
+Start Time:           Sun, 24 May 2026 22:16:49 +0300
+Labels:               k8s-app=calico-kube-controllers
+                      pod-template-hash=6d5bc68bd
+Annotations:          <none>
+Status:               Pending
+SeccompProfile:       RuntimeDefault
+IP:
+IPs:                  <none>
+Controlled By:        ReplicaSet/calico-kube-controllers-6d5bc68bd
+Containers:
+  calico-kube-controllers:
+    Container ID:
+    Image:          docker.io/calico/kube-controllers:v3.29.5
+    Image ID:
+    Port:           <none>
+    Host Port:      <none>
+    State:          Waiting
+      Reason:       ContainerCreating
+    Ready:          False
+    Restart Count:  0
+    Liveness:       exec [/usr/bin/check-status -l] delay=10s timeout=10s period=10s #success=1 #failure=6
+    Readiness:      exec [/usr/bin/check-status -r] delay=0s timeout=1s period=10s #success=1 #failure=3
+    Environment:
+      ENABLED_CONTROLLERS:  node
+      DATASTORE_TYPE:       kubernetes
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-s97xx (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   False
+  Initialized                 True
+  Ready                       False
+  ContainersReady             False
+  PodScheduled                True
+Volumes:
+  kube-api-access-s97xx:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              kubernetes.io/os=linux
+Tolerations:                 CriticalAddonsOnly op=Exists
+                             node-role.kubernetes.io/control-plane:NoSchedule
+                             node-role.kubernetes.io/master:NoSchedule
+                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason                  Age                      From     Message
+  ----     ------                  ----                     ----     -------
+  Normal   SandboxChanged          3m39s (x38851 over 11h)  kubelet  Pod sandbox changed, it will be killed and re-created.
+  Warning  FailedCreatePodSandBox  3m39s (x38843 over 11h)  kubelet  (combined from similar events): Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "eae0d42e8f186e6489da7e57400f0474cb58b5b9708dca5b4e2554f1426f82db": plugin type="calico" failed (add): failed to find plugin "calico" in path [/usr/libexec/cni]
