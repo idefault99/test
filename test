@@ -1,5 +1,555 @@
-docker.io/longhornio/longhorn-engine                   v1.10.2             329d0762e8a88       435MB
-docker.io/longhornio/longhorn-instance-manager         v1.10.2             0532cbc3f4e20       476MB
-docker.io/longhornio/longhorn-manager                  v1.10.2             a0848fb9df567       356MB
-docker.io/longhornio/longhorn-share-manager            v1.10.2             e34c55c8d13db       270MB
-docker.io/longhornio/longhorn-ui                       v1.10.2             898594695f763       241MB
+# =====================================================================
+# LONGHORN INSTALL CONTINUE — CLOSED CONTOUR
+# Текущее состояние:
+#   - часть Longhorn images уже есть в crictl images
+#   - закрытый контур
+#   - кластер Ready
+#   - ставим Longhorn v1.10.2
+# =====================================================================
+
+
+# =====================================================================
+# 0. ВЫПОЛНЯТЬ С coparking-5
+# =====================================================================
+
+ssh root@coparking-5
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+export LONGHORN_VERSION="1.10.2"
+export LONGHORN_NAMESPACE="longhorn-system"
+
+
+# =====================================================================
+# 1. ПРОВЕРИТЬ, ЧТО ОСНОВНЫЕ LONGHORN IMAGES ЕСТЬ НА ВСЕХ НОДАХ
+# =====================================================================
+
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo
+  echo "===== $n ====="
+  ssh root@$n "crictl images | grep -E 'longhornio|sig-storage|csi|longhorn' || true"
+done
+
+
+# Минимум, который у тебя уже есть:
+#
+# docker.io/longhornio/longhorn-engine:v1.10.2
+# docker.io/longhornio/longhorn-instance-manager:v1.10.2
+# docker.io/longhornio/longhorn-manager:v1.10.2
+# docker.io/longhornio/longhorn-share-manager:v1.10.2
+# docker.io/longhornio/longhorn-ui:v1.10.2
+#
+# Важно:
+# эти images должны быть на тех нодах, где будут запускаться Longhorn pod'ы.
+# Для закрытого контура лучше загрузить их на ВСЕ 6 нод.
+
+
+# =====================================================================
+# 2. ПРОВЕРИТЬ, ЕСТЬ ЛИ ЛОКАЛЬНЫЙ HELM CHART LONGHORN
+# =====================================================================
+
+ls -lah /root/longhorn-${LONGHORN_VERSION}.tgz
+
+# Если файла нет, его нужно заранее принести в закрытый контур.
+# Нужен именно:
+#
+#   longhorn-1.10.2.tgz
+#
+# Без локального chart дальше Helm install не выполнить без интернета.
+
+
+# =====================================================================
+# 3. ПОСМОТРЕТЬ, КАКИЕ IMAGES ТРЕБУЕТ LONGHORN CHART
+# =====================================================================
+
+mkdir -p /root/longhorn-render
+
+helm template longhorn /root/longhorn-${LONGHORN_VERSION}.tgz \
+  --namespace ${LONGHORN_NAMESPACE} \
+  > /root/longhorn-render/longhorn-rendered.yaml
+
+
+grep -oE 'image: *"?.+"?' /root/longhorn-render/longhorn-rendered.yaml \
+  | sed 's/image: //g' \
+  | tr -d '"' \
+  | sort -u \
+  > /root/longhorn-render/required-images.txt
+
+
+cat /root/longhorn-render/required-images.txt
+
+
+# =====================================================================
+# 4. СРАВНИТЬ REQUIRED IMAGES С ТЕМ, ЧТО ЕСТЬ НА НОДАХ
+# =====================================================================
+
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo
+  echo "===== $n ====="
+
+  ssh root@$n "crictl images | awk 'NR>1 {print \$1\":\"\$2}' | sort -u" \
+    > /tmp/images-${n}.txt
+
+  echo "--- missing images on $n ---"
+  comm -23 \
+    /root/longhorn-render/required-images.txt \
+    /tmp/images-${n}.txt \
+    || true
+done
+
+
+# Если вывод missing images пустой на всех нодах — можно ставить.
+# Если missing images есть — Longhorn pod'ы уйдут в ImagePullBackOff,
+# потому что закрытый контур и тянуть их неоткуда.
+
+
+# =====================================================================
+# 5. НАИБОЛЕЕ ВЕРОЯТНО НЕДОСТАЮЩИЕ IMAGES
+# =====================================================================
+
+# Часто не хватает CSI sidecars:
+#
+# registry.k8s.io/sig-storage/csi-attacher:...
+# registry.k8s.io/sig-storage/csi-provisioner:...
+# registry.k8s.io/sig-storage/csi-node-driver-registrar:...
+# registry.k8s.io/sig-storage/csi-resizer:...
+# registry.k8s.io/sig-storage/csi-snapshotter:...
+# registry.k8s.io/sig-storage/livenessprobe:...
+#
+# Также могут понадобиться:
+#
+# docker.io/longhornio/longhorn-backing-image-manager:v1.10.2
+# docker.io/longhornio/support-bundle-kit:...
+#
+# Точный список брать только из:
+#
+#   /root/longhorn-render/required-images.txt
+
+
+# =====================================================================
+# 6. ЕСЛИ НЕДОСТАЮЩИЕ IMAGES ЕСТЬ В ВИДЕ TAR-ФАЙЛОВ
+# =====================================================================
+
+# Пример:
+#   /root/images/longhorn-csi-attacher.tar
+#   /root/images/longhorn-csi-provisioner.tar
+#   ...
+#
+# Загрузить на каждую ноду через ctr/crictl.
+#
+# Для containerd лучше использовать ctr namespace k8s.io:
+
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "mkdir -p /root/longhorn-images"
+done
+
+
+# Скопировать tar-архивы на все ноды:
+
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "===== copy to $n ====="
+  scp /root/longhorn-images/*.tar root@$n:/root/longhorn-images/
+done
+
+
+# Импортировать:
+
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "===== import on $n ====="
+  ssh root@$n 'for img in /root/longhorn-images/*.tar; do echo "--- $img"; ctr -n k8s.io images import "$img"; done'
+done
+
+
+# Проверить снова:
+
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo
+  echo "===== $n ====="
+  ssh root@$n "crictl images | grep -E 'longhornio|sig-storage|csi|longhorn' || true"
+done
+
+
+# =====================================================================
+# 7. ЕСЛИ IMAGES ЕСТЬ ТОЛЬКО НА coparking-5 И НУЖНО РАЗНЕСТИ ИХ НА ВСЕ НОДЫ
+# =====================================================================
+
+# На coparking-5 экспортировать нужные images из containerd.
+# ВАЖНО: image names должны совпадать с required-images.txt.
+
+mkdir -p /root/longhorn-images-export
+
+while read -r img; do
+  [ -z "$img" ] && continue
+  safe_name=$(echo "$img" | sed 's#/#_#g; s#:#_#g')
+  echo "===== export $img ====="
+  ctr -n k8s.io images export "/root/longhorn-images-export/${safe_name}.tar" "$img" || true
+done < /root/longhorn-render/required-images.txt
+
+
+ls -lah /root/longhorn-images-export/
+
+
+# Скопировать на остальные ноды:
+
+for n in coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "mkdir -p /root/longhorn-images-export"
+  scp /root/longhorn-images-export/*.tar root@$n:/root/longhorn-images-export/
+done
+
+
+# Импортировать на остальных нодах:
+
+for n in coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "===== import on $n ====="
+  ssh root@$n 'for img in /root/longhorn-images-export/*.tar; do echo "--- $img"; ctr -n k8s.io images import "$img"; done'
+done
+
+
+# =====================================================================
+# 8. ЕСЛИ ОБРАЗЫ ВНУТРИ CRICTL ЕСТЬ, НО ПОДЫ ВСЁ РАВНО ПЫТАЮТСЯ PULL
+# =====================================================================
+
+# Причины:
+#
+# 1. image в pod spec отличается от того, что есть локально.
+#    Например, есть:
+#      docker.io/longhornio/longhorn-manager:v1.10.2
+#    а chart хочет:
+#      longhornio/longhorn-manager:v1.10.2
+#    или:
+#      registry.test.model.svo.aero/longhornio/longhorn-manager:v1.10.2
+#
+# 2. imagePullPolicy: Always.
+#
+# Проверить render:
+
+grep -nE 'image:|imagePullPolicy:' /root/longhorn-render/longhorn-rendered.yaml | head -n 120
+
+
+# Для closed contour нужно, чтобы imagePullPolicy был IfNotPresent.
+# В values ниже зададим это явно, если chart поддерживает.
+
+
+# =====================================================================
+# 9. ПОДГОТОВИТЬ LONGHORN VALUES
+# =====================================================================
+
+cat > /root/longhorn-values.yaml <<'EOF'
+defaultSettings:
+  defaultDataPath: "/var/lib/longhorn"
+  defaultReplicaCount: 2
+  createDefaultDiskLabeledNodes: true
+  storageMinimalAvailablePercentage: 10
+  storageOverProvisioningPercentage: 100
+  replicaSoftAntiAffinity: true
+  replicaAutoBalance: "best-effort"
+  defaultDataLocality: "disabled"
+  nodeDownPodDeletionPolicy: "delete-both-statefulset-and-deployment-pod"
+  v2DataEngine: false
+
+persistence:
+  defaultClass: false
+  defaultFsType: xfs
+  reclaimPolicy: Delete
+
+csi:
+  kubeletRootDir: /var/lib/kubelet
+
+longhornUI:
+  replicas: 2
+EOF
+
+
+# Если в chart values есть image.pullPolicy, можно добавить:
+#
+# image:
+#   pullPolicy: IfNotPresent
+#
+# Но сначала проверим values chart:
+
+helm show values /root/longhorn-${LONGHORN_VERSION}.tgz | grep -nE 'pullPolicy|image:' | head -n 80
+
+
+# Если видишь image.pullPolicy, добавь в /root/longhorn-values.yaml:
+#
+# image:
+#   pullPolicy: IfNotPresent
+
+
+# =====================================================================
+# 10. SELINUX WORKAROUND
+# =====================================================================
+
+# В закрытом контуре нельзя apply с GitHub.
+# Нужен локальный файл:
+#
+#   /root/longhorn-iscsi-selinux-workaround.yaml
+#
+# Проверить наличие:
+
+ls -lah /root/longhorn-iscsi-selinux-workaround.yaml
+
+
+# Применить:
+
+kubectl apply -f /root/longhorn-iscsi-selinux-workaround.yaml
+
+
+# Проверить:
+
+kubectl get pods -A | grep -i longhorn || true
+
+
+# =====================================================================
+# 11. УСТАНОВИТЬ LONGHORN
+# =====================================================================
+
+kubectl create namespace ${LONGHORN_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+
+helm upgrade --install longhorn /root/longhorn-${LONGHORN_VERSION}.tgz \
+  --namespace ${LONGHORN_NAMESPACE} \
+  -f /root/longhorn-values.yaml \
+  --wait \
+  --timeout 15m
+
+
+# Если зависло — не ждать долго, сразу смотреть:
+
+kubectl -n ${LONGHORN_NAMESPACE} get pods -o wide
+
+kubectl -n ${LONGHORN_NAMESPACE} get events --sort-by='.lastTimestamp' | tail -n 120
+
+
+# =====================================================================
+# 12. ЕСЛИ ПОЯВИЛСЯ ImagePullBackOff
+# =====================================================================
+
+kubectl -n ${LONGHORN_NAMESPACE} get pods -o wide
+
+kubectl -n ${LONGHORN_NAMESPACE} get pods | grep -E 'ImagePullBackOff|ErrImagePull|ContainerCreating' || true
+
+
+# Вывести все pod images, которые реально использует Longhorn:
+
+kubectl -n ${LONGHORN_NAMESPACE} get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.containers[*]}{"  "}{.image}{"\n"}{end}{range .spec.initContainers[*]}{"  init: "}{.image}{"\n"}{end}{"\n"}{end}'
+
+
+# Описать проблемный pod:
+
+kubectl -n ${LONGHORN_NAMESPACE} describe pod <POD_NAME>
+
+
+# Проверить, есть ли такой image локально на ноде, где pod запланирован:
+
+kubectl -n ${LONGHORN_NAMESPACE} get pod <POD_NAME> -o wide
+
+ssh root@<NODE_NAME> "crictl images | grep '<IMAGE_NAME_OR_PART>'"
+
+
+# =====================================================================
+# 13. СОЗДАТЬ STORAGECLASS
+# =====================================================================
+
+cat <<'EOF' | kubectl apply -f -
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "2880"
+  fsType: "xfs"
+  dataLocality: "disabled"
+  replicaAutoBalance: "best-effort"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-single
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "2880"
+  fsType: "xfs"
+  dataLocality: "strict-local"
+EOF
+
+
+kubectl get storageclass
+
+
+# =====================================================================
+# 14. ПРОВЕРИТЬ LONGHORN
+# =====================================================================
+
+kubectl -n ${LONGHORN_NAMESPACE} get pods -o wide
+
+kubectl -n ${LONGHORN_NAMESPACE} get pods | grep -Ev 'Running|Completed|NAME' || true
+
+kubectl get crd | grep longhorn
+
+kubectl -n ${LONGHORN_NAMESPACE} get nodes.longhorn.io
+
+kubectl -n ${LONGHORN_NAMESPACE} get volumes.longhorn.io
+
+
+# =====================================================================
+# 15. ТЕСТ PVC
+# =====================================================================
+
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+  namespace: default
+spec:
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
+
+kubectl get pvc test-pvc -w
+
+
+# Когда станет Bound — Ctrl+C.
+
+kubectl describe pvc test-pvc
+
+kubectl get pv | grep test-pvc || true
+
+
+# =====================================================================
+# 16. ТЕСТ POD С PVC
+# =====================================================================
+
+# В закрытом контуре busybox:1.36 тоже должен быть доступен локально
+# или во внутреннем registry.
+#
+# Сначала проверить:
+
+for n in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "crictl images | grep -E 'busybox.*1.36|net-debug|minimal' || true"
+done
+
+
+# Если busybox есть как docker.io/library/busybox:1.36:
+
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-longhorn-pod
+  namespace: default
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: docker.io/library/busybox:1.36
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -c
+        - |
+          echo "longhorn-ok $(date)" > /data/test.txt
+          cat /data/test.txt
+          sleep 10
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: test-pvc
+EOF
+
+
+kubectl get pod test-longhorn-pod -o wide -w
+
+
+# Когда pod Running/Completed:
+
+kubectl logs test-longhorn-pod
+
+kubectl describe pod test-longhorn-pod
+
+
+# Удалить тест:
+
+kubectl delete pod test-longhorn-pod --ignore-not-found
+
+kubectl delete pvc test-pvc --ignore-not-found
+
+
+# =====================================================================
+# 17. LONGHORN UI
+# =====================================================================
+
+kubectl -n ${LONGHORN_NAMESPACE} port-forward svc/longhorn-frontend 8080:80 --address 0.0.0.0
+
+
+# Открыть:
+#
+#   http://coparking-5:8080
+#
+# Проверить:
+#
+#   Node and Disk:
+#     все 6 нод Ready
+#     /var/lib/longhorn виден
+#     Scheduling enabled
+#
+#   Volume:
+#     нет faulted volumes
+#
+#   Settings:
+#     Default Data Path = /var/lib/longhorn
+#     Default Replica Count = 2
+
+
+# =====================================================================
+# 18. ФИНАЛЬНЫЙ ЧЕК
+# =====================================================================
+
+kubectl get nodes -o wide
+
+kubectl get pods -A | grep -Ev 'Running|Completed|NAMESPACE' || true
+
+kubectl -n ${LONGHORN_NAMESPACE} get pods -o wide
+
+kubectl -n ${LONGHORN_NAMESPACE} get nodes.longhorn.io
+
+kubectl get storageclass
+
+kubectl get pvc -A
+
+kubectl get pv
+
+kubectl get events -A --sort-by='.lastTimestamp' | tail -n 100
+
+
+# Готово, если:
+#
+#   - все longhorn pod'ы Running
+#   - нет ImagePullBackOff
+#   - nodes.longhorn.io показывает все 6 нод
+#   - storageclass longhorn default
+#   - test-pvc становится Bound
+#   - test pod пишет файл в /data
+# =====================================================================
