@@ -1,68 +1,471 @@
-apiVersion: v1
-kind: Pod
-metadata:
-  creationTimestamp: null
-  name: kube-vip
-  namespace: kube-system
-spec:
-  automountServiceAccountToken: true
-  containers:
-  - args:
-    - manager
-    env:
-    - name: vip_arp
-      value: "true"
-    - name: port
-      value: "6443"
-    - name: vip_nodename
-      valueFrom:
-        fieldRef:
-          fieldPath: spec.nodeName
-    - name: vip_interface
-      value: eno1
-    - name: vip_subnet
-      value: "32"
-    - name: dns_mode
-      value: first
-    - name: cp_enable
-      value: "true"
-    - name: cp_namespace
-      value: kube-system
-    - name: vip_leaderelection
-      value: "true"
-    - name: vip_leasename
-      value: plndr-cp-lock
-    - name: vip_leaseduration
-      value: "5"
-    - name: vip_renewdeadline
-      value: "3"
-    - name: vip_retryperiod
-      value: "1"
-    - name: address
-      value: 172.16.175.20
-    - name: prometheus_server
-      value: :2112
-    image: ghcr.io/kube-vip/kube-vip:v0.9.2
-    imagePullPolicy: IfNotPresent
-    name: kube-vip
-    resources: {}
-    securityContext:
-      capabilities:
-        add:
-        - NET_ADMIN
-        - NET_RAW
-        drop:
-        - ALL
-    volumeMounts:
-    - mountPath: /etc/kubernetes/admin.conf
-      name: kubeconfig
-  hostAliases:
-  - hostnames:
-    - kubernetes
-    ip: 127.0.0.1
-  hostNetwork: true
-  volumes:
-  - hostPath:
-      path: /etc/kubernetes/super-admin.conf
-    name: kubeconfig
-status: {}
+#!/usr/bin/env bash
+set -o pipefail
+
+VIP="172.16.175.20"
+API_DNS="k8s-api"
+API_PORT="6443"
+POD_CIDR_HINT="10.244"
+SERVICE_CIDR_HINT="10.96"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+ok()   { echo -e "${GREEN}[OK]${NC} $*"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+fail() { echo -e "${RED}[FAIL]${NC} $*"; }
+info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+
+section() {
+  echo
+  echo "================================================================"
+  echo "$1"
+  echo "================================================================"
+}
+
+run() {
+  echo "+ $*"
+  eval "$@" 2>&1
+}
+
+exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+check_file() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    ok "file exists: $f"
+    ls -lah "$f"
+    wc -c "$f"
+  else
+    warn "file missing: $f"
+  fi
+}
+
+check_port() {
+  local host="$1"
+  local port="$2"
+
+  if exists nc; then
+    if nc -zvw3 "$host" "$port" >/dev/null 2>&1; then
+      ok "tcp reachable: $host:$port"
+    else
+      fail "tcp not reachable: $host:$port"
+    fi
+  else
+    warn "nc not installed, skipping TCP check for $host:$port"
+  fi
+}
+
+section "BASIC NODE INFO"
+
+run "date"
+run "hostname -f || hostname"
+run "cat /etc/os-release | sed -n '1,8p'"
+run "uname -a"
+run "uptime"
+run "whoami"
+
+section "NETWORK INTERFACES AND ROUTES"
+
+run "ip -br a"
+run "ip route"
+run "ip neigh show | head -n 30"
+
+echo
+info "Interface with 172.16.175.x:"
+run "ip -br a | grep '172.16.175' || true"
+
+echo
+info "VIP presence on this node:"
+if ip -br a | grep -q "$VIP"; then
+  ok "VIP $VIP is currently on this node"
+  ip -br a | grep "$VIP"
+else
+  info "VIP $VIP is not on this node"
+fi
+
+section "HOSTS AND DNS RESOLUTION"
+
+run "cat /etc/hosts"
+echo
+run "getent hosts $API_DNS || true"
+run "getent hosts kubernetes || true"
+run "cat /etc/resolv.conf"
+
+if getent hosts "$API_DNS" | awk '{print $1}' | grep -qx "$VIP"; then
+  ok "$API_DNS resolves to $VIP"
+else
+  warn "$API_DNS does not resolve to $VIP"
+fi
+
+section "API CONNECTIVITY"
+
+check_port "$VIP" "$API_PORT"
+check_port "$API_DNS" "$API_PORT"
+
+echo
+if exists curl; then
+  echo "+ curl -k --max-time 5 https://${VIP}:${API_PORT}/healthz"
+  if curl -k --max-time 5 "https://${VIP}:${API_PORT}/healthz"; then
+    echo
+    ok "API healthz via VIP is OK"
+  else
+    echo
+    fail "API healthz via VIP failed"
+  fi
+
+  echo
+  echo "+ curl -k --max-time 5 https://${API_DNS}:${API_PORT}/healthz"
+  if curl -k --max-time 5 "https://${API_DNS}:${API_PORT}/healthz"; then
+    echo
+    ok "API healthz via $API_DNS is OK"
+  else
+    echo
+    fail "API healthz via $API_DNS failed"
+  fi
+else
+  warn "curl not installed"
+fi
+
+section "PROXY / NO_PROXY"
+
+echo
+info "Environment proxy variables:"
+run "env | grep -i proxy || true"
+
+echo
+info "/etc/environment proxy variables:"
+run "grep -i proxy /etc/environment || true"
+
+echo
+info "systemd kubelet proxy env:"
+run "systemctl show kubelet --property=Environment || true"
+
+echo
+info "systemd containerd proxy env:"
+run "systemctl show containerd --property=Environment || true"
+
+echo
+info "Check that these are in NO_PROXY if proxy is used:"
+echo "  $VIP"
+echo "  $API_DNS"
+echo "  127.0.0.1"
+echo "  localhost"
+echo "  .svc"
+echo "  .cluster.local"
+echo "  10.244.0.0/16 or your pod CIDR"
+echo "  10.96.0.0/12 or your service CIDR"
+echo "  172.16.175.0/24 or your node subnet"
+
+section "SYSTEMD SERVICES"
+
+for svc in kubelet containerd; do
+  echo
+  info "Service: $svc"
+  if systemctl is-active --quiet "$svc"; then
+    ok "$svc is active"
+  else
+    fail "$svc is not active"
+  fi
+
+  run "systemctl status $svc --no-pager -l | sed -n '1,25p'"
+done
+
+section "KUBERNETES BINARIES"
+
+for bin in kubeadm kubelet kubectl crictl ctr; do
+  echo
+  if exists "$bin"; then
+    ok "$bin exists: $(command -v "$bin")"
+    case "$bin" in
+      kubeadm) run "kubeadm version -o short || kubeadm version" ;;
+      kubelet) run "kubelet --version" ;;
+      kubectl) run "kubectl version --client=true --output=yaml || kubectl version --client=true" ;;
+      crictl) run "crictl version || true" ;;
+      ctr) run "ctr version || true" ;;
+    esac
+  else
+    warn "$bin not found"
+  fi
+done
+
+section "SWAP / SYSCTL / KERNEL MODULES"
+
+echo
+info "Swap:"
+run "swapon --show || true"
+if [[ -z "$(swapon --show)" ]]; then
+  ok "swap is disabled"
+else
+  fail "swap is enabled"
+fi
+
+echo
+info "Kernel modules:"
+for m in br_netfilter overlay ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack; do
+  if lsmod | awk '{print $1}' | grep -qx "$m"; then
+    ok "module loaded: $m"
+  else
+    warn "module not loaded: $m"
+  fi
+done
+
+echo
+info "Required sysctl:"
+for key in \
+  net.bridge.bridge-nf-call-iptables \
+  net.bridge.bridge-nf-call-ip6tables \
+  net.ipv4.ip_forward; do
+  run "sysctl $key || true"
+done
+
+section "CONTAINERD CONFIG"
+
+check_file "/etc/containerd/config.toml"
+
+echo
+info "containerd SystemdCgroup:"
+run "grep -n 'SystemdCgroup' /etc/containerd/config.toml || true"
+
+echo
+info "containerd sandbox image:"
+run "grep -n 'sandbox_image' /etc/containerd/config.toml || true"
+
+echo
+info "containerd registry/mirror/proxy related lines:"
+run "grep -niE 'registry|mirror|proxy|nexus|harbor|endpoint|config_path' /etc/containerd/config.toml || true"
+
+section "CRI STATUS"
+
+if exists crictl; then
+  run "crictl info | sed -n '1,80p' || true"
+  echo
+  info "Recent kube-system containers:"
+  run "crictl ps -a | head -n 30 || true"
+else
+  warn "crictl not found"
+fi
+
+section "KUBERNETES NODE FILES"
+
+for f in \
+  /etc/kubernetes/kubelet.conf \
+  /etc/kubernetes/bootstrap-kubelet.conf \
+  /etc/kubernetes/admin.conf \
+  /etc/kubernetes/super-admin.conf \
+  /var/lib/kubelet/config.yaml \
+  /var/lib/kubelet/kubeadm-flags.env; do
+  check_file "$f"
+  echo
+done
+
+echo
+info "kubelet flags:"
+run "cat /var/lib/kubelet/kubeadm-flags.env 2>/dev/null || true"
+
+echo
+info "kubelet config important fields:"
+run "grep -nE 'clusterDNS|clusterDomain|cgroupDriver|containerRuntimeEndpoint|resolvConf|staticPodPath' /var/lib/kubelet/config.yaml 2>/dev/null || true"
+
+section "CONTROL-PLANE STATIC MANIFESTS"
+
+if [[ -d /etc/kubernetes/manifests ]]; then
+  ok "static manifest dir exists: /etc/kubernetes/manifests"
+  run "ls -lah /etc/kubernetes/manifests"
+
+  echo
+  info "Static pod manifest names:"
+  run "for f in /etc/kubernetes/manifests/*.yaml; do echo '---' \$f; grep -nE 'name:|image:|hostNetwork|advertise-address|control-plane-endpoint|kubeconfig|super-admin|admin.conf|address|vip_interface|vip_leaderelection' \$f || true; done"
+else
+  info "No /etc/kubernetes/manifests directory. This is probably a worker node."
+fi
+
+section "KUBE-VIP LOCAL MANIFEST CHECK"
+
+KV="/etc/kubernetes/manifests/kube-vip.yaml"
+
+if [[ -f "$KV" ]]; then
+  ok "kube-vip manifest exists"
+
+  echo
+  info "kube-vip important lines:"
+  run "grep -nE 'image:|vip_|address|kubeconfig|admin.conf|super-admin.conf|hostPath|mountPath|type:|automountServiceAccountToken|hostNetwork|capabilities|NET_ADMIN|NET_RAW' $KV || true"
+
+  echo
+  info "Check kube-vip kubeconfig env:"
+  if grep -q 'name: kubeconfig' "$KV"; then
+    ok "kube-vip has env name: kubeconfig"
+  else
+    fail "kube-vip does NOT have env name: kubeconfig"
+  fi
+
+  echo
+  info "Check kube-vip hostPath file exists:"
+  HOSTPATH="$(awk '
+    /hostPath:/ {hp=1; next}
+    hp && /path:/ {print $2; exit}
+  ' "$KV")"
+
+  if [[ -n "$HOSTPATH" ]]; then
+    info "kube-vip hostPath: $HOSTPATH"
+    check_file "$HOSTPATH"
+  else
+    warn "Could not detect kube-vip hostPath"
+  fi
+
+  echo
+  info "Check kube-vip interface:"
+  VIP_IFACE="$(awk '
+    /name: vip_interface/ {getline; print $2; exit}
+  ' "$KV" | tr -d '"')"
+
+  if [[ -n "$VIP_IFACE" ]]; then
+    info "vip_interface=$VIP_IFACE"
+    if ip link show "$VIP_IFACE" >/dev/null 2>&1; then
+      ok "interface exists: $VIP_IFACE"
+      ip -br a show "$VIP_IFACE"
+    else
+      fail "interface does not exist: $VIP_IFACE"
+    fi
+  else
+    warn "vip_interface not found in kube-vip manifest"
+  fi
+else
+  info "No kube-vip manifest on this node. This is OK for worker nodes."
+fi
+
+section "PKI CERTIFICATES"
+
+if [[ -d /etc/kubernetes/pki ]]; then
+  ok "PKI directory exists"
+
+  echo
+  info "Certificate files:"
+  run "find /etc/kubernetes/pki -maxdepth 2 -type f | sort"
+
+  echo
+  info "Certificate expiration:"
+  if exists kubeadm; then
+    run "kubeadm certs check-expiration || true"
+  else
+    warn "kubeadm not found"
+  fi
+else
+  warn "No /etc/kubernetes/pki"
+fi
+
+section "CNI CONFIG"
+
+if [[ -d /etc/cni/net.d ]]; then
+  ok "CNI config dir exists"
+  run "ls -lah /etc/cni/net.d"
+  echo
+  run "for f in /etc/cni/net.d/*; do echo '---' \$f; sed -n '1,120p' \$f; done"
+else
+  fail "CNI config dir missing: /etc/cni/net.d"
+fi
+
+echo
+info "CNI binaries:"
+run "ls -lah /opt/cni/bin 2>/dev/null | head -n 80 || true"
+
+section "IPTABLES / IPVS"
+
+echo
+info "iptables version:"
+run "iptables --version || true"
+
+echo
+info "NAT table kube chains:"
+run "iptables-save -t nat 2>/dev/null | grep -E 'KUBE-|CALI-' | head -n 80 || true"
+
+echo
+info "Filter table kube chains:"
+run "iptables-save -t filter 2>/dev/null | grep -E 'KUBE-|CALI-' | head -n 80 || true"
+
+if exists ipvsadm; then
+  echo
+  info "IPVS services:"
+  run "ipvsadm -Ln | head -n 120 || true"
+else
+  warn "ipvsadm not installed"
+fi
+
+section "CALICO / POD NETWORK HINTS"
+
+echo
+info "Routes with pod CIDR hint:"
+run "ip route | grep -E '$POD_CIDR_HINT|cali|tunl|vxlan' || true"
+
+echo
+info "Calico interfaces:"
+run "ip -br link | grep -E 'cali|tunl|vxlan' || true"
+
+section "LOCAL KUBECTL CLUSTER CHECK"
+
+if [[ -f /etc/kubernetes/admin.conf ]] && exists kubectl; then
+  export KUBECONFIG=/etc/kubernetes/admin.conf
+
+  echo
+  info "kubectl through local admin.conf:"
+  run "kubectl get nodes -o wide || true"
+  echo
+  run "kubectl -n kube-system get pods -o wide || true"
+  echo
+  run "kubectl get --raw='/readyz?verbose' 2>/dev/null | tail -n 20 || true"
+  echo
+  run "kubectl -n kube-system get lease plndr-cp-lock -o wide 2>/dev/null || true"
+  echo
+  run "kubectl -n kube-system get lease plndr-cp-lock -o yaml 2>/dev/null | grep holderIdentity || true"
+else
+  info "Skipping kubectl cluster check. Usually OK on worker nodes without /etc/kubernetes/admin.conf."
+fi
+
+section "KUBELET RECENT ERRORS"
+
+run "journalctl -u kubelet -n 200 --no-pager | grep -iE 'error|fail|failed|timeout|denied|refused|unreachable|no route|x509|certificate|cni|calico|containercreating|kube-vip|eviction|notready' || true"
+
+section "CONTAINERD RECENT ERRORS"
+
+run "journalctl -u containerd -n 150 --no-pager | grep -iE 'error|fail|failed|timeout|denied|refused|x509|certificate|pull|unpack|snapshot|proxy' || true"
+
+section "DISK / MEMORY / LOAD"
+
+run "df -h"
+echo
+run "free -h"
+echo
+run "top -b -n1 | head -n 20"
+
+section "SUMMARY HINTS"
+
+echo "Manual checks to do from any control-plane:"
+echo
+echo "1) All nodes:"
+echo "   kubectl get nodes -o wide"
+echo
+echo "2) All system pods:"
+echo "   kubectl -n kube-system get pods -o wide"
+echo
+echo "3) API readiness:"
+echo "   kubectl get --raw='/readyz?verbose'"
+echo
+echo "4) VIP owner:"
+echo "   for n in coparking-5 coparking-6 coparking-7; do ssh root@\$n \"ip -br a | grep $VIP || true\"; done"
+echo
+echo "5) kube-vip leader:"
+echo "   kubectl -n kube-system get lease plndr-cp-lock -o yaml | grep holderIdentity"
+echo
+echo "6) etcd members:"
+echo "   kubectl -n kube-system exec etcd-coparking-5 -- etcdctl \\"
+echo "     --cacert=/etc/kubernetes/pki/etcd/ca.crt \\"
+echo "     --cert=/etc/kubernetes/pki/etcd/server.crt \\"
+echo "     --key=/etc/kubernetes/pki/etcd/server.key \\"
+echo "     --endpoints=https://127.0.0.1:2379 \\"
+echo "     endpoint status --cluster -w table"
+echo
+echo "Done."
