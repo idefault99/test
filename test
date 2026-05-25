@@ -1,471 +1,577 @@
-#!/usr/bin/env bash
-set -o pipefail
+# =====================================================================
+# WORKER NODES FIX / CHECKLIST
+# Cluster:
+#   control-plane: coparking-5, coparking-6, coparking-7
+#   workers:       coparking-8, coparking-9, coparking-10
+# VIP/API:         k8s-api / 172.16.175.20:6443
+# =====================================================================
 
-VIP="172.16.175.20"
-API_DNS="k8s-api"
-API_PORT="6443"
-POD_CIDR_HINT="10.244"
-SERVICE_CIDR_HINT="10.96"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# =====================================================================
+# 0. ВАЖНОЕ ПОНИМАНИЕ
+# =====================================================================
 
-ok()   { echo -e "${GREEN}[OK]${NC} $*"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
-fail() { echo -e "${RED}[FAIL]${NC} $*"; }
-info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+# STATUS Ready у worker-нод означает, что нода подключена к кластеру.
+# ROLES <none> — это НЕ ошибка.
+# В kubeadm worker-ноды по умолчанию не получают роль worker в kubectl get nodes.
+# Роль — это просто label:
+#
+#   node-role.kubernetes.io/worker=
+#
+# Если хочешь видеть worker вместо <none>, надо повесить label вручную.
 
-section() {
-  echo
-  echo "================================================================"
-  echo "$1"
-  echo "================================================================"
-}
 
-run() {
-  echo "+ $*"
-  eval "$@" 2>&1
-}
+# =====================================================================
+# 1. ВЫПОЛНЯТЬ НА CONTROL-PLANE, например на coparking-5
+# =====================================================================
 
-exists() {
-  command -v "$1" >/dev/null 2>&1
-}
+ssh root@coparking-5
 
-check_file() {
-  local f="$1"
-  if [[ -f "$f" ]]; then
-    ok "file exists: $f"
-    ls -lah "$f"
-    wc -c "$f"
-  else
-    warn "file missing: $f"
-  fi
-}
 
-check_port() {
-  local host="$1"
-  local port="$2"
+# Проверить ноды:
 
-  if exists nc; then
-    if nc -zvw3 "$host" "$port" >/dev/null 2>&1; then
-      ok "tcp reachable: $host:$port"
-    else
-      fail "tcp not reachable: $host:$port"
-    fi
-  else
-    warn "nc not installed, skipping TCP check for $host:$port"
-  fi
-}
+kubectl get nodes -o wide
 
-section "BASIC NODE INFO"
 
-run "date"
-run "hostname -f || hostname"
-run "cat /etc/os-release | sed -n '1,8p'"
-run "uname -a"
-run "uptime"
-run "whoami"
+# Повесить worker role label на worker-ноды:
 
-section "NETWORK INTERFACES AND ROUTES"
+kubectl label node coparking-8 node-role.kubernetes.io/worker= --overwrite
+kubectl label node coparking-9 node-role.kubernetes.io/worker= --overwrite
+kubectl label node coparking-10 node-role.kubernetes.io/worker= --overwrite
 
-run "ip -br a"
-run "ip route"
-run "ip neigh show | head -n 30"
 
-echo
-info "Interface with 172.16.175.x:"
-run "ip -br a | grep '172.16.175' || true"
+# Проверить, что теперь ROLE стал worker:
 
-echo
-info "VIP presence on this node:"
-if ip -br a | grep -q "$VIP"; then
-  ok "VIP $VIP is currently on this node"
-  ip -br a | grep "$VIP"
-else
-  info "VIP $VIP is not on this node"
-fi
+kubectl get nodes -o wide
 
-section "HOSTS AND DNS RESOLUTION"
 
-run "cat /etc/hosts"
-echo
-run "getent hosts $API_DNS || true"
-run "getent hosts kubernetes || true"
-run "cat /etc/resolv.conf"
+# Ожидаемо:
+#
+# coparking-8    Ready    worker
+# coparking-9    Ready    worker
+# coparking-10   Ready    worker
 
-if getent hosts "$API_DNS" | awk '{print $1}' | grep -qx "$VIP"; then
-  ok "$API_DNS resolves to $VIP"
-else
-  warn "$API_DNS does not resolve to $VIP"
-fi
 
-section "API CONNECTIVITY"
+# =====================================================================
+# 2. ПРОВЕРИТЬ, ЧТО НА WORKER-НОДАХ ЕСТЬ СИСТЕМНЫЕ POD'Ы
+# =====================================================================
 
-check_port "$VIP" "$API_PORT"
-check_port "$API_DNS" "$API_PORT"
+kubectl -n kube-system get pods -o wide | egrep 'coparking-8|coparking-9|coparking-10|NAME'
 
-echo
-if exists curl; then
-  echo "+ curl -k --max-time 5 https://${VIP}:${API_PORT}/healthz"
-  if curl -k --max-time 5 "https://${VIP}:${API_PORT}/healthz"; then
-    echo
-    ok "API healthz via VIP is OK"
-  else
-    echo
-    fail "API healthz via VIP failed"
-  fi
 
-  echo
-  echo "+ curl -k --max-time 5 https://${API_DNS}:${API_PORT}/healthz"
-  if curl -k --max-time 5 "https://${API_DNS}:${API_PORT}/healthz"; then
-    echo
-    ok "API healthz via $API_DNS is OK"
-  else
-    echo
-    fail "API healthz via $API_DNS failed"
-  fi
-else
-  warn "curl not installed"
-fi
+# На каждой worker-ноде должны быть минимум:
+#
+# calico-node-xxxxx   1/1 Running   ...   coparking-8
+# kube-proxy-xxxxx    1/1 Running   ...   coparking-8
+#
+# Аналогично для coparking-9 и coparking-10.
 
-section "PROXY / NO_PROXY"
 
-echo
-info "Environment proxy variables:"
-run "env | grep -i proxy || true"
+# =====================================================================
+# 3. ПРОВЕРИТЬ ВСЕ POD'Ы ПО НОДАМ
+# =====================================================================
 
-echo
-info "/etc/environment proxy variables:"
-run "grep -i proxy /etc/environment || true"
+kubectl get pods -A -o wide --field-selector spec.nodeName=coparking-8
+kubectl get pods -A -o wide --field-selector spec.nodeName=coparking-9
+kubectl get pods -A -o wide --field-selector spec.nodeName=coparking-10
 
-echo
-info "systemd kubelet proxy env:"
-run "systemctl show kubelet --property=Environment || true"
 
-echo
-info "systemd containerd proxy env:"
-run "systemctl show containerd --property=Environment || true"
+# =====================================================================
+# 4. ПРОБЛЕМА: НА WORKER-НОДЕ kubectl get pods ДАЁТ connection refused
+# =====================================================================
 
-echo
-info "Check that these are in NO_PROXY if proxy is used:"
-echo "  $VIP"
-echo "  $API_DNS"
-echo "  127.0.0.1"
-echo "  localhost"
-echo "  .svc"
-echo "  .cluster.local"
-echo "  10.244.0.0/16 or your pod CIDR"
-echo "  10.96.0.0/12 or your service CIDR"
-echo "  172.16.175.0/24 or your node subnet"
+# Это обычно НЕ проблема worker-ноды.
+# Это значит, что на worker-ноде kubectl смотрит не в кластерный API,
+# а пытается подключиться к localhost:8080 или 127.0.0.1:6443.
+#
+# На worker-нодах по умолчанию обычно НЕТ /etc/kubernetes/admin.conf.
+# kubelet использует /etc/kubernetes/kubelet.conf,
+# но kubectl для root не настроен.
 
-section "SYSTEMD SERVICES"
 
-for svc in kubelet containerd; do
-  echo
-  info "Service: $svc"
-  if systemctl is-active --quiet "$svc"; then
-    ok "$svc is active"
-  else
-    fail "$svc is not active"
-  fi
+# =====================================================================
+# 5. ПРОВЕРИТЬ НА WORKER-НОДЕ, КУДА СМОТРИТ kubectl
+# =====================================================================
 
-  run "systemctl status $svc --no-pager -l | sed -n '1,25p'"
+ssh root@coparking-8
+
+kubectl config view
+echo $KUBECONFIG
+ls -lah ~/.kube/config /etc/kubernetes/admin.conf /etc/kubernetes/kubelet.conf 2>/dev/null || true
+
+
+# Если kubectl config view пустой или server localhost:8080 —
+# отсюда и connection refused.
+
+
+# Повторить для остальных:
+
+ssh root@coparking-9
+
+kubectl config view
+echo $KUBECONFIG
+ls -lah ~/.kube/config /etc/kubernetes/admin.conf /etc/kubernetes/kubelet.conf 2>/dev/null || true
+
+
+ssh root@coparking-10
+
+kubectl config view
+echo $KUBECONFIG
+ls -lah ~/.kube/config /etc/kubernetes/admin.conf /etc/kubernetes/kubelet.conf 2>/dev/null || true
+
+
+# =====================================================================
+# 6. ПРАВИЛЬНЫЙ ВАРИАНТ: СКОПИРОВАТЬ kubeconfig НА WORKER-НОДЫ
+# =====================================================================
+
+# Выполнять с coparking-5.
+
+ssh root@coparking-5
+
+
+# Создать ~/.kube на worker-нодах:
+
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "mkdir -p /root/.kube"
 done
 
-section "KUBERNETES BINARIES"
 
-for bin in kubeadm kubelet kubectl crictl ctr; do
-  echo
-  if exists "$bin"; then
-    ok "$bin exists: $(command -v "$bin")"
-    case "$bin" in
-      kubeadm) run "kubeadm version -o short || kubeadm version" ;;
-      kubelet) run "kubelet --version" ;;
-      kubectl) run "kubectl version --client=true --output=yaml || kubectl version --client=true" ;;
-      crictl) run "crictl version || true" ;;
-      ctr) run "ctr version || true" ;;
-    esac
-  else
-    warn "$bin not found"
-  fi
+# Скопировать admin.conf как kubeconfig для root:
+
+for n in coparking-8 coparking-9 coparking-10; do
+  scp /etc/kubernetes/admin.conf root@$n:/root/.kube/config
 done
 
-section "SWAP / SYSCTL / KERNEL MODULES"
 
-echo
-info "Swap:"
-run "swapon --show || true"
-if [[ -z "$(swapon --show)" ]]; then
-  ok "swap is disabled"
-else
-  fail "swap is enabled"
-fi
+# Выставить права:
 
-echo
-info "Kernel modules:"
-for m in br_netfilter overlay ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack; do
-  if lsmod | awk '{print $1}' | grep -qx "$m"; then
-    ok "module loaded: $m"
-  else
-    warn "module not loaded: $m"
-  fi
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "chown root:root /root/.kube/config && chmod 600 /root/.kube/config"
 done
 
-echo
-info "Required sysctl:"
-for key in \
-  net.bridge.bridge-nf-call-iptables \
-  net.bridge.bridge-nf-call-ip6tables \
-  net.ipv4.ip_forward; do
-  run "sysctl $key || true"
+
+# Проверить, что в kubeconfig указан нормальный API endpoint:
+
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "grep 'server:' /root/.kube/config"
 done
 
-section "CONTAINERD CONFIG"
 
-check_file "/etc/containerd/config.toml"
+# Желательно, чтобы было так:
+#
+# server: https://k8s-api:6443
+#
+# или так:
+#
+# server: https://172.16.175.20:6443
+#
+# Если там случайно https://127.0.0.1:6443 или https://localhost:6443,
+# на worker-ноде kubectl будет падать.
 
-echo
-info "containerd SystemdCgroup:"
-run "grep -n 'SystemdCgroup' /etc/containerd/config.toml || true"
 
-echo
-info "containerd sandbox image:"
-run "grep -n 'sandbox_image' /etc/containerd/config.toml || true"
+# =====================================================================
+# 7. ЕСЛИ В config УКАЗАН 127.0.0.1 ИЛИ localhost
+# =====================================================================
 
-echo
-info "containerd registry/mirror/proxy related lines:"
-run "grep -niE 'registry|mirror|proxy|nexus|harbor|endpoint|config_path' /etc/containerd/config.toml || true"
+# На каждой worker-ноде заменить server на VIP/DNS:
 
-section "CRI STATUS"
-
-if exists crictl; then
-  run "crictl info | sed -n '1,80p' || true"
-  echo
-  info "Recent kube-system containers:"
-  run "crictl ps -a | head -n 30 || true"
-else
-  warn "crictl not found"
-fi
-
-section "KUBERNETES NODE FILES"
-
-for f in \
-  /etc/kubernetes/kubelet.conf \
-  /etc/kubernetes/bootstrap-kubelet.conf \
-  /etc/kubernetes/admin.conf \
-  /etc/kubernetes/super-admin.conf \
-  /var/lib/kubelet/config.yaml \
-  /var/lib/kubelet/kubeadm-flags.env; do
-  check_file "$f"
-  echo
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "sed -i 's#server: https://127.0.0.1:6443#server: https://k8s-api:6443#g' /root/.kube/config"
+  ssh root@$n "sed -i 's#server: https://localhost:6443#server: https://k8s-api:6443#g' /root/.kube/config"
 done
 
-echo
-info "kubelet flags:"
-run "cat /var/lib/kubelet/kubeadm-flags.env 2>/dev/null || true"
 
-echo
-info "kubelet config important fields:"
-run "grep -nE 'clusterDNS|clusterDomain|cgroupDriver|containerRuntimeEndpoint|resolvConf|staticPodPath' /var/lib/kubelet/config.yaml 2>/dev/null || true"
+# Проверить:
 
-section "CONTROL-PLANE STATIC MANIFESTS"
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "grep 'server:' /root/.kube/config"
+done
 
-if [[ -d /etc/kubernetes/manifests ]]; then
-  ok "static manifest dir exists: /etc/kubernetes/manifests"
-  run "ls -lah /etc/kubernetes/manifests"
 
-  echo
-  info "Static pod manifest names:"
-  run "for f in /etc/kubernetes/manifests/*.yaml; do echo '---' \$f; grep -nE 'name:|image:|hostNetwork|advertise-address|control-plane-endpoint|kubeconfig|super-admin|admin.conf|address|vip_interface|vip_leaderelection' \$f || true; done"
-else
-  info "No /etc/kubernetes/manifests directory. This is probably a worker node."
-fi
+# =====================================================================
+# 8. ПРОВЕРИТЬ hosts И ДОСТУП К API НА WORKER-НОДАХ
+# =====================================================================
 
-section "KUBE-VIP LOCAL MANIFEST CHECK"
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "getent hosts k8s-api"
+  ssh root@$n "curl -k --max-time 5 https://k8s-api:6443/healthz"
+  ssh root@$n "curl -k --max-time 5 https://172.16.175.20:6443/healthz"
+done
 
-KV="/etc/kubernetes/manifests/kube-vip.yaml"
 
-if [[ -f "$KV" ]]; then
-  ok "kube-vip manifest exists"
+# Ожидаемо:
+#
+# 172.16.175.20 k8s-api
+# ok
+# ok
 
-  echo
-  info "kube-vip important lines:"
-  run "grep -nE 'image:|vip_|address|kubeconfig|admin.conf|super-admin.conf|hostPath|mountPath|type:|automountServiceAccountToken|hostNetwork|capabilities|NET_ADMIN|NET_RAW' $KV || true"
 
-  echo
-  info "Check kube-vip kubeconfig env:"
-  if grep -q 'name: kubeconfig' "$KV"; then
-    ok "kube-vip has env name: kubeconfig"
-  else
-    fail "kube-vip does NOT have env name: kubeconfig"
-  fi
+# Если getent hosts k8s-api ничего не выводит,
+# добавить запись в /etc/hosts на worker-нодах:
 
-  echo
-  info "Check kube-vip hostPath file exists:"
-  HOSTPATH="$(awk '
-    /hostPath:/ {hp=1; next}
-    hp && /path:/ {print $2; exit}
-  ' "$KV")"
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "grep -q '172.16.175.20 k8s-api' /etc/hosts || echo '172.16.175.20 k8s-api' >> /etc/hosts"
+done
 
-  if [[ -n "$HOSTPATH" ]]; then
-    info "kube-vip hostPath: $HOSTPATH"
-    check_file "$HOSTPATH"
-  else
-    warn "Could not detect kube-vip hostPath"
-  fi
 
-  echo
-  info "Check kube-vip interface:"
-  VIP_IFACE="$(awk '
-    /name: vip_interface/ {getline; print $2; exit}
-  ' "$KV" | tr -d '"')"
+# Повторить проверку:
 
-  if [[ -n "$VIP_IFACE" ]]; then
-    info "vip_interface=$VIP_IFACE"
-    if ip link show "$VIP_IFACE" >/dev/null 2>&1; then
-      ok "interface exists: $VIP_IFACE"
-      ip -br a show "$VIP_IFACE"
-    else
-      fail "interface does not exist: $VIP_IFACE"
-    fi
-  else
-    warn "vip_interface not found in kube-vip manifest"
-  fi
-else
-  info "No kube-vip manifest on this node. This is OK for worker nodes."
-fi
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "getent hosts k8s-api"
+  ssh root@$n "curl -k --max-time 5 https://k8s-api:6443/healthz"
+done
 
-section "PKI CERTIFICATES"
 
-if [[ -d /etc/kubernetes/pki ]]; then
-  ok "PKI directory exists"
+# =====================================================================
+# 9. ПРОВЕРИТЬ kubectl НА WORKER-НОДАХ
+# =====================================================================
 
-  echo
-  info "Certificate files:"
-  run "find /etc/kubernetes/pki -maxdepth 2 -type f | sort"
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "kubectl get nodes -o wide"
+  ssh root@$n "kubectl get pods -A -o wide | head -n 30"
+done
 
-  echo
-  info "Certificate expiration:"
-  if exists kubeadm; then
-    run "kubeadm certs check-expiration || true"
-  else
-    warn "kubeadm not found"
-  fi
-else
-  warn "No /etc/kubernetes/pki"
-fi
 
-section "CNI CONFIG"
+# Если теперь работает — проблема была только в отсутствии kubeconfig для kubectl.
 
-if [[ -d /etc/cni/net.d ]]; then
-  ok "CNI config dir exists"
-  run "ls -lah /etc/cni/net.d"
-  echo
-  run "for f in /etc/cni/net.d/*; do echo '---' \$f; sed -n '1,120p' \$f; done"
-else
-  fail "CNI config dir missing: /etc/cni/net.d"
-fi
 
-echo
-info "CNI binaries:"
-run "ls -lah /opt/cni/bin 2>/dev/null | head -n 80 || true"
+# =====================================================================
+# 10. ПРОВЕРИТЬ kubelet НА WORKER-НОДАХ
+# =====================================================================
 
-section "IPTABLES / IPVS"
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "systemctl is-active kubelet"
+  ssh root@$n "systemctl status kubelet --no-pager -l | sed -n '1,25p'"
+done
 
-echo
-info "iptables version:"
-run "iptables --version || true"
 
-echo
-info "NAT table kube chains:"
-run "iptables-save -t nat 2>/dev/null | grep -E 'KUBE-|CALI-' | head -n 80 || true"
+# Проверить kubelet.conf:
 
-echo
-info "Filter table kube chains:"
-run "iptables-save -t filter 2>/dev/null | grep -E 'KUBE-|CALI-' | head -n 80 || true"
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "ls -lah /etc/kubernetes/kubelet.conf"
+  ssh root@$n "grep 'server:' /etc/kubernetes/kubelet.conf"
+done
 
-if exists ipvsadm; then
-  echo
-  info "IPVS services:"
-  run "ipvsadm -Ln | head -n 120 || true"
-else
-  warn "ipvsadm not installed"
-fi
 
-section "CALICO / POD NETWORK HINTS"
+# В kubelet.conf тоже должен быть нормальный API endpoint:
+#
+# server: https://k8s-api:6443
+# или
+# server: https://172.16.175.20:6443
 
-echo
-info "Routes with pod CIDR hint:"
-run "ip route | grep -E '$POD_CIDR_HINT|cali|tunl|vxlan' || true"
 
-echo
-info "Calico interfaces:"
-run "ip -br link | grep -E 'cali|tunl|vxlan' || true"
+# Если kubelet.conf смотрит на 127.0.0.1 или localhost,
+# это плохо для worker-ноды.
+# Тогда заменить:
 
-section "LOCAL KUBECTL CLUSTER CHECK"
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "cp /etc/kubernetes/kubelet.conf /etc/kubernetes/kubelet.conf.bak.$(date +%F-%H%M%S)"
+  ssh root@$n "sed -i 's#server: https://127.0.0.1:6443#server: https://k8s-api:6443#g' /etc/kubernetes/kubelet.conf"
+  ssh root@$n "sed -i 's#server: https://localhost:6443#server: https://k8s-api:6443#g' /etc/kubernetes/kubelet.conf"
+done
 
-if [[ -f /etc/kubernetes/admin.conf ]] && exists kubectl; then
-  export KUBECONFIG=/etc/kubernetes/admin.conf
 
-  echo
-  info "kubectl through local admin.conf:"
-  run "kubectl get nodes -o wide || true"
-  echo
-  run "kubectl -n kube-system get pods -o wide || true"
-  echo
-  run "kubectl get --raw='/readyz?verbose' 2>/dev/null | tail -n 20 || true"
-  echo
-  run "kubectl -n kube-system get lease plndr-cp-lock -o wide 2>/dev/null || true"
-  echo
-  run "kubectl -n kube-system get lease plndr-cp-lock -o yaml 2>/dev/null | grep holderIdentity || true"
-else
-  info "Skipping kubectl cluster check. Usually OK on worker nodes without /etc/kubernetes/admin.conf."
-fi
+# После изменения kubelet.conf перезапустить kubelet:
 
-section "KUBELET RECENT ERRORS"
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "systemctl restart kubelet"
+done
 
-run "journalctl -u kubelet -n 200 --no-pager | grep -iE 'error|fail|failed|timeout|denied|refused|unreachable|no route|x509|certificate|cni|calico|containercreating|kube-vip|eviction|notready' || true"
 
-section "CONTAINERD RECENT ERRORS"
+# Проверить:
 
-run "journalctl -u containerd -n 150 --no-pager | grep -iE 'error|fail|failed|timeout|denied|refused|x509|certificate|pull|unpack|snapshot|proxy' || true"
+kubectl get nodes -o wide
 
-section "DISK / MEMORY / LOAD"
 
-run "df -h"
-echo
-run "free -h"
-echo
-run "top -b -n1 | head -n 20"
+# =====================================================================
+# 11. ПРОВЕРИТЬ containerd НА WORKER-НОДАХ
+# =====================================================================
 
-section "SUMMARY HINTS"
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "systemctl is-active containerd"
+  ssh root@$n "systemctl status containerd --no-pager -l | sed -n '1,20p'"
+  ssh root@$n "crictl ps -a | head -n 30"
+done
 
-echo "Manual checks to do from any control-plane:"
-echo
-echo "1) All nodes:"
-echo "   kubectl get nodes -o wide"
-echo
-echo "2) All system pods:"
-echo "   kubectl -n kube-system get pods -o wide"
-echo
-echo "3) API readiness:"
-echo "   kubectl get --raw='/readyz?verbose'"
-echo
-echo "4) VIP owner:"
-echo "   for n in coparking-5 coparking-6 coparking-7; do ssh root@\$n \"ip -br a | grep $VIP || true\"; done"
-echo
-echo "5) kube-vip leader:"
-echo "   kubectl -n kube-system get lease plndr-cp-lock -o yaml | grep holderIdentity"
-echo
-echo "6) etcd members:"
-echo "   kubectl -n kube-system exec etcd-coparking-5 -- etcdctl \\"
-echo "     --cacert=/etc/kubernetes/pki/etcd/ca.crt \\"
-echo "     --cert=/etc/kubernetes/pki/etcd/server.crt \\"
-echo "     --key=/etc/kubernetes/pki/etcd/server.key \\"
-echo "     --endpoints=https://127.0.0.1:2379 \\"
-echo "     endpoint status --cluster -w table"
-echo
-echo "Done."
+
+# =====================================================================
+# 12. ПРОВЕРИТЬ CNI НА WORKER-НОДАХ
+# =====================================================================
+
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "ls -lah /etc/cni/net.d"
+  ssh root@$n "ls -lah /opt/cni/bin | head -n 40"
+  ssh root@$n "ip -br link | grep -E 'cali|tunl|vxlan' || true"
+  ssh root@$n "ip route | grep -E '10.244|cali|tunl|vxlan' || true"
+done
+
+
+# =====================================================================
+# 13. ПРОВЕРИТЬ kube-proxy И calico-node ДЛЯ WORKER-НОД
+# =====================================================================
+
+kubectl -n kube-system get pods -o wide | egrep 'NAME|coparking-8|coparking-9|coparking-10'
+
+
+# Посмотреть конкретно:
+
+kubectl -n kube-system get pods -o wide | grep calico-node
+kubectl -n kube-system get pods -o wide | grep kube-proxy
+
+
+# Если на worker нет calico-node или kube-proxy — это проблема DaemonSet.
+# Проверить DaemonSet:
+
+kubectl -n kube-system get ds -o wide
+kubectl -n kube-system describe ds calico-node
+kubectl -n kube-system describe ds kube-proxy
+
+
+# =====================================================================
+# 14. ПРОВЕРИТЬ TAINTS НА WORKER-НОДАХ
+# =====================================================================
+
+kubectl describe node coparking-8 | grep -i taints -A2
+kubectl describe node coparking-9 | grep -i taints -A2
+kubectl describe node coparking-10 | grep -i taints -A2
+
+
+# На worker-нодах обычно должно быть:
+#
+# Taints: <none>
+#
+# Если там есть что-то вроде NoSchedule, удалить:
+
+kubectl taint node coparking-8 node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+kubectl taint node coparking-9 node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+kubectl taint node coparking-10 node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+
+kubectl taint node coparking-8 node.kubernetes.io/not-ready:NoSchedule- 2>/dev/null || true
+kubectl taint node coparking-9 node.kubernetes.io/not-ready:NoSchedule- 2>/dev/null || true
+kubectl taint node coparking-10 node.kubernetes.io/not-ready:NoSchedule- 2>/dev/null || true
+
+
+# Проверить снова:
+
+kubectl describe node coparking-8 | grep -i taints -A2
+kubectl describe node coparking-9 | grep -i taints -A2
+kubectl describe node coparking-10 | grep -i taints -A2
+
+
+# =====================================================================
+# 15. ПРОВЕРИТЬ LABELS НА WORKER-НОДАХ
+# =====================================================================
+
+kubectl get node coparking-8 --show-labels
+kubectl get node coparking-9 --show-labels
+kubectl get node coparking-10 --show-labels
+
+
+# Нужный минимум:
+#
+# kubernetes.io/hostname=coparking-8
+# node-role.kubernetes.io/worker=
+#
+# Если worker label пропал:
+
+kubectl label node coparking-8 node-role.kubernetes.io/worker= --overwrite
+kubectl label node coparking-9 node-role.kubernetes.io/worker= --overwrite
+kubectl label node coparking-10 node-role.kubernetes.io/worker= --overwrite
+
+
+# =====================================================================
+# 16. ПРОВЕРИТЬ СЕТЕВОЙ POD-TO-POD / POD-TO-SERVICE
+# =====================================================================
+
+# Создать тестовый pod на worker-ноде coparking-8:
+
+kubectl run test-worker-8 \
+  --image=busybox:1.36 \
+  --restart=Never \
+  --overrides='{"spec":{"nodeName":"coparking-8","containers":[{"name":"test-worker-8","image":"busybox:1.36","command":["sleep","3600"]}]}}'
+
+
+# Создать тестовый pod на worker-ноде coparking-9:
+
+kubectl run test-worker-9 \
+  --image=busybox:1.36 \
+  --restart=Never \
+  --overrides='{"spec":{"nodeName":"coparking-9","containers":[{"name":"test-worker-9","image":"busybox:1.36","command":["sleep","3600"]}]}}'
+
+
+# Создать тестовый pod на worker-ноде coparking-10:
+
+kubectl run test-worker-10 \
+  --image=busybox:1.36 \
+  --restart=Never \
+  --overrides='{"spec":{"nodeName":"coparking-10","containers":[{"name":"test-worker-10","image":"busybox:1.36","command":["sleep","3600"]}]}}'
+
+
+# Проверить запуск:
+
+kubectl get pods -o wide | grep test-worker
+
+
+# Проверить DNS внутри pod:
+
+kubectl exec test-worker-8 -- nslookup kubernetes.default.svc.cluster.local
+kubectl exec test-worker-9 -- nslookup kubernetes.default.svc.cluster.local
+kubectl exec test-worker-10 -- nslookup kubernetes.default.svc.cluster.local
+
+
+# Проверить доступ к Kubernetes service:
+
+kubectl exec test-worker-8 -- wget -qO- --no-check-certificate https://kubernetes.default.svc.cluster.local/healthz
+kubectl exec test-worker-9 -- wget -qO- --no-check-certificate https://kubernetes.default.svc.cluster.local/healthz
+kubectl exec test-worker-10 -- wget -qO- --no-check-certificate https://kubernetes.default.svc.cluster.local/healthz
+
+
+# Ожидаемо:
+#
+# ok
+
+
+# Удалить тестовые pod'ы:
+
+kubectl delete pod test-worker-8 test-worker-9 test-worker-10 --ignore-not-found
+
+
+# =====================================================================
+# 17. ЕСЛИ TEST POD ЗАСТРЯЛ В ContainerCreating
+# =====================================================================
+
+kubectl describe pod test-worker-8
+kubectl describe pod test-worker-9
+kubectl describe pod test-worker-10
+
+
+# Смотреть Events.
+# Типовые проблемы:
+#
+# Failed to pull image              -> проблема с registry/proxy/containerd
+# CNI plugin not initialized        -> проблема calico/CNI
+# networkPlugin cni failed          -> проблема /etc/cni/net.d или calico-node
+# no route to host / timeout        -> routing/firewall/proxy
+# x509 certificate signed by unknown authority -> registry CA/certs
+
+
+# =====================================================================
+# 18. ПРОВЕРИТЬ PROXY / NO_PROXY НА WORKER-НОДАХ
+# =====================================================================
+
+for n in coparking-8 coparking-9 coparking-10; do
+  echo "===== $n ====="
+  ssh root@$n "env | grep -i proxy || true"
+  ssh root@$n "grep -i proxy /etc/environment || true"
+  ssh root@$n "systemctl show kubelet --property=Environment"
+  ssh root@$n "systemctl show containerd --property=Environment"
+done
+
+
+# Если используется proxy, в NO_PROXY обязательно добавить:
+#
+# 127.0.0.1
+# localhost
+# k8s-api
+# 172.16.175.20
+# 172.16.175.0/24
+# .svc
+# .cluster.local
+# 10.244.0.0/16
+# 10.96.0.0/12
+
+
+# Пример для /etc/environment на каждой worker-ноде:
+
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "cat /etc/environment"
+done
+
+
+# Если надо руками поправить:
+
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "vi /etc/environment"
+done
+
+
+# После изменения proxy/env перезапустить kubelet и containerd:
+
+for n in coparking-8 coparking-9 coparking-10; do
+  ssh root@$n "systemctl daemon-reload"
+  ssh root@$n "systemctl restart containerd"
+  ssh root@$n "systemctl restart kubelet"
+done
+
+
+# =====================================================================
+# 19. ФИНАЛЬНАЯ ПРОВЕРКА С CONTROL-PLANE
+# =====================================================================
+
+ssh root@coparking-5
+
+
+kubectl get nodes -o wide
+
+kubectl -n kube-system get pods -o wide
+
+kubectl get pods -A -o wide
+
+kubectl get --raw='/readyz?verbose'
+
+
+# Проверить, что worker role отображается:
+
+kubectl get nodes
+
+
+# Ожидаемо:
+#
+# coparking-5    Ready    control-plane
+# coparking-6    Ready    control-plane
+# coparking-7    Ready    control-plane
+# coparking-8    Ready    worker
+# coparking-9    Ready    worker
+# coparking-10   Ready    worker
+
+
+# Проверить, что на worker-нодах есть calico-node и kube-proxy:
+
+kubectl -n kube-system get pods -o wide | egrep 'NAME|coparking-8|coparking-9|coparking-10'
+
+
+# Проверить, что нет проблемных pod'ов:
+
+kubectl get pods -A | egrep -v 'Running|Completed|NAMESPACE'
+
+
+# Если команда ничего не вывела — хорошо.
+
+
+# =====================================================================
+# 20. КРАТКИЙ ИТОГ
+# =====================================================================
+
+# Чтобы убрать <none> в ROLES:
+#
+#   kubectl label node coparking-8 node-role.kubernetes.io/worker= --overwrite
+#   kubectl label node coparking-9 node-role.kubernetes.io/worker= --overwrite
+#   kubectl label node coparking-10 node-role.kubernetes.io/worker= --overwrite
+#
+# Чтобы kubectl get pods не давал connection refused на worker:
+#
+#   mkdir -p /root/.kube
+#   скопировать /etc/kubernetes/admin.conf с control-plane в /root/.kube/config на worker
+#   проверить, что server: https://k8s-api:6443 или https://172.16.175.20:6443
+#
+# Сам worker при этом мог быть полностью исправен.
+# connection refused относился не к kubelet, а к локально не настроенному kubectl.
