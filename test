@@ -1,128 +1,79 @@
-Name:                 coredns-668d6bf9bc-9ljmt
-Namespace:            kube-system
-Priority:             2000000000
-Priority Class Name:  system-cluster-critical
-Service Account:      coredns
-Node:                 coparking-5/172.16.175.19
-Start Time:           Sun, 24 May 2026 22:16:49 +0300
-Labels:               k8s-app=kube-dns
-                      pod-template-hash=668d6bf9bc
-Annotations:          <none>
-Status:               Pending
-IP:
-IPs:                  <none>
-Controlled By:        ReplicaSet/coredns-668d6bf9bc
-Containers:
-  coredns:
-    Container ID:
-    Image:         registry.k8s.io/coredns/coredns:v1.11.3
-    Image ID:
-    Ports:         53/UDP, 53/TCP, 9153/TCP
-    Host Ports:    0/UDP, 0/TCP, 0/TCP
-    Args:
-      -conf
-      /etc/coredns/Corefile
-    State:          Waiting
-      Reason:       ContainerCreating
-    Ready:          False
-    Restart Count:  0
-    Limits:
-      memory:  170Mi
-    Requests:
-      cpu:        100m
-      memory:     70Mi
-    Liveness:     http-get http://:8080/health delay=60s timeout=5s period=10s #success=1 #failure=5
-    Readiness:    http-get http://:8181/ready delay=0s timeout=1s period=10s #success=1 #failure=3
-    Environment:  <none>
-    Mounts:
-      /etc/coredns from config-volume (ro)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-r99w9 (ro)
-Conditions:
-  Type                        Status
-  PodReadyToStartContainers   False
-  Initialized                 True
-  Ready                       False
-  ContainersReady             False
-  PodScheduled                True
-Volumes:
-  config-volume:
-    Type:      ConfigMap (a volume populated by a ConfigMap)
-    Name:      coredns
-    Optional:  false
-  kube-api-access-r99w9:
-    Type:                    Projected (a volume that contains injected data from multiple sources)
-    TokenExpirationSeconds:  3607
-    ConfigMapName:           kube-root-ca.crt
-    ConfigMapOptional:       <nil>
-    DownwardAPI:             true
-QoS Class:                   Burstable
-Node-Selectors:              kubernetes.io/os=linux
-Tolerations:                 CriticalAddonsOnly op=Exists
-                             node-role.kubernetes.io/control-plane:NoSchedule
-                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
-                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
-Events:
-  Type     Reason                  Age                     From     Message
-  ----     ------                  ----                    ----     -------
-  Normal   SandboxChanged          2m4s (x38851 over 11h)  kubelet  Pod sandbox changed, it will be killed and re-created.
-  Warning  FailedCreatePodSandBox  2m4s (x38843 over 11h)  kubelet  (combined from similar events): Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "e54423ec3347e563f738262cbe12420561ff0e7f7438d217592a88bf7880c2aa": plugin type="calico" failed (add): failed to find plugin "calico" in path [/usr/libexec/cni]
+kubectl get nodes -o wide
+NAME           STATUS   ROLES           AGE     VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE     KERNEL-VERSION           CONTAINER-RUNTIME
+coparking-10   Ready    <none>          46s     v1.32.13   172.16.175.29   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+coparking-5    Ready    control-plane   2d15h   v1.32.13   172.16.175.19   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+coparking-6    Ready    control-plane   17m     v1.32.13   172.16.175.21   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+coparking-7    Ready    control-plane   8m29s   v1.32.13   172.16.175.23   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+coparking-8    Ready    <none>          74s     v1.32.13   172.16.175.25   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+coparking-9    Ready    <none>          46s     v1.32.13   172.16.175.27   <none>        RED OS 8.0   6.12.69-1.red80.x86_64   containerd://1.7.29
+[root@coparking-5 coparking]# kubectl -n kube-system get pods -o wide
+NAME                                      READY   STATUS             RESTARTS      AGE     IP              NODE           NOMINATED NODE   READINESS GATES
+calico-kube-controllers-6d5bc68bd-2s7df   1/1     Running            0             12h     10.244.244.65   coparking-5    <none>           <none>
+calico-node-6tqm7                         1/1     Running            0             60s     172.16.175.29   coparking-10   <none>           <none>
+calico-node-bn4qs                         1/1     Running            0             17m     172.16.175.21   coparking-6    <none>           <none>
+calico-node-gx7lw                         1/1     Running            0             12h     172.16.175.19   coparking-5    <none>           <none>
+calico-node-p2vqb                         1/1     Running            0             88s     172.16.175.25   coparking-8    <none>           <none>
+calico-node-srpb7                         1/1     Running            0             8m43s   172.16.175.23   coparking-7    <none>           <none>
+calico-node-t2qv2                         1/1     Running            0             60s     172.16.175.27   coparking-9    <none>           <none>
+coredns-668d6bf9bc-9ljmt                  1/1     Running            0             12h     10.244.244.67   coparking-5    <none>           <none>
+coredns-668d6bf9bc-flf96                  1/1     Running            0             12h     10.244.244.66   coparking-5    <none>           <none>
+etcd-coparking-5                          1/1     Running            1             2d15h   172.16.175.19   coparking-5    <none>           <none>
+etcd-coparking-6                          1/1     Running            0             17m     172.16.175.21   coparking-6    <none>           <none>
+etcd-coparking-7                          1/1     Running            0             8m42s   172.16.175.23   coparking-7    <none>           <none>
+kube-apiserver-coparking-5                1/1     Running            305           2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-apiserver-coparking-6                1/1     Running            0             17m     172.16.175.21   coparking-6    <none>           <none>
+kube-apiserver-coparking-7                1/1     Running            0             8m43s   172.16.175.23   coparking-7    <none>           <none>
+kube-controller-manager-coparking-5       1/1     Running            2             2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-controller-manager-coparking-6       1/1     Running            0             17m     172.16.175.21   coparking-6    <none>           <none>
+kube-controller-manager-coparking-7       1/1     Running            0             8m43s   172.16.175.23   coparking-7    <none>           <none>
+kube-proxy-6t599                          1/1     Running            0             17m     172.16.175.21   coparking-6    <none>           <none>
+kube-proxy-dl5fv                          1/1     Running            0             60s     172.16.175.29   coparking-10   <none>           <none>
+kube-proxy-gppsl                          1/1     Running            0             12h     172.16.175.19   coparking-5    <none>           <none>
+kube-proxy-j64xn                          1/1     Running            0             88s     172.16.175.25   coparking-8    <none>           <none>
+kube-proxy-lvlxq                          1/1     Running            0             60s     172.16.175.27   coparking-9    <none>           <none>
+kube-proxy-mkfl8                          1/1     Running            0             8m43s   172.16.175.23   coparking-7    <none>           <none>
+kube-scheduler-coparking-5                1/1     Running            2             2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-scheduler-coparking-6                1/1     Running            0             17m     172.16.175.21   coparking-6    <none>           <none>
+kube-scheduler-coparking-7                1/1     Running            0             8m43s   172.16.175.23   coparking-7    <none>           <none>
+kube-vip-coparking-5                      1/1     Running            0             2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-vip-coparking-6                      0/1     CrashLoopBackOff   5 (26s ago)   17m     172.16.175.21   coparking-6    <none>           <none>
+kube-vip-coparking-7                      0/1     CrashLoopBackOff   4 (86s ago)   8m43s   172.16.175.23   coparking-7    <none>           <none>
+[root@coparking-5 coparking]# kubectl get pods -A -o wide
+NAMESPACE     NAME                                      READY   STATUS             RESTARTS      AGE     IP              NODE           NOMINATED NODE   READINESS GATES
+kube-system   calico-kube-controllers-6d5bc68bd-2s7df   1/1     Running            0             12h     10.244.244.65   coparking-5    <none>           <none>
+kube-system   calico-node-6tqm7                         1/1     Running            0             107s    172.16.175.29   coparking-10   <none>           <none>
+kube-system   calico-node-bn4qs                         1/1     Running            0             18m     172.16.175.21   coparking-6    <none>           <none>
+kube-system   calico-node-gx7lw                         1/1     Running            0             12h     172.16.175.19   coparking-5    <none>           <none>
+kube-system   calico-node-p2vqb                         1/1     Running            0             2m15s   172.16.175.25   coparking-8    <none>           <none>
+kube-system   calico-node-srpb7                         1/1     Running            0             9m30s   172.16.175.23   coparking-7    <none>           <none>
+kube-system   calico-node-t2qv2                         1/1     Running            0             107s    172.16.175.27   coparking-9    <none>           <none>
+kube-system   coredns-668d6bf9bc-9ljmt                  1/1     Running            0             12h     10.244.244.67   coparking-5    <none>           <none>
+kube-system   coredns-668d6bf9bc-flf96                  1/1     Running            0             12h     10.244.244.66   coparking-5    <none>           <none>
+kube-system   etcd-coparking-5                          1/1     Running            1             2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-system   etcd-coparking-6                          1/1     Running            0             18m     172.16.175.21   coparking-6    <none>           <none>
+kube-system   etcd-coparking-7                          1/1     Running            0             9m29s   172.16.175.23   coparking-7    <none>           <none>
+kube-system   kube-apiserver-coparking-5                1/1     Running            305           2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-system   kube-apiserver-coparking-6                1/1     Running            0             18m     172.16.175.21   coparking-6    <none>           <none>
+kube-system   kube-apiserver-coparking-7                1/1     Running            0             9m30s   172.16.175.23   coparking-7    <none>           <none>
+kube-system   kube-controller-manager-coparking-5       1/1     Running            2             2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-system   kube-controller-manager-coparking-6       1/1     Running            0             18m     172.16.175.21   coparking-6    <none>           <none>
+kube-system   kube-controller-manager-coparking-7       1/1     Running            0             9m30s   172.16.175.23   coparking-7    <none>           <none>
+kube-system   kube-proxy-6t599                          1/1     Running            0             18m     172.16.175.21   coparking-6    <none>           <none>
+kube-system   kube-proxy-dl5fv                          1/1     Running            0             107s    172.16.175.29   coparking-10   <none>           <none>
+kube-system   kube-proxy-gppsl                          1/1     Running            0             12h     172.16.175.19   coparking-5    <none>           <none>
+kube-system   kube-proxy-j64xn                          1/1     Running            0             2m15s   172.16.175.25   coparking-8    <none>           <none>
+kube-system   kube-proxy-lvlxq                          1/1     Running            0             107s    172.16.175.27   coparking-9    <none>           <none>
+kube-system   kube-proxy-mkfl8                          1/1     Running            0             9m30s   172.16.175.23   coparking-7    <none>           <none>
+kube-system   kube-scheduler-coparking-5                1/1     Running            2             2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-system   kube-scheduler-coparking-6                1/1     Running            0             18m     172.16.175.21   coparking-6    <none>           <none>
+kube-system   kube-scheduler-coparking-7                1/1     Running            0             9m30s   172.16.175.23   coparking-7    <none>           <none>
+kube-system   kube-vip-coparking-5                      1/1     Running            0             2d15h   172.16.175.19   coparking-5    <none>           <none>
+kube-system   kube-vip-coparking-6                      0/1     CrashLoopBackOff   5 (73s ago)   18m     172.16.175.21   coparking-6    <none>           <none>
+kube-system   kube-vip-coparking-7                      0/1     CrashLoopBackOff   5 (43s ago)   9m30s   172.16.175.23   coparking-7    <none>           <none>
 ---
-Name:                 calico-kube-controllers-6d5bc68bd-2s7df
-Namespace:            kube-system
-Priority:             2000000000
-Priority Class Name:  system-cluster-critical
-Service Account:      calico-kube-controllers
-Node:                 coparking-5/172.16.175.19
-Start Time:           Sun, 24 May 2026 22:16:49 +0300
-Labels:               k8s-app=calico-kube-controllers
-                      pod-template-hash=6d5bc68bd
-Annotations:          <none>
-Status:               Pending
-SeccompProfile:       RuntimeDefault
-IP:
-IPs:                  <none>
-Controlled By:        ReplicaSet/calico-kube-controllers-6d5bc68bd
-Containers:
-  calico-kube-controllers:
-    Container ID:
-    Image:          docker.io/calico/kube-controllers:v3.29.5
-    Image ID:
-    Port:           <none>
-    Host Port:      <none>
-    State:          Waiting
-      Reason:       ContainerCreating
-    Ready:          False
-    Restart Count:  0
-    Liveness:       exec [/usr/bin/check-status -l] delay=10s timeout=10s period=10s #success=1 #failure=6
-    Readiness:      exec [/usr/bin/check-status -r] delay=0s timeout=1s period=10s #success=1 #failure=3
-    Environment:
-      ENABLED_CONTROLLERS:  node
-      DATASTORE_TYPE:       kubernetes
-    Mounts:
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-s97xx (ro)
-Conditions:
-  Type                        Status
-  PodReadyToStartContainers   False
-  Initialized                 True
-  Ready                       False
-  ContainersReady             False
-  PodScheduled                True
-Volumes:
-  kube-api-access-s97xx:
-    Type:                    Projected (a volume that contains injected data from multiple sources)
-    TokenExpirationSeconds:  3607
-    ConfigMapName:           kube-root-ca.crt
-    ConfigMapOptional:       <nil>
-    DownwardAPI:             true
-QoS Class:                   BestEffort
-Node-Selectors:              kubernetes.io/os=linux
-Tolerations:                 CriticalAddonsOnly op=Exists
-                             node-role.kubernetes.io/control-plane:NoSchedule
-                             node-role.kubernetes.io/master:NoSchedule
-                             node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
-                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
-Events:
-  Type     Reason                  Age                      From     Message
-  ----     ------                  ----                     ----     -------
-  Normal   SandboxChanged          3m39s (x38851 over 11h)  kubelet  Pod sandbox changed, it will be killed and re-created.
-  Warning  FailedCreatePodSandBox  3m39s (x38843 over 11h)  kubelet  (combined from similar events): Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "eae0d42e8f186e6489da7e57400f0474cb58b5b9708dca5b4e2554f1426f82db": plugin type="calico" failed (add): failed to find plugin "calico" in path [/usr/libexec/cni]
+kubectl logs -n kube-system kube-vip-coparking-6
+2026/05/25 07:56:57 INFO kube-vip.io version=v0.9.2 build=b56b80cd30497207e340d581a0db34469aa41c57
+2026/05/25 07:56:57 INFO starting namespace=kube-system Mode=ARP "Control Plane"=true Services=false
+2026/05/25 07:56:57 INFO using node name name=coparking-6
+2026/05/25 07:56:57 INFO prometheus HTTP server started
+2026/05/25 07:56:57 ERROR new manager err="could not create k8s REST config from incluster file: \"/.kube/config\": failed to create rest config: failed to get incluster config: open /var/run/secrets/kubernetes.io/serviceaccount/token: no such file or directory"
