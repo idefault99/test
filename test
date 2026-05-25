@@ -1,7 +1,19 @@
-cd /root/longhorn-airgap-1.10.2
-
-sed -i 's#registry.k8s.io/pause:3.1#registry.k8s.io/pause:3.10#g' \
-  longhorn-iscsi-selinux-workaround.yaml
-
-kubectl -n longhorn-system delete ds longhorn-iscsi-selinux-workaround --ignore-not-found
-kubectl apply -f longhorn-iscsi-selinux-workaround.yaml
+  Normal   Scheduled  3m37s                default-scheduler  Successfully assigned longhorn-system/longhorn-ui-75779c679-ng6hg to coparking-9
+  Normal   Pulled     39s (x5 over 3m36s)  kubelet            Container image "docker.io/longhornio/longhorn-ui:v1.10.2" already present on machine
+  Normal   Created    39s (x5 over 3m36s)  kubelet            Created container: longhorn-ui
+  Normal   Started    39s (x5 over 3m36s)  kubelet            Started container longhorn-ui
+  Warning  BackOff    6s (x9 over 2m54s)   kubelet            Back-off restarting failed container longhorn-ui in pod longhorn-ui-75779c679-ng6hg_longhorn-system(12e6468a-3472-4751-9418-36b011f45021)
+[root@coparking-7 cni]# k logs -n longhorn-system longhorn-ui-75779c679-ng6hg
+No IPv6 address detected, running in IPv4-only mode...
+nginx: [emerg] host not found in upstream "longhorn-backend" in /var/config/nginx/nginx.conf:34
+---
+Events:
+  Type    Reason     Age    From               Message
+  ----    ------     ----   ----               -------
+  Normal  Scheduled  4m48s  default-scheduler  Successfully assigned longhorn-system/longhorn-driver-deployer-79888b698b-p5b9n to coparking-8
+  Normal  Pulled     4m47s  kubelet            Container image "docker.io/longhornio/longhorn-manager:v1.10.2" already present on machine
+  Normal  Created    4m47s  kubelet            Created container: wait-longhorn-manager
+  Normal  Started    4m47s  kubelet            Started container wait-longhorn-manager
+[root@coparking-7 cni]# k logs -n longhorn-system longhorn-driver-deployer-79888b698b-p5b9n
+Defaulted container "longhorn-driver-deployer" out of: longhorn-driver-deployer, wait-longhorn-manager (init)
+Error from server (BadRequest): container "longhorn-driver-deployer" in pod "longhorn-driver-deployer-79888b698b-p5b9n" is waiting to start: PodInitializing
