@@ -1,12 +1,7 @@
-  Normal   Scheduled  2m27s                default-scheduler  Successfully assigned longhorn-system/longhorn-iscsi-selinux-workaround-6fwm4 to coparking-5
-  Normal   Pulling    2m26s                kubelet            Pulling image "alpine:3.17"
-  Normal   Pulled     2m21s                kubelet            Successfully pulled image "alpine:3.17" in 4.837s (4.837s including waiting). Image size: 3401960 bytes.
-  Normal   Created    2m21s                kubelet            Created container: iscsi-selinux-workaround
-  Normal   Started    2m21s                kubelet            Started container iscsi-selinux-workaround
-  Normal   Pulling    41s (x4 over 2m12s)  kubelet            Pulling image "registry.k8s.io/pause:3.1"
-  Warning  Failed     41s (x4 over 2m11s)  kubelet            Failed to pull image "registry.k8s.io/pause:3.1": failed to pull and unpack image "registry.k8s.io/pause:3.1": failed to resolve reference "registry.k8s.io/pause:3.1": failed to do request: Head "https://europe-north1-docker.pkg.dev/v2/k8s-artifacts-prod/images/pause/manifests/3.1": EOF
-  Warning  Failed     41s (x4 over 2m11s)  kubelet            Error: ErrImagePull
-  Normal   BackOff    0s (x7 over 106s)    kubelet            Back-off pulling image "registry.k8s.io/pause:3.1"
-  Warning  Failed     0s (x7 over 106s)    kubelet            Error: ImagePullBackOff
-  ---
-  registry.k8s.io/pause                                  3.10                873ed75102791       739kB
+cd /root/longhorn-airgap-1.10.2
+
+sed -i 's#registry.k8s.io/pause:3.1#registry.k8s.io/pause:3.10#g' \
+  longhorn-iscsi-selinux-workaround.yaml
+
+kubectl -n longhorn-system delete ds longhorn-iscsi-selinux-workaround --ignore-not-found
+kubectl apply -f longhorn-iscsi-selinux-workaround.yaml
