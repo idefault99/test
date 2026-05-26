@@ -1,1 +1,15 @@
-sed -i 's|--server-side -f /tmp/calico-tigera-operator|--server-side --force-conflicts -f /tmp/calico-tigera-operator|' playbooks/03-k8s-cluster.yml
+TASK [Дождаться tigera-operator] *********************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+[ERROR]: Task failed: Module failed: non-zero return code
+Origin: /home/ikbelykh/k8s-ansible/playbooks/03-k8s-cluster.yml:343:7
+
+341       command: kubectl apply --server-side --force-conflicts -f /tmp/calico-tigera-operator.yaml
+342
+343     - name: Дождаться tigera-operator
+          ^ column 7
+
+fatal: [coparking-5]: FAILED! => {"changed": true, "cmd": ["kubectl", "-n", "tigera-operator", "rollout", "status", "deployment/tigera-operator", "--timeout=120s"], "delta": "0:00:08.631483", "end": "2026-05-26 23:47:19.021712", "msg": "non-zero return code", "rc": 1, "start": "2026-05-26 23:47:10.390229", "stderr": "error: deployment \"tigera-operator\" exceeded its progress deadline", "stderr_lines": ["error: deployment \"tigera-operator\" exceeded its progress deadline"], "stdout": "Waiting for deployment \"tigera-operator\" rollout to finish: 0 of 1 updated replicas are available...", "stdout_lines": ["Waiting for deployment \"tigera-operator\" rollout to finish: 0 of 1 updated replicas are available..."]}
+---
+Warning  Failed     8m21s (x5 over 11m)  kubelet            Failed to pull image "quay.io/tigera/operator:v1.36.12": failed to pull and unpack image "quay.io/tigera/operator:v1.36.12": failed to resolve reference "quay.io/tigera/operator:v1.36.12": failed to do request: Head "https://quay.io/v2/tigera/operator/manifests/v1.36.12": EOF
+  Warning  Failed     8m21s (x5 over 11m)  kubelet            Error: ErrImagePull
+  Normal   BackOff    61s (x42 over 11m)   kubelet            Back-off pulling image "quay.io/tigera/operator:v1.36.12"
+  Warning  Failed     61s (x42 over 11m)   kubelet            Error: ImagePullBackOff
