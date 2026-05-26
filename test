@@ -1,36 +1,16 @@
-#!/usr/bin/env bash
-set -e
-cd "$(dirname "$0")"
+[ERROR]: YAML parsing failed: Values starting with a quote must end with the same quote.
+Origin: /home/ikbelykh/k8s-ansible/playbooks/01-fixup.yml:314:11
 
-echo "=== 1. Удаляем macOS resource fork файлы ==="
-find . -name "._*" -delete
-find . -name ".DS_Store" -delete
-echo "OK"
+312       when:
+313         - r_kubectl_find.stdout_lines | length > 0
+314         - '/usr/local/bin/kubectl' not in r_kubectl_find.stdout
+              ^ column 11
 
-echo "=== 2. Исправляем CRLF → LF ==="
-find . \( -name "*.yml" -o -name "*.yaml" -o -name "*.j2" -o -name "*.ini" -o -name "*.cfg" \) \
-  -exec sed -i 's/\r//' {} \;
-echo "OK"
 
-echo "=== 3. Исправляем ansible.cfg (stdout_callback) ==="
-sed -i 's/^stdout_callback\s*=\s*yaml/stdout_callback    = default\nresult_format      = yaml/' ansible.cfg
-echo "OK"
+For example:
 
-echo "=== 4. Создаём requirements.yml ==="
-cat > requirements.yml << 'EOF'
----
-collections:
-  - name: ansible.posix
-    version: ">=1.5.0"
-EOF
-echo "OK"
+    raw: "foo" in bar
 
-echo "=== 5. Устанавливаем коллекции ==="
-ansible-galaxy collection install -r requirements.yml
-echo "OK"
+Should be:
 
-echo ""
-echo "=== Готово. Проверка: ==="
-grep -E 'stdout_callback|result_format' ansible.cfg
-echo ""
-echo "Запускайте: ansible-playbook -i inventory.ini playbooks/00-audit.yml"
+    raw: '"foo" in bar'
