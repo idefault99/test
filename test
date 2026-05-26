@@ -1,153 +1,22 @@
-╔══════════════════════════════════════════════════════╗
-║          АУДИТ ХОСТА — 2026-05-26 21:18:04            ║
-╚══════════════════════════════════════════════════════╝
+# 1. Перенести архив и распаковать на хосте с Ansible
+scp k8s-ansible.tar.gz user@bastion:~/
+ssh user@bastion 'tar xzf k8s-ansible.tar.gz'
 
-══ HOSTNAME & OS
-  hostname:    coparking-7
-  os-release:  RED OS 8.0
-  kernel:      6.12.69-1.red80.x86_64
-  arch:        x86_64
+# 2. Заполнить group_vars/all.yml — пароли, local_registry, ansible_user в inventory.ini
 
-══ SELinux (ожидается Permissive)
-  getenforce: Permissive
-  config:     SELINUX=permissive
-  ✓ OK
+# 3. Аудит всех нод (убедиться что схема такая же)
+ansible-playbook playbooks/00-audit.yml -K
 
-══ SWAP (ожидается пусто)
-  ✓ swap отключён
-  zram:        inactive
-n/a
-  ✓ fstab чист от swap
+# 4. ← НОВЫЙ ОБЯЗАТЕЛЬНЫЙ ШАГ
+ansible-playbook playbooks/01-fixup.yml -K
+# Делает: SystemdCgroup=true, kubeadm reset, убирает tunl0, nf_conntrack, kubectl
 
-══ systemd-resolved DNSStubListener (ожидается no)
-  DNSStubListener=no
-#DNSStubListenerExtra=
-  resolv.conf nameserver: 10.2.190.153 10.248.74.216
+# 5. Основной кластер
+ansible-playbook playbooks/03-k8s-cluster.yml -K
 
-══ KERNEL MODULES (br_netfilter, overlay, ip_vs, nf_conntrack)
-  ✓ overlay загружен
-  ✓ br_netfilter загружен
-  ✓ ip_vs загружен
-  ✓ ip_vs_rr загружен
-  ✗ nf_conntrack НЕ ЗАГРУЖЕН
-  ✓ iscsi_tcp загружен
+# 6. GPU Operator
+ansible-playbook playbooks/04-gpu-operator.yml -K
 
-  k8s.conf: overlay br_netfilter
-
-══ SYSCTL
-  net.ipv4.ip_forward = 1
-  net.bridge.bridge-nf-call-iptables = 1
-  vm.swappiness = 0
-
-══ FIREWALLD
-  status:     active
-  trusted sources: 172.16.175.0/24 10.244.0.0/16 172.30.0.0/16
-  allowed ports:   30000-32767/tcp
-
-══ CONTAINERD
-  service:    active
-  version:    1.7.29
-  SystemdCgroup: SystemdCgroup = false
-  sandbox_image: sandbox_image = registry.test.model.svo.aero/pause:3.10
-  bin_dir:       bin_dir = /opt/cni/bin
-  crictl cgroupDriver: ?
-
-══ KUBERNETES PACKAGES
-  kubelet:    activating | Kubernetes v1.32.13
-  kubeadm:    v1.32.13
-  kubectl:    НЕ УСТАНОВЛЕН
-
-  Пакеты rpm:
-    cri-tools1.32-1.32.0-1.red80.x86_64
-    kubernetes1.32-client-1.32.13-1.red80.x86_64
-    kubernetes1.32-kubeadm-1.32.13-1.red80.x86_64
-    kubernetes1.32-master-1.32.13-1.red80.x86_64
-    kubernetes1.32-node-1.32.13-1.red80.x86_64
-
-══ K8S STATE
-  ✗ admin.conf НЕ НАЙДЕН → кластер не инициализирован
-  ✗ kubelet.conf НЕ НАЙДЕН → нода не присоединена
-
-  Статические поды /etc/kubernetes/manifests/:
-    (директория не существует или пуста)
-
-
-══ NETWORK
-  eno1 IP:
-    inet 172.16.175.23/24 brd 172.16.175.255 scope global noprefixroute eno1
-    inet 10.96.183.239/24 brd 10.96.183.255 scope global noprefixroute eno1
-
-  Все интерфейсы:
-    1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    inet 127.0.0.1/8 scope host lo
-    2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    inet 172.16.175.23/24 brd 172.16.175.255 scope global noprefixroute eno1
-    inet 10.96.183.239/24 brd 10.96.183.255 scope global noprefixroute eno1
-    4: tunl0@NONE: <NOARP,UP,LOWER_UP> mtu 1480 qdisc noqueue state UNKNOWN group default qlen 1000
-    inet 10.244.72.0/32 scope global tunl0
-
-  /etc/hosts k8s-блок:
-    172.16.175.20  k8s-api
-    172.16.175.19  coparking-5
-    172.16.175.21  coparking-6
-    172.16.175.23  coparking-7
-    172.16.175.25  coparking-8
-    172.16.175.27  coparking-9
-    172.16.175.29  coparking-10
-
-  /etc/NetworkManager/conf.d/calico.conf:
-    (НЕТ — нужен для Calico)
-
-══ STORAGE — /var/lib/longhorn (sdb)
-  ✓ смонтирован
-    Filesystem     Type  Size  Used Avail Use% Mounted on
-    /dev/sdb       xfs    19T  130G   19T   1% /var/lib/longhorn
-
-  lsblk (все диски):
-    sda    3.5T disk
-    sdb   18.2T disk /var/lib/longhorn
-    zram0    0B disk
-
-  fstab longhorn:
-    UUID=6c372fcd-1545-4267-8dfb-d47c1890ac27 /var/lib/longhorn xfs defaults,noatime,nodiratime 0 0
-
-  SELinux контекст /var/lib/longhorn:
-    system_u:object_r:container_file_t:s0 /var/lib/longhorn
-
-  iSCSI:
-    iscsid: active
-    initiatorname: InitiatorName=iqn.1994-05.com.redhat:1fcc6cfe8cd1
-
-══ NVIDIA
-  nouveau module:
-  ✓ nouveau не загружен
-
-  blacklist config:
-    blacklist nouveau
-    options nouveau modeset=0
-
-  nvidia-smi:
-Tesla T4, 570.133.20, 15360 MiB
-  ✓ nvidia-smi работает
-
-  dkms status (nvidia):
-    (нет записей nvidia)
-
-  nvidia-persistenced: active
-
-  nvidia-container-toolkit пакеты:
-    libnvidia-container1-1.19.1-1.x86_64
-    libnvidia-container-tools-1.19.1-1.x86_64
-    nvidia-container-toolkit-1.19.1-1.x86_64
-    nvidia-container-toolkit-base-1.19.1-1.x86_64
-
-  /etc/cdi/ — CDI configs:
-    (нет CDI конфигов)
-
-══ CHRONY
-  active
-    Reference ID    : 596DFB16 (ntp2.vniiftri.ru)
-    Stratum         : 2
-    Ref time (UTC)  : Tue May 26 18:14:04 2026
-    System time     : 0.000049223 seconds slow of NTP time
-    Last offset     : -0.000039681 seconds
+# 7-8. Storage и сервисы
+ansible-playbook playbooks/05-longhorn.yml -K
+ansible-playbook playbooks/06-services.yml -K
