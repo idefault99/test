@@ -1,1 +1,36 @@
-[ERROR]: The 'community.general.yaml' callback plugin has been removed. The plugin has been superseded by the option `result_format=yaml` in callback plugin ansible.builtin.default from ansible-core 2.13 onwards. This feature was removed from collection 'community.general' version 12.0.0.
+#!/usr/bin/env bash
+set -e
+cd "$(dirname "$0")"
+
+echo "=== 1. Удаляем macOS resource fork файлы ==="
+find . -name "._*" -delete
+find . -name ".DS_Store" -delete
+echo "OK"
+
+echo "=== 2. Исправляем CRLF → LF ==="
+find . \( -name "*.yml" -o -name "*.yaml" -o -name "*.j2" -o -name "*.ini" -o -name "*.cfg" \) \
+  -exec sed -i 's/\r//' {} \;
+echo "OK"
+
+echo "=== 3. Исправляем ansible.cfg (stdout_callback) ==="
+sed -i 's/^stdout_callback\s*=\s*yaml/stdout_callback    = default\nresult_format      = yaml/' ansible.cfg
+echo "OK"
+
+echo "=== 4. Создаём requirements.yml ==="
+cat > requirements.yml << 'EOF'
+---
+collections:
+  - name: ansible.posix
+    version: ">=1.5.0"
+EOF
+echo "OK"
+
+echo "=== 5. Устанавливаем коллекции ==="
+ansible-galaxy collection install -r requirements.yml
+echo "OK"
+
+echo ""
+echo "=== Готово. Проверка: ==="
+grep -E 'stdout_callback|result_format' ansible.cfg
+echo ""
+echo "Запускайте: ansible-playbook -i inventory.ini playbooks/00-audit.yml"
