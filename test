@@ -1,9 +1,9 @@
 ╔══════════════════════════════════════════════════════╗
-║          АУДИТ ХОСТА — 2026-05-26 21:12:11            ║
+║          АУДИТ ХОСТА — 2026-05-26 21:18:04            ║
 ╚══════════════════════════════════════════════════════╝
 
 ══ HOSTNAME & OS
-  hostname:    coparking-5
+  hostname:    coparking-7
   os-release:  RED OS 8.0
   kernel:      6.12.69-1.red80.x86_64
   arch:        x86_64
@@ -42,7 +42,7 @@ n/a
 ══ FIREWALLD
   status:     active
   trusted sources: 172.16.175.0/24 10.244.0.0/16 172.30.0.0/16
-  allowed ports:   2379/tcp 2380/tcp 30000-32767/tcp
+  allowed ports:   30000-32767/tcp
 
 ══ CONTAINERD
   service:    active
@@ -69,23 +69,22 @@ n/a
   ✗ kubelet.conf НЕ НАЙДЕН → нода не присоединена
 
   Статические поды /etc/kubernetes/manifests/:
+    (директория не существует или пуста)
 
-
-  kubectl get nodes:
 
 ══ NETWORK
   eno1 IP:
-    inet 10.96.183.237/24 brd 10.96.183.255 scope global noprefixroute eno1
-    inet 172.16.175.19/24 brd 172.16.175.255 scope global noprefixroute eno1
+    inet 172.16.175.23/24 brd 172.16.175.255 scope global noprefixroute eno1
+    inet 10.96.183.239/24 brd 10.96.183.255 scope global noprefixroute eno1
 
   Все интерфейсы:
     1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     inet 127.0.0.1/8 scope host lo
     2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
-    inet 10.96.183.237/24 brd 10.96.183.255 scope global noprefixroute eno1
-    inet 172.16.175.19/24 brd 172.16.175.255 scope global noprefixroute eno1
+    inet 172.16.175.23/24 brd 172.16.175.255 scope global noprefixroute eno1
+    inet 10.96.183.239/24 brd 10.96.183.255 scope global noprefixroute eno1
     4: tunl0@NONE: <NOARP,UP,LOWER_UP> mtu 1480 qdisc noqueue state UNKNOWN group default qlen 1000
-    inet 10.244.244.64/32 scope global tunl0
+    inet 10.244.72.0/32 scope global tunl0
 
   /etc/hosts k8s-блок:
     172.16.175.20  k8s-api
@@ -110,15 +109,14 @@ n/a
     zram0    0B disk
 
   fstab longhorn:
-    UUID=cc9d89f4-7ff8-4600-b640-2d3aff4ac9b8 /var/lib/longhorn xfs defaults,noatime,nodiratime 0 0
-    UUID=cc9d89f4-7ff8-4600-b640-2d3aff4ac9b8 /var/lib/longhorn xfs defaults,noatime,nodiratime 0 0
+    UUID=6c372fcd-1545-4267-8dfb-d47c1890ac27 /var/lib/longhorn xfs defaults,noatime,nodiratime 0 0
 
   SELinux контекст /var/lib/longhorn:
     system_u:object_r:container_file_t:s0 /var/lib/longhorn
 
   iSCSI:
     iscsid: active
-    initiatorname: InitiatorName=iqn.1994-05.com.redhat:ded9f567791
+    initiatorname: InitiatorName=iqn.1994-05.com.redhat:1fcc6cfe8cd1
 
 ══ NVIDIA
   nouveau module:
@@ -148,8 +146,8 @@ Tesla T4, 570.133.20, 15360 MiB
 
 ══ CHRONY
   active
-    Reference ID    : 596DFB17 (ntp3.vniiftri.ru)
+    Reference ID    : 596DFB16 (ntp2.vniiftri.ru)
     Stratum         : 2
-    Ref time (UTC)  : Tue May 26 18:04:45 2026
-    System time     : 0.000151020 seconds slow of NTP time
-    Last offset     : -0.000151660 seconds
+    Ref time (UTC)  : Tue May 26 18:14:04 2026
+    System time     : 0.000049223 seconds slow of NTP time
+    Last offset     : -0.000039681 seconds
