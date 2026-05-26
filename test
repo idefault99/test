@@ -1,31 +1,30 @@
-E0526 20:19:06.725481       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:08.274598       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:09.740768       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:11.134625       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:12.407165       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:13.887245       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:15.441938       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:17.482897       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:18.779403       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:19.898209       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:21.967030       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:23.281877       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:24.487998       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:26.348929       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:27.563914       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:28.683760       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:30.528502       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:31.671505       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:33.789637       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:35.433454       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:36.606165       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:38.012113       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:39.679407       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:41.216802       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:42.858734       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:44.147687       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:45.285396       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:47.054539       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:49.210684       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:50.256854       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
-E0526 20:19:51.474160       1 leaderelection.go:436] error retrieving resource lock kube-system/plndr-cp-lock: leases.coordination.k8s.io "plndr-cp-lock" is forbidden: User "kubernetes-admin" cannot get resource "leases" in API group "coordination.k8s.io" in the namespace "kube-system"
+cat > /tmp/kubevip-superadmin.patch << 'PATCH'
+--- a/playbooks/03-k8s-cluster.yml
++++ b/playbooks/03-k8s-cluster.yml
+@@ -110,16 +110,13 @@
+     - name: Сгенерировать kube-vip манифест
+       shell: |
+         ctr -n k8s.io run --rm --net-host \
+           {{ local_registry }}/kube-vip/kube-vip:{{ kubevip_version }} kv \
+           /kube-vip manifest pod \
+           --interface {{ vip_interface }} \
+           --address {{ vip }} \
+           --controlplane \
+           --arp \
+           --leaderElection \
+-        > /etc/kubernetes/manifests/kube-vip.yaml
++        > /tmp/kube-vip-raw.yaml && \
++        sed 's|path: /etc/kubernetes/admin\.conf|path: /etc/kubernetes/super-admin.conf|g' \
++          /tmp/kube-vip-raw.yaml > /etc/kubernetes/manifests/kube-vip.yaml
+       args:
+         creates: /etc/kubernetes/manifests/kube-vip.yaml
+-
+-    - name: "Патч kube-vip → super-admin.conf (hack для К8s ≥1.29)"
+-      replace:
+-        path: /etc/kubernetes/manifests/kube-vip.yaml
+-        regexp: 'path: /etc/kubernetes/admin\.conf'
+-        replace: 'path: /etc/kubernetes/super-admin.conf'
+-      when: not kubevip_exists.stat.exists
+PATCH
+
+patch -p1 < /tmp/kubevip-superadmin.patch
