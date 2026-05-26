@@ -1,1 +1,7 @@
-sed -i 's|dest: /tmp/calico-tigera-operator.yaml$|dest: /tmp/calico-tigera-operator.yaml\n\n    - name: "Подменить quay.io → local registry в манифесте"\n      replace:\n        path: /tmp/calico-tigera-operator.yaml\n        regexp: '"'"'quay\\.io/tigera/operator'"'"'\n        replace: "{{ local_registry }}/tigera/operator"|' playbooks/03-k8s-cluster.yml
+# Скопировать на ноды
+for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9; do
+  scp calico-images.tar ikbelykh@${node}:/tmp/
+done
+
+# На каждой ноде импортировать
+sudo ctr -n k8s.io images import /tmp/calico-images.tar
