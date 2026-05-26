@@ -1,12 +1,5 @@
-ansible-playbook playbooks/00-audit.yml
+ansible-playbook -i inventory.ini playbooks/00-audit.yml
 [WARNING]: Ansible is being run in a world writable directory (/mnt/c/Users/ik.belykh/test/ansible/k8s-ansible), ignoring it as an ansible.cfg source. For more information see https://docs.ansible.com/ansible/devel/reference_appendices/config.html#cfg-in-world-writable-dir
-[WARNING]: No inventory was parsed, only implicit localhost is available
-[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
-[WARNING]: Could not match supplied host pattern, ignoring: all_nodes
 
 PLAY [Audit — состояние всех нод] ********************************************************************************************************************************************************************************************************************************************************************************************************************************************************
-skipping: no hosts matched
-[WARNING]: Could not match supplied host pattern, ignoring: first_control_plane
-
-PLAY [Audit — статус кластера K8s] *******************************************************************************************************************************************************************************************************************************************************************************************************************************************************
-skipping: no hosts matched
+[ERROR]: YAML parsing failed: While scanning a simple key could not find expected ':'.
