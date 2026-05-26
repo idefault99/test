@@ -1,14 +1,13 @@
-# 1. Временно переключить k8s-api на локальный IP
-sed -i 's/172\.16\.175\.20\s*k8s-api/172.16.175.19 k8s-api/' /etc/hosts
+# kubeadm reset чистит всё что init создал
+sudo kubeadm reset --force
 
-# 2. Рестартовать kube-vip pod
-crictl stopp $(crictl pods --name kube-vip | grep -v POD | awk '{print $1}')
+# Удалить kube-vip манифест вручную (он останется после reset)
+sudo rm -f /etc/kubernetes/manifests/kube-vip.yaml
 
-# 3. Подождать ~15 сек, проверить что VIP появился
-sleep 15 && ip addr show eno1 | grep 172.16.175.20
-
-# 4. Как только VIP появился — вернуть нормальный /etc/hosts
-sed -i 's/172\.16\.175\.19\s*k8s-api/172.16.175.20 k8s-api/' /etc/hosts
-
-# 5. Проверить кластер
-kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes
+# Убедиться что всё чисто
+ip addr show eno1          # 172.16.175.20 не должно быть
+sudo crictl ps -a          # контейнеров k8s не должно быть
+---
+# Прямо на coparking-5: убрать --leaderElection из playbook
+sed -i '/leaderElection/d' ~/k8s-ansible/playbooks/03-k8s-cluster.yml
+---
