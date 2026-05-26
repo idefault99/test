@@ -1,16 +1,57 @@
-[ERROR]: YAML parsing failed: Values starting with a quote must end with the same quote.
-Origin: /home/ikbelykh/k8s-ansible/playbooks/01-fixup.yml:314:11
+TASK [Pull образ kube-vip из локального registry] ****************************************************************************************************************************************************************************************************************************************************************************************************************************************
+[ERROR]: Task failed: Module failed: non-zero return code
+Origin: /home/ikbelykh/k8s-ansible/playbooks/03-k8s-cluster.yml:96:7
 
-312       when:
-313         - r_kubectl_find.stdout_lines | length > 0
-314         - '/usr/local/bin/kubectl' not in r_kubectl_find.stdout
-              ^ column 11
+94         mode: "0755"
+95
+96     - name: Pull образ kube-vip из локального registry
+         ^ column 7
 
-
-For example:
-
-    raw: "foo" in bar
-
-Should be:
-
-    raw: '"foo" in bar'
+fatal: [coparking-6]: FAILED! => {"changed": true, "cmd": ["ctr", "-n", "k8s.io", "image", "pull", "registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2"], "delta": "0:00:00.118839", "end": "2026-05-26 22:40:12.040385", "msg": "non-zero return code", "rc": 1, "start": "2026-05-26 22:40:11.921546", "stderr": "time=\"2026-05-26T22:40:12+03:00\" level=info msg=\"trying next host\" error=\"failed to do request: Head \\\"https://registry.test.model.svo.aero/v2/kube-vip/kube-vip/manifests/v0.9.2\\\": tls: failed to verify certificate: x509: certificate signed by unknown authority\" host=registry.test.model.svo.aero\nctr: failed to resolve reference \"registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2\": failed to do request: Head \"https://registry.test.model.svo.aero/v2/kube-vip/kube-vip/manifests/v0.9.2\": tls: failed to verify certificate: x509: certificate signed by unknown authority", "stderr_lines": ["time=\"2026-05-26T22:40:12+03:00\" level=info msg=\"trying next host\" error=\"failed to do request: Head \\\"https://registry.test.model.svo.aero/v2/kube-vip/kube-vip/manifests/v0.9.2\\\": tls: failed to verify certificate: x509: certificate signed by unknown authority\" host=registry.test.model.svo.aero", "ctr: failed to resolve reference \"registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2\": failed to do request: Head \"https://registry.test.model.svo.aero/v2/kube-vip/kube-vip/manifests/v0.9.2\": tls: failed to verify certificate: x509: certificate signed by unknown authority"], "stdout": "", "stdout_lines": []}
+fatal: [coparking-5]: FAILED! => {"changed": true, "cmd": ["ctr", "-n", "k8s.io", "image", "pull", "registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2"], "delta": "0:00:00.202251", "end": "2026-05-26 22:40:12.113787", "msg": "non-zero return code", "rc": 1, "start": "2026-05-26 22:40:11.911536", "stderr": "time=\"2026-05-26T22:40:12+03:00\" level=info msg=\"trying next host\" error=\"failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden\" host=registry.test.model.svo.aero\nctr: failed to resolve reference \"registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2\": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden", "stderr_lines": ["time=\"2026-05-26T22:40:12+03:00\" level=info msg=\"trying next host\" error=\"failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden\" host=registry.test.model.svo.aero", "ctr: failed to resolve reference \"registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2\": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden"], "stdout": "", "stdout_lines": []}
+fatal: [coparking-7]: FAILED! => {"changed": true, "cmd": ["ctr", "-n", "k8s.io", "image", "pull", "registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2"], "delta": "0:00:00.261358", "end": "2026-05-26 22:40:12.194306", "msg": "non-zero return code", "rc": 1, "start": "2026-05-26 22:40:11.932948", "stderr": "time=\"2026-05-26T22:40:12+03:00\" level=info msg=\"trying next host\" error=\"failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden\" host=registry.test.model.svo.aero\nctr: failed to resolve reference \"registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2\": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden", "stderr_lines": ["time=\"2026-05-26T22:40:12+03:00\" level=info msg=\"trying next host\" error=\"failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden\" host=registry.test.model.svo.aero", "ctr: failed to resolve reference \"registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2\": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Akube-vip%2Fkube-vip%3Apull&service=container_registry: 403 Forbidden"], "stdout": "registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2: resolving      |\u001b[32m\u001b[0m--------------------------------------| \nelapsed: 0.1 s                                         total:   0.0 B (0.0 B/s)                                         ", "stdout_lines": ["registry.test.model.svo.aero/kube-vip/kube-vip:v0.9.2: resolving      |\u001b[32m\u001b[0m--------------------------------------| ", "elapsed: 0.1 s                                         total:   0.0 B (0.0 B/s)                                         "]}
+crictl images
+IMAGE                                                        TAG                 IMAGE ID            SIZE
+docker.io/calico/cni                                         v3.29.5             2b1c487ed9e0f       99.3MB
+registry.test.model.svo.aero/calico/cni                      v3.29.5             2b1c487ed9e0f       99.3MB
+docker.io/calico/kube-controllers                            v3.29.5             fef102d0f353c       82.5MB
+registry.test.model.svo.aero/calico/kube-controllers         v3.29.5             fef102d0f353c       82.5MB
+docker.io/calico/node                                        v3.29.5             4d440810bc03b       381MB
+registry.test.model.svo.aero/calico/node                     v3.29.5             4d440810bc03b       381MB
+docker.io/library/alpine                                     3.17                775f483016a7d       3.4MB
+docker.io/longhornio/csi-node-driver-registrar               v2.15.0-20251226    22c21014feb85       15.2MB
+docker.io/longhornio/livenessprobe                           v2.17.0-20251226    fbcc52b982b20       15.4MB
+docker.io/longhornio/longhorn-engine                         v1.10.2             329d0762e8a88       435MB
+docker.io/longhornio/longhorn-instance-manager               v1.10.2             0532cbc3f4e20       476MB
+docker.io/longhornio/longhorn-manager                        v1.10.2             a0848fb9df567       356MB
+docker.io/longhornio/longhorn-share-manager                  v1.10.2             e34c55c8d13db       270MB
+docker.io/longhornio/longhorn-ui                             v1.10.2             898594695f763       241MB
+ghcr.io/kube-vip/kube-vip                                    v0.9.2              d8bc73bdd55e9       58.6MB
+registry.test.model.svo.aero/kube-vip/kube-vip               v0.9.2              d8bc73bdd55e9       58.6MB
+registry.test.model.svo.aero/plndr/kube-vip                  v0.8.7              d8bc73bdd55e9       58.6MB
+registry.k8s.io/coredns/coredns                              v1.11.3             c69fa2e9cbf5f       63.3MB
+registry.test.model.svo.aero/coredns/coredns                 v1.11.3             c69fa2e9cbf5f       63.3MB
+registry.test.model.svo.aero/coredns                         v1.11.3             c69fa2e9cbf5f       63.3MB
+registry.test.model.svo.aero/k8s/coredns                     v1.11.3             c69fa2e9cbf5f       63.3MB
+registry.k8s.io/etcd                                         3.5.16-0            a9e7e6b294baf       151MB
+registry.test.model.svo.aero/etcd                            3.5.16-0            a9e7e6b294baf       151MB
+registry.test.model.svo.aero/k8s/etcd                        3.5.16-0            a9e7e6b294baf       151MB
+registry.k8s.io/etcd                                         3.5.24-0            8cb12dd0c3e42       66.2MB
+registry.test.model.svo.aero/etcd                            3.5.24-0            8cb12dd0c3e42       66.2MB
+registry.k8s.io/kube-apiserver                               v1.32.13            1ca64cd86eb37       99MB
+registry.test.model.svo.aero/k8s/kube-apiserver              v1.32.13            1ca64cd86eb37       99MB
+registry.test.model.svo.aero/kube-apiserver                  v1.32.13            1ca64cd86eb37       99MB
+registry.k8s.io/kube-controller-manager                      v1.32.13            59a2147964ea7       91.8MB
+registry.test.model.svo.aero/k8s/kube-controller-manager     v1.32.13            59a2147964ea7       91.8MB
+registry.test.model.svo.aero/kube-controller-manager         v1.32.13            59a2147964ea7       91.8MB
+registry.k8s.io/kube-proxy                                   v1.32.13            e9078246da346       95.9MB
+registry.test.model.svo.aero/k8s/kube-proxy                  v1.32.13            e9078246da346       95.9MB
+registry.test.model.svo.aero/kube-proxy                      v1.32.13            e9078246da346       95.9MB
+registry.k8s.io/kube-scheduler                               v1.32.13            2fab0ac6a3f2b       71.6MB
+registry.test.model.svo.aero/k8s/kube-scheduler              v1.32.13            2fab0ac6a3f2b       71.6MB
+registry.test.model.svo.aero/kube-scheduler                  v1.32.13            2fab0ac6a3f2b       71.6MB
+registry.k8s.io/pause                                        3.10                873ed75102791       739kB
+registry.test.model.svo.aero/k8s/pause                       3.10                873ed75102791       739kB
+registry.test.model.svo.aero/pause                           3.10                873ed75102791       739kB
+registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils   1.0.0               2c49e4dc46a59       21.7MB
+registry.test.model.svo.aero/dpm/iac/infra/alpine            3.23.3              a40c03cbb81c5       3.86MB
