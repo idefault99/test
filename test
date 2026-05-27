@@ -1,1 +1,132 @@
-sed -i 's/command: kubectl create namespace longhorn-system --dry-run/shell: kubectl create namespace longhorn-system --dry-run/' playbooks/05-longhorn.yml
+longhorn-driver-deployer-79888b698b-m2lrt   0/1     Init:0/1           0              8m11s
+longhorn-iscsi-selinux-workaround-4w9kt     0/1     ImagePullBackOff   0              8m16s
+longhorn-iscsi-selinux-workaround-5v6rx     0/1     ImagePullBackOff   0              8m16s
+longhorn-iscsi-selinux-workaround-9rs62     0/1     ImagePullBackOff   0              8m16s
+longhorn-iscsi-selinux-workaround-g28pb     0/1     ImagePullBackOff   0              8m16s
+longhorn-iscsi-selinux-workaround-jqpr8     0/1     ImagePullBackOff   0              8m16s
+longhorn-iscsi-selinux-workaround-ng775     0/1     ImagePullBackOff   0              8m16s
+longhorn-manager-229mh                      1/2     Running            0              8m11s
+longhorn-manager-hmtgv                      1/2     Running            0              8m11s
+longhorn-manager-mbgbv                      1/2     Running            0              8m11s
+longhorn-manager-ssl7f                      1/2     Running            0              8m11s
+longhorn-manager-tlrlv                      1/2     Running            3 (113s ago)   8m11s
+longhorn-manager-w9mzg                      2/2     Running            0              8m11s
+longhorn-ui-75779c679-f65cz                 0/1     CrashLoopBackOff   6 (18s ago)    8m11s
+longhorn-ui-75779c679-hwjtg                 1/1     Running            6 (3m6s ago)   8m11s
+---
+k logs -n longhorn-system longhorn-ui-75779c679-hwjtg
+No IPv6 address detected, running in IPv4-only mode...
+nginx: [emerg] host not found in upstream "longhorn-backend" in /var/config/nginx/nginx.conf:34
+---
+k describe pod -n longhorn-system longhorn-iscsi-selinux-workaround-4w9kt
+Events:
+  Type     Reason     Age                   From               Message
+  ----     ------     ----                  ----               -------
+  Normal   Scheduled  10m                   default-scheduler  Successfully assigned longhorn-system/longhorn-iscsi-selinux-workaround-4w9kt to coparking-5
+  Normal   Pulled     10m                   kubelet            Container image "alpine:3.17" already present on machine
+  Normal   Created    10m                   kubelet            Created container: iscsi-selinux-workaround
+  Normal   Started    10m                   kubelet            Started container iscsi-selinux-workaround
+  Normal   Pulling    7m19s (x5 over 10m)   kubelet            Pulling image "registry.k8s.io/pause:3.1"
+  Warning  Failed     7m19s (x5 over 10m)   kubelet            Failed to pull image "registry.k8s.io/pause:3.1": failed to pull and unpack image "registry.k8s.io/pause:3.1": failed to resolve reference "registry.k8s.io/pause:3.1": failed to do request: Head "https://europe-north1-docker.pkg.dev/v2/k8s-artifacts-prod/images/pause/manifests/3.1": EOF
+  Warning  Failed     7m19s (x5 over 10m)   kubelet            Error: ErrImagePull
+  Normal   BackOff    21s (x41 over 9m49s)  kubelet            Back-off pulling image "registry.k8s.io/pause:3.1"
+  Warning  Failed     9s (x42 over 9m49s)   kubelet            Error: ImagePullBackOff
+  ---
+  k describe pod -n longhorn-system longhorn-driver-deployer-79888b698b-m2lrt
+Name:                 longhorn-driver-deployer-79888b698b-m2lrt
+Namespace:            longhorn-system
+Priority:             1000000000
+Priority Class Name:  longhorn-critical
+Service Account:      longhorn-service-account
+Node:                 coparking-10/172.16.175.29
+Start Time:           Wed, 27 May 2026 20:27:44 +0300
+Labels:               app=longhorn-driver-deployer
+                      app.kubernetes.io/instance=longhorn
+                      app.kubernetes.io/managed-by=Helm
+                      app.kubernetes.io/name=longhorn
+                      app.kubernetes.io/version=v1.10.2
+                      helm.sh/chart=longhorn-1.10.2
+                      pod-template-hash=79888b698b
+Annotations:          cni.projectcalico.org/containerID: 848515dc242743ec7b4eeaf519ba0d891e9e4e4a8c697f0464fa0409f935b772
+                      cni.projectcalico.org/podIP: 10.244.209.134/32
+                      cni.projectcalico.org/podIPs: 10.244.209.134/32
+Status:               Pending
+IP:                   10.244.209.134
+IPs:
+  IP:           10.244.209.134
+Controlled By:  ReplicaSet/longhorn-driver-deployer-79888b698b
+Init Containers:
+  wait-longhorn-manager:
+    Container ID:  containerd://01953703581870be9c5e834bdf7f1480bdb1d257aed35191a4199d08374d9e43
+    Image:         docker.io/longhornio/longhorn-manager:v1.10.2
+    Image ID:      sha256:a0848fb9df567ab4f0f3f08686821296e9306bdbd9221188ad6ab121236f35e6
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      sh
+      -c
+      while [ $(curl -m 1 -s -o /dev/null -w "%{http_code}" http://longhorn-backend:9500/v1) != "200" ]; do echo waiting; sleep 2; done
+    State:          Running
+      Started:      Wed, 27 May 2026 20:27:45 +0300
+    Ready:          False
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-zl7s8 (ro)
+Containers:
+  longhorn-driver-deployer:
+    Container ID:
+    Image:         docker.io/longhornio/longhorn-manager:v1.10.2
+    Image ID:
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      longhorn-manager
+      -d
+      deploy-driver
+      --manager-image
+      docker.io/longhornio/longhorn-manager:v1.10.2
+      --manager-url
+      http://longhorn-backend:9500/v1
+    State:          Waiting
+      Reason:       PodInitializing
+    Ready:          False
+    Restart Count:  0
+    Environment:
+      POD_NAMESPACE:                    longhorn-system (v1:metadata.namespace)
+      NODE_NAME:                         (v1:spec.nodeName)
+      SERVICE_ACCOUNT:                   (v1:spec.serviceAccountName)
+      KUBELET_ROOT_DIR:                 /var/lib/kubelet
+      CSI_ATTACHER_IMAGE:               docker.io/longhornio/csi-attacher:v4.10.0-20251226
+      CSI_PROVISIONER_IMAGE:            docker.io/longhornio/csi-provisioner:v5.3.0-20251226
+      CSI_NODE_DRIVER_REGISTRAR_IMAGE:  docker.io/longhornio/csi-node-driver-registrar:v2.15.0-20251226
+      CSI_RESIZER_IMAGE:                docker.io/longhornio/csi-resizer:v1.14.0-20260119
+      CSI_SNAPSHOTTER_IMAGE:            docker.io/longhornio/csi-snapshotter:v8.4.0-20251226
+      CSI_LIVENESS_PROBE_IMAGE:         docker.io/longhornio/livenessprobe:v2.17.0-20251226
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-zl7s8 (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True
+  Initialized                 False
+  Ready                       False
+  ContainersReady             False
+  PodScheduled                True
+Volumes:
+  kube-api-access-zl7s8:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type    Reason     Age   From               Message
+  ----    ------     ----  ----               -------
+  Normal  Scheduled  11m   default-scheduler  Successfully assigned longhorn-system/longhorn-driver-deployer-79888b698b-m2lrt to coparking-10
+  Normal  Pulled     11m   kubelet            Container image "docker.io/longhornio/longhorn-manager:v1.10.2" already present on machine
+  Normal  Created    11m   kubelet            Created container: wait-longhorn-manager
+  Normal  Started    11m   kubelet            Started container wait-longhorn-manager
