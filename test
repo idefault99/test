@@ -1,31 +1,13 @@
-Я изменил в ds longhorn-iscsi-selinux-workaround-46z2q образ на registry.k8s.io/pause:3.10
+# Имена контейнеров и статус
+kubectl get pod -n longhorn-system longhorn-manager-229mh \
+  -o jsonpath='{range .status.containerStatuses[*]}{.name}: ready={.ready} started={.started} {.state}{"\n"}{end}'
+
+# Логи второго контейнера (он не ready)
+kubectl logs -n longhorn-system longhorn-manager-229mh --all-containers=true 2>&1 | tail -60
+
+# Проверить есть ли endpoints у longhorn-backend
+kubectl get endpoints -n longhorn-system longhorn-backend
 ---
-k get all -n longhorn-system
-NAME                                            READY   STATUS             RESTARTS        AGE
-pod/longhorn-driver-deployer-79888b698b-m2lrt   0/1     Init:0/1           0               31m
-pod/longhorn-iscsi-selinux-workaround-46z2q     1/1     Running            0               2m44s
-pod/longhorn-iscsi-selinux-workaround-8h4rz     1/1     Running            0               2m44s
-pod/longhorn-iscsi-selinux-workaround-czwdg     1/1     Running            0               2m44s
-pod/longhorn-iscsi-selinux-workaround-dx9m4     1/1     Running            0               2m44s
-pod/longhorn-iscsi-selinux-workaround-nbkmc     1/1     Running            0               2m44s
-pod/longhorn-iscsi-selinux-workaround-vhzm7     1/1     Running            0               2m31s
-pod/longhorn-manager-229mh                      1/2     Running            3 (12m ago)     31m
-pod/longhorn-manager-hmtgv                      2/2     Running            1 (68s ago)     31m
-pod/longhorn-manager-mbgbv                      1/2     Running            0               31m
-pod/longhorn-manager-ssl7f                      1/2     Running            3 (3m27s ago)   31m
-pod/longhorn-manager-tlrlv                      1/2     Running            3 (25m ago)     31m
-pod/longhorn-manager-w9mzg                      1/2     Running            4 (10m ago)     31m
-pod/longhorn-ui-75779c679-f65cz                 0/1     CrashLoopBackOff   10 (2m4s ago)   31m
-pod/longhorn-ui-75779c679-hwjtg                 0/1     CrashLoopBackOff   10 (111s ago)   31m
+kubectl delete pods -n longhorn-system -l app=longhorn-ui
 ---
-k logs -n longhorn-system longhorn-ui-75779c679-f65cz
-No IPv6 address detected, running in IPv4-only mode...
-nginx: [emerg] host not found in upstream "longhorn-backend" in /var/config/nginx/nginx.conf:34
-[root@coparking-5 coparking]# k logs -n longhorn-system longhorn-ui-75779c679-hwjtg
-No IPv6 address detected, running in IPv4-only mode...
-nginx: [emerg] host not found in upstream "longhorn-backend" in /var/config/nginx/nginx.conf:34
----
-k logs -n longhorn-system longhorn-iscsi-selinux-workaround-46z2q
-Defaulted container "sleep" out of: sleep, iscsi-selinux-workaround (init)
-Warning: pause should be the first process
----
+kubectl get svc,endpoints -n longhorn-system | grep -E 'longhorn-(backend|frontend|manager)'
