@@ -1,19 +1,31 @@
-for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
-  echo "=== $node ==="
-  ssh ikbelykh@$node sudo bash << 'EOF'
-    mkdir -p /etc/containerd/certs.d/registry.test.model.svo.aero
-    cat > /etc/containerd/certs.d/registry.test.model.svo.aero/hosts.toml << 'TOML'
-server = "https://registry.test.model.svo.aero"
+# Проверить секрет
+kubectl get secret registry-credentials -n default
 
-[host."https://registry.test.model.svo.aero"]
-  capabilities = ["pull", "resolve", "push"]
-  skip_verify = true
-TOML
-    grep -q 'config_path' /etc/containerd/config.toml || \
-      sed -i '/^\[plugins\."io\.containerd\.grpc\.v1\.cri"\]$/a\  config_path = "/etc/containerd/certs.d"' \
-        /etc/containerd/config.toml
-    systemctl restart containerd
-    sleep 2
-    systemctl is-active containerd && echo "OK: $(grep config_path /etc/containerd/config.toml)"
+# Если нет — создать вручную (замени USER и PASS)
+kubectl create secret docker-registry registry-credentials \
+  --docker-server=registry.test.model.svo.aero \
+  --docker-username=USER \
+  --docker-password=PASS \
+  -n default
+
+# Удалить старый под
+kubectl delete pod test-dns
+
+# Создать через yaml (надёжнее чем --overrides)
+kubectl apply -f - << 'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-dns
+  namespace: default
+spec:
+  imagePullSecrets:
+    - name: registry-credentials
+  containers:
+    - name: test-dns
+      image: registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0
+      command: ["sleep", "300"]
+  restartPolicy: Never
 EOF
-done
+
+kubectl get pod test-dns -w
