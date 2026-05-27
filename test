@@ -1,108 +1,35 @@
-cat > setup-registry.sh << 'ENDOFFILE'
-#!/usr/bin/env bash
-# Настройка доступа к приватному registry на всех нодах K8s.
-# Запускать с бастиона (нужен ssh-доступ к нодам).
-#
-# Использование:
-#   ./setup-registry.sh
-#   ./setup-registry.sh <user> <password>   — переопределить credentials
+# Реальный IP kube-dns сервиса
+kubectl get svc -n kube-system kube-dns
 
-set -euo pipefail
+# Что в resolv.conf пода
+kubectl exec test-dns -- cat /etc/resolv.conf
 
-# ═══════════════════ НАСТРОЙКИ — ИЗМЕНИ ПОД СЕБЯ ═══════════════════
-REGISTRY="registry.test.model.svo.aero"
-REG_USER="${1:-YOUR_REGISTRY_USER}"
-REG_PASS="${2:-YOUR_REGISTRY_PASSWORD}"
-SSH_USER="ikbelykh"
-NODES=(
-  coparking-5
-  coparking-6
-  coparking-7
-  coparking-8
-  coparking-9
-  coparking-10
-)
-# ═══════════════════════════════════════════════════════════════════
-
-echo "Registry : $REGISTRY"
-echo "User     : $REG_USER"
-echo "Nodes    : ${NODES[*]}"
-echo ""
-
-echo "==> Получаю CA-сертификат с $REGISTRY ..."
-CERT_FILE="/tmp/registry-ca-$REGISTRY.crt"
-
-openssl s_client -connect "${REGISTRY}:443" -showcerts < /dev/null 2>/dev/null \
-  | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/{print}' > "$CERT_FILE"
-
-if ! openssl x509 -in "$CERT_FILE" -noout -subject 2>/dev/null; then
-  echo "ОШИБКА: не удалось получить сертификат"
-  exit 1
-fi
-echo "  $(openssl x509 -in "$CERT_FILE" -noout -subject -enddate 2>/dev/null)"
-echo ""
-
-AUTH_B64=$(printf '%s:%s' "$REG_USER" "$REG_PASS" | base64 -w0)
-
-for node in "${NODES[@]}"; do
+# Что кубелет думает про clusterDNS на ноде
+ssh ikbelykh@coparking-8 "grep -A3 clusterDNS /var/lib/kubelet/config.yaml"
+---
+for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
   echo "=== $node ==="
+  ssh ikbelykh@$node sudo bash << 'EOF'
+    # Проверить текущее значение
+    grep -A2 clusterDNS /var/lib/kubelet/config.yaml
 
-  scp -q "$CERT_FILE" "${SSH_USER}@${node}:/tmp/registry-ca.crt"
+    # Исправить
+    sed -i 's/- 10\.96\.0\.10/- 172.30.0.10/' /var/lib/kubelet/config.yaml
 
-  ssh "${SSH_USER}@${node}" sudo bash -s << EOF
-set -e
+    # Убедиться что поменялось
+    grep -A2 clusterDNS /var/lib/kubelet/config.yaml
 
-cp /tmp/registry-ca.crt /etc/pki/ca-trust/source/anchors/${REGISTRY}.crt
-update-ca-trust
-echo "  CA-trust: OK"
-
-mkdir -p /etc/containerd/certs.d/${REGISTRY}
-cat > /etc/containerd/certs.d/${REGISTRY}/hosts.toml << 'TOML'
-server = "https://${REGISTRY}"
-
-[host."https://${REGISTRY}"]
-  capabilities = ["pull", "resolve", "push"]
-  [host."https://${REGISTRY}".header]
-    authorization = ["Basic ${AUTH_B64}"]
-TOML
-echo "  hosts.toml: OK"
-
-if ! grep -q 'config_path' /etc/containerd/config.toml; then
-  sed -i '/^\[plugins\."io\.containerd\.grpc\.v1\.cri"\]$/a\  config_path = "/etc/containerd/certs.d"' \
-    /etc/containerd/config.toml
-  echo "  config_path: добавлен"
-else
-  echo "  config_path: уже есть"
-fi
-
-systemctl restart containerd
-sleep 3
-systemctl is-active containerd && echo "  containerd: OK" || { echo "  containerd: FAILED"; exit 1; }
-
-crictl pull ${REGISTRY}/pause:3.10 2>&1 | tail -1 && echo "  pull test: OK" || echo "  pull test: см. выше"
+    systemctl restart kubelet
+    sleep 3
+    systemctl is-active kubelet && echo "kubelet: OK"
 EOF
-
-  echo ""
 done
+---
+kubectl delete pod test-dns --ignore-not-found
+kubectl run test-dns \
+  --image=registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0 \
+  --restart=Never \
+  --overrides='{"spec":{"imagePullSecrets":[{"name":"registry-credentials"}]}}' \
+  -- sleep 300
 
-echo "==> Создаю imagePullSecrets в Kubernetes ..."
-NAMESPACES=(default kube-system longhorn-system calico-system tigera-operator gpu-operator monitoring)
-
-if ! kubectl version --client -o json > /dev/null 2>&1; then
-  echo "  kubectl не найден — запусти на control-plane с KUBECONFIG=/root/.kube/config"
-else
-  for ns in "${NAMESPACES[@]}"; do
-    kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
-    kubectl create secret docker-registry registry-credentials \
-      --namespace="$ns" \
-      --docker-server="$REGISTRY" \
-      --docker-username="$REG_USER" \
-      --docker-password="$REG_PASS" \
-      --dry-run=client -o yaml | kubectl apply -f - && echo "  $ns: OK"
-  done
-fi
-
-echo ""
-echo "Готово."
-ENDOFFILE
-chmod +x setup-registry.sh
+kubectl exec test-dns -- nslookup kubernetes.default.svc.cluster.local
