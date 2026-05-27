@@ -1,13 +1,10 @@
-crictl pull registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0
-E0527 21:44:22.127957 1827966 log.go:32] "PullImage from image service failed" err="rpc error: code = Unknown desc = failed to pull and unpack image \"registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0\": failed to resolve reference \"registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0\": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Adpm%2Fiac%2Finfra%2Falpine-netutils%3Apull&service=container_registry: 403 Forbidden" image="registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0"
-FATA[0000] pulling image: failed to pull and unpack image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to resolve reference "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://gitlab-internal.code-discovery.ru/jwt/auth?scope=repository%3Adpm%2Fiac%2Finfra%2Falpine-netutils%3Apull&service=container_registry: 403 Forbidden
+kubectl delete pod test-dns
+
+kubectl run test-dns \
+  --image=registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0 \
+  --restart=Never \
+  --overrides='{"spec":{"imagePullSecrets":[{"name":"registry-credentials"}]}}' \
+  -- sleep 300
 ---
-Events:
-  Type     Reason     Age                From               Message
-  ----     ------     ----               ----               -------
-  Normal   Scheduled  43s                default-scheduler  Successfully assigned default/test-dns to coparking-9
-  Normal   BackOff    19s (x3 over 42s)  kubelet            Back-off pulling image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0"
-  Warning  Failed     19s (x3 over 42s)  kubelet            Error: ImagePullBackOff
-  Normal   Pulling    4s (x3 over 43s)   kubelet            Pulling image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0"
-  Warning  Failed     4s (x3 over 43s)   kubelet            Failed to pull image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to pull and unpack image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to resolve reference "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to do request: Head "https://registry.test.model.svo.aero/v2/dpm/iac/infra/alpine-netutils/manifests/1.0.0": tls: failed to verify certificate: x509: certificate signed by unknown authority
-  Warning  Failed     4s (x3 over 43s)   kubelet            Error: ErrImagePull
+crictl pull --creds "$(grep registry_user group_vars/all.yml | awk '{print $2}' | tr -d '"'):$(grep registry_password group_vars/all.yml | awk '{print $2}' | tr -d '"')" \
+  registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0
