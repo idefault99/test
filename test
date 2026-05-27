@@ -1,18 +1,24 @@
-# Проверить секрет
-kubectl get secret registry-credentials -n default
+# 1. Забрать сертификат
+openssl s_client -connect registry.test.model.svo.aero:443 -showcerts < /dev/null 2>/dev/null \
+  | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/{print}' > /tmp/registry-ca.crt
+openssl x509 -in /tmp/registry-ca.crt -noout -subject
 
-# Если нет — создать вручную (замени USER и PASS)
-kubectl create secret docker-registry registry-credentials \
-  --docker-server=registry.test.model.svo.aero \
-  --docker-username=USER \
-  --docker-password=PASS \
-  -n default
+# 2. Раздать на все ноды
+for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "=== $node ==="
+  scp /tmp/registry-ca.crt ikbelykh@$node:/tmp/
+  ssh ikbelykh@$node sudo bash << 'EOF'
+    cp /tmp/registry-ca.crt /etc/pki/ca-trust/source/anchors/registry.test.model.svo.aero.crt
+    update-ca-trust
+    systemctl restart containerd
+    sleep 3
+    systemctl is-active containerd && echo OK
+EOF
+done
 
-# Удалить старый под
-kubectl delete pod test-dns
-
-# Создать через yaml (надёжнее чем --overrides)
-kubectl apply -f - << 'EOF'
+# 3. Пересоздать под
+kubectl delete pod test-dns --ignore-not-found
+kubectl apply -f - << 'YAML'
 apiVersion: v1
 kind: Pod
 metadata:
@@ -26,6 +32,5 @@ spec:
       image: registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0
       command: ["sleep", "300"]
   restartPolicy: Never
-EOF
-
+YAML
 kubectl get pod test-dns -w
