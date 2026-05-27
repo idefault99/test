@@ -1,13 +1,80 @@
-# Имена контейнеров и статус
 kubectl get pod -n longhorn-system longhorn-manager-229mh \
   -o jsonpath='{range .status.containerStatuses[*]}{.name}: ready={.ready} started={.started} {.state}{"\n"}{end}'
-
-# Логи второго контейнера (он не ready)
-kubectl logs -n longhorn-system longhorn-manager-229mh --all-containers=true 2>&1 | tail -60
-
-# Проверить есть ли endpoints у longhorn-backend
-kubectl get endpoints -n longhorn-system longhorn-backend
----
-kubectl delete pods -n longhorn-system -l app=longhorn-ui
----
-kubectl get svc,endpoints -n longhorn-system | grep -E 'longhorn-(backend|frontend|manager)'
+longhorn-manager: ready=false started=true {"running":{"startedAt":"2026-05-27T17:47:34Z"}}
+pre-pull-share-manager-image: ready=true started=true {"running":{"startedAt":"2026-05-27T17:27:45Z"}}
+[root@coparking-5 coparking]#
+[root@coparking-5 coparking]#
+[root@coparking-5 coparking]#
+[root@coparking-5 coparking]# k get pods -n longhorn-system
+NAME                                        READY   STATUS             RESTARTS         AGE
+longhorn-driver-deployer-79888b698b-m2lrt   0/1     Init:0/1           0                37m
+longhorn-iscsi-selinux-workaround-46z2q     1/1     Running            0                8m22s
+longhorn-iscsi-selinux-workaround-8h4rz     1/1     Running            0                8m22s
+longhorn-iscsi-selinux-workaround-czwdg     1/1     Running            0                8m22s
+longhorn-iscsi-selinux-workaround-dx9m4     1/1     Running            0                8m22s
+longhorn-iscsi-selinux-workaround-nbkmc     1/1     Running            0                8m22s
+longhorn-iscsi-selinux-workaround-vhzm7     1/1     Running            0                8m9s
+longhorn-manager-229mh                      1/2     Running            3 (17m ago)      37m
+longhorn-manager-hmtgv                      1/2     CrashLoopBackOff   3 (11s ago)      37m
+longhorn-manager-mbgbv                      1/2     Running            0                37m
+longhorn-manager-ssl7f                      1/2     Running            3 (9m5s ago)     37m
+longhorn-manager-tlrlv                      1/2     Running            3 (31m ago)      37m
+longhorn-manager-w9mzg                      1/2     Running            4 (15m ago)      37m
+longhorn-ui-75779c679-f65cz                 0/1     CrashLoopBackOff   11 (2m16s ago)   37m
+longhorn-ui-75779c679-hwjtg                 0/1     CrashLoopBackOff   11 (118s ago)    37m
+[root@coparking-5 coparking]#
+[root@coparking-5 coparking]#
+[root@coparking-5 coparking]# kubectl logs -n longhorn-system longhorn-manager-229mh --all-containers=true 2>&1 | tail -60
+I0527 17:47:35.182114       1 leaderelection.go:257] attempting to acquire leader lease longhorn-system/longhorn-manager-webhook-lock...
+time="2026-05-27T17:47:35.193322723Z" level=info msg="Webhook leader elected: coparking-5" func=app.startWebhooksByLeaderElection.func4 file="daemon.go:234"
+time="2026-05-27T17:49:51.747480226Z" level=info msg="Webhook leader elected: coparking-10" func=app.startWebhooksByLeaderElection.func4 file="daemon.go:234"
+time="2026-05-27T17:56:23.967077612Z" level=info msg="Webhook leader elected: coparking-9" func=app.startWebhooksByLeaderElection.func4 file="daemon.go:234"
+time="2026-05-27T18:05:19.328160965Z" level=info msg="Webhook leader elected: coparking-10" func=app.startWebhooksByLeaderElection.func4 file="daemon.go:234"
+share-manager image pulled
+[root@coparking-5 coparking]# kubectl get endpoints -n longhorn-system longhorn-backend
+NAME               ENDPOINTS             AGE
+longhorn-backend   10.244.209.132:9500   37m
+[root@coparking-5 coparking]# kubectl delete pods -n longhorn-system -l app=longhorn-ui
+pod "longhorn-ui-75779c679-f65cz" deleted
+pod "longhorn-ui-75779c679-hwjtg" deleted
+[root@coparking-5 coparking]# kubectl get svc,endpoints -n longhorn-system | grep -E 'longhorn-(backend|frontend|manager)'
+service/longhorn-backend             ClusterIP   172.30.58.211    <none>        9500/TCP   38m
+service/longhorn-frontend            ClusterIP   172.30.192.91    <none>        80/TCP     38m
+endpoints/longhorn-backend             10.244.209.132:9500                    38m
+endpoints/longhorn-frontend            10.244.198.205:8000,10.244.72.7:8000   38m
+[root@coparking-5 coparking]# k get pods -n longhorn-system
+NAME                                        READY   STATUS     RESTARTS        AGE
+longhorn-driver-deployer-79888b698b-m2lrt   0/1     Init:0/1   0               38m
+longhorn-iscsi-selinux-workaround-46z2q     1/1     Running    0               9m13s
+longhorn-iscsi-selinux-workaround-8h4rz     1/1     Running    0               9m13s
+longhorn-iscsi-selinux-workaround-czwdg     1/1     Running    0               9m13s
+longhorn-iscsi-selinux-workaround-dx9m4     1/1     Running    0               9m13s
+longhorn-iscsi-selinux-workaround-nbkmc     1/1     Running    0               9m13s
+longhorn-iscsi-selinux-workaround-vhzm7     1/1     Running    0               9m
+longhorn-manager-229mh                      1/2     Running    3 (18m ago)     38m
+longhorn-manager-hmtgv                      1/2     Running    4 (62s ago)     38m
+longhorn-manager-mbgbv                      1/2     Running    0               38m
+longhorn-manager-ssl7f                      2/2     Running    3 (9m56s ago)   38m
+longhorn-manager-tlrlv                      1/2     Running    3 (31m ago)     38m
+longhorn-manager-w9mzg                      1/2     Running    4 (16m ago)     38m
+longhorn-ui-75779c679-9tdfv                 1/1     Running    0               11s
+longhorn-ui-75779c679-fvnp4                 1/1     Running    0               11s
+[root@coparking-5 coparking]# kubectl logs -n longhorn-system longhorn-ui-75779c679-9tdfv
+No IPv6 address detected, running in IPv4-only mode...
+[root@coparking-5 coparking]# k get pods -n longhorn-system
+NAME                                        READY   STATUS     RESTARTS      AGE
+longhorn-driver-deployer-79888b698b-m2lrt   0/1     Init:0/1   0             38m
+longhorn-iscsi-selinux-workaround-46z2q     1/1     Running    0             9m35s
+longhorn-iscsi-selinux-workaround-8h4rz     1/1     Running    0             9m35s
+longhorn-iscsi-selinux-workaround-czwdg     1/1     Running    0             9m35s
+longhorn-iscsi-selinux-workaround-dx9m4     1/1     Running    0             9m35s
+longhorn-iscsi-selinux-workaround-nbkmc     1/1     Running    0             9m35s
+longhorn-iscsi-selinux-workaround-vhzm7     1/1     Running    0             9m22s
+longhorn-manager-229mh                      1/2     Running    3 (19m ago)   38m
+longhorn-manager-hmtgv                      1/2     Running    4 (84s ago)   38m
+longhorn-manager-mbgbv                      1/2     Running    0             38m
+longhorn-manager-ssl7f                      2/2     Running    3 (10m ago)   38m
+longhorn-manager-tlrlv                      1/2     Running    3 (32m ago)   38m
+longhorn-manager-w9mzg                      1/2     Running    4 (16m ago)   38m
+longhorn-ui-75779c679-9tdfv                 1/1     Running    1 (12s ago)   33s
+longhorn-ui-75779c679-fvnp4                 1/1     Running    1 (12s ago)   33s
