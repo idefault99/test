@@ -1,4 +1,12 @@
-sed -i '/Скопировать SELinux workaround манифест/{
-  i\    - name: Создать namespace longhorn-system\n      command: kubectl create namespace longhorn-system --dry-run=client -o yaml | kubectl apply -f -\n
-  /Применить SELinux workaround/{n;n;n;n;n;n;n;d}
-}' playbooks/05-longhorn.yml
+TASK [Создать namespace longhorn-system] *************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+[WARNING]: Host 'coparking-5' is using the discovered Python interpreter at '/usr/bin/python3.11', but future installation of another Python interpreter could cause a different interpreter to be discovered. See https://docs.ansible.com/ansible-core/2.20/reference_appendices/interpreter_discovery.html for more information.
+[ERROR]: Task failed: Module failed: non-zero return code
+Origin: /home/ikbelykh/k8s-ansible/playbooks/05-longhorn.yml:44:7
+
+42       when: not r_selinux_fix.stat.exists
+43
+44     - name: Создать namespace longhorn-system
+         ^ column 7
+
+fatal: [coparking-5]: FAILED! => {"ansible_facts": {"discovered_interpreter_python": "/usr/bin/python3.11"}, "changed": true, "cmd": ["kubectl", "create", "namespace", "longhorn-system", "--dry-run=client", "-o", "yaml", "|", "kubectl", "apply", "-f", "-"], "delta": "0:00:00.081782", "end": "2026-05-27 20:23:30.509761", "msg": "non-zero return code", "rc": 1, "start": "2026-05-27 20:23:30.427979", "stderr": "error: unknown shorthand flag: 'f' in -f\nSee 'kubectl create namespace --help' for usage.", "stderr_lines": ["error: unknown shorthand flag: 'f' in -f", "See 'kubectl create namespace --help' for usage."], "stdout": "", "stdout_lines": []}
+
