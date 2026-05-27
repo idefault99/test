@@ -1,21 +1,14 @@
-for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
-  echo "=== $node ==="
-  ssh ikbelykh@$node sudo bash << 'EOF'
-    sed -i 's/--cluster-dns=10\.96\.0\.10/--cluster-dns=172.30.0.10/' \
-      /etc/systemd/system/kubelet.service.d/kubeadm.conf
-    systemctl daemon-reload
-    systemctl restart kubelet
-    sleep 3
-    systemctl is-active kubelet && \
-      grep cluster-dns /etc/systemd/system/kubelet.service.d/kubeadm.conf
-EOF
-done
----
-kubectl delete pod test-dns --ignore-not-found
-kubectl run test-dns \
-  --image=registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0 \
-  --restart=Never \
-  --overrides='{"spec":{"imagePullSecrets":[{"name":"registry-credentials"}]}}' \
-  -- sleep 300
-
 kubectl exec test-dns -- sh -c "cat /etc/resolv.conf && nslookup kubernetes.default.svc.cluster.local"
+search default.svc.cluster.local svc.cluster.local cluster.local
+nameserver 172.30.0.10
+options ndots:5
+;; Got recursion not available from 172.30.0.10
+;; Got recursion not available from 172.30.0.10
+;; Got recursion not available from 172.30.0.10
+;; Got recursion not available from 172.30.0.10
+Server:         172.30.0.10
+Address:        172.30.0.10#53
+
+Name:   kubernetes.default.svc.cluster.local
+Address: 172.30.0.1
+;; Got recursion not available from 172.30.0.10
