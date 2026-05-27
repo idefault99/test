@@ -1,15 +1,21 @@
-=== systemd unit ===
-Environment="KUBELET_DNS_ARGS=--cluster-dns=10.96.0.10 --cluster-domain=cluster.local"
-ExecStart=/usr/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_SYSTEM_PODS_ARGS $KUBELET_DNS_ARGS $KUBELET_AUTHZ_ARGS $KUBELET_EXTRA_ARGS $KUBELET_KUBEADM_ARGS
-=== environment file ===
-не найден
-=== drop-ins ===
-kubeadm.conf
-/etc/systemd/system/kubelet.service.d/kubeadm.conf:Environment="KUBELET_DNS_ARGS=--cluster-dns=10.96.0.10 --cluster-domain=cluster.local"
-=== фактические аргументы запущенного кубелета ===
---cluster-dns=10.96.0.10
-=== config.yaml clusterDNS ===
-clusterDNS:
-- 172.30.0.10
-clusterDomain: cluster.local
-containerRuntimeEndpoint: ""
+for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "=== $node ==="
+  ssh ikbelykh@$node sudo bash << 'EOF'
+    sed -i 's/--cluster-dns=10\.96\.0\.10/--cluster-dns=172.30.0.10/' \
+      /etc/systemd/system/kubelet.service.d/kubeadm.conf
+    systemctl daemon-reload
+    systemctl restart kubelet
+    sleep 3
+    systemctl is-active kubelet && \
+      grep cluster-dns /etc/systemd/system/kubelet.service.d/kubeadm.conf
+EOF
+done
+---
+kubectl delete pod test-dns --ignore-not-found
+kubectl run test-dns \
+  --image=registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0 \
+  --restart=Never \
+  --overrides='{"spec":{"imagePullSecrets":[{"name":"registry-credentials"}]}}' \
+  -- sleep 300
+
+kubectl exec test-dns -- sh -c "cat /etc/resolv.conf && nslookup kubernetes.default.svc.cluster.local"
