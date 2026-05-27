@@ -1,2 +1,1 @@
-kubectl get pods -n longhorn-system
-kubectl exec test-dns -- nslookup longhorn-backend.longhorn-system.svc.cluster.local
+123
