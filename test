@@ -1,8 +1,2 @@
-ansible-playbook -i inventory.ini playbooks/05-longhorn.yml
-[ERROR]: Error processing keyword 'name': 'longhorn_version' is undefined
-Origin: /home/ikbelykh/k8s-ansible/playbooks/05-longhorn.yml:8:9
-
-6 # Запуск: ansible-playbook playbooks/05-longhorn.yml -K
-7
-8 - name: "Longhorn v{{ longhorn_version }} установка"
-          ^ column 9
+grep longhorn_version group_vars/all.yml || \
+  sed -i '/^calico_version/a longhorn_version:        "1.10.2"' group_vars/all.yml
