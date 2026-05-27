@@ -1,35 +1,21 @@
-# Реальный IP kube-dns сервиса
-kubectl get svc -n kube-system kube-dns
+# Узнать ноду
+kubectl get pod test-dns -o wide
 
-# Что в resolv.conf пода
-kubectl exec test-dns -- cat /etc/resolv.conf
+# На этой ноде проверить источник --cluster-dns
+ssh ikbelykh@coparking-X sudo bash << 'EOF'
+  echo "=== systemd unit ==="
+  systemctl cat kubelet | grep -i dns
 
-# Что кубелет думает про clusterDNS на ноде
-ssh ikbelykh@coparking-8 "grep -A3 clusterDNS /var/lib/kubelet/config.yaml"
----
-for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
-  echo "=== $node ==="
-  ssh ikbelykh@$node sudo bash << 'EOF'
-    # Проверить текущее значение
-    grep -A2 clusterDNS /var/lib/kubelet/config.yaml
+  echo "=== environment file ==="
+  cat /etc/sysconfig/kubelet 2>/dev/null || cat /etc/default/kubelet 2>/dev/null || echo "не найден"
 
-    # Исправить
-    sed -i 's/- 10\.96\.0\.10/- 172.30.0.10/' /var/lib/kubelet/config.yaml
+  echo "=== drop-ins ==="
+  ls /etc/systemd/system/kubelet.service.d/ 2>/dev/null
+  grep -r dns /etc/systemd/system/kubelet.service.d/ 2>/dev/null || true
 
-    # Убедиться что поменялось
-    grep -A2 clusterDNS /var/lib/kubelet/config.yaml
+  echo "=== фактические аргументы запущенного кубелета ==="
+  cat /proc/$(pgrep kubelet)/cmdline | tr '\0' '\n' | grep dns || echo "нет --cluster-dns в cmdline"
 
-    systemctl restart kubelet
-    sleep 3
-    systemctl is-active kubelet && echo "kubelet: OK"
+  echo "=== config.yaml clusterDNS ==="
+  grep -A3 clusterDNS /var/lib/kubelet/config.yaml
 EOF
-done
----
-kubectl delete pod test-dns --ignore-not-found
-kubectl run test-dns \
-  --image=registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0 \
-  --restart=Never \
-  --overrides='{"spec":{"imagePullSecrets":[{"name":"registry-credentials"}]}}' \
-  -- sleep 300
-
-kubectl exec test-dns -- nslookup kubernetes.default.svc.cluster.local
