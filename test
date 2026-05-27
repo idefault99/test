@@ -1,36 +1,108 @@
-# 1. Забрать сертификат
-openssl s_client -connect registry.test.model.svo.aero:443 -showcerts < /dev/null 2>/dev/null \
-  | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/{print}' > /tmp/registry-ca.crt
-openssl x509 -in /tmp/registry-ca.crt -noout -subject
+cat > setup-registry.sh << 'ENDOFFILE'
+#!/usr/bin/env bash
+# Настройка доступа к приватному registry на всех нодах K8s.
+# Запускать с бастиона (нужен ssh-доступ к нодам).
+#
+# Использование:
+#   ./setup-registry.sh
+#   ./setup-registry.sh <user> <password>   — переопределить credentials
 
-# 2. Раздать на все ноды
-for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+set -euo pipefail
+
+# ═══════════════════ НАСТРОЙКИ — ИЗМЕНИ ПОД СЕБЯ ═══════════════════
+REGISTRY="registry.test.model.svo.aero"
+REG_USER="${1:-YOUR_REGISTRY_USER}"
+REG_PASS="${2:-YOUR_REGISTRY_PASSWORD}"
+SSH_USER="ikbelykh"
+NODES=(
+  coparking-5
+  coparking-6
+  coparking-7
+  coparking-8
+  coparking-9
+  coparking-10
+)
+# ═══════════════════════════════════════════════════════════════════
+
+echo "Registry : $REGISTRY"
+echo "User     : $REG_USER"
+echo "Nodes    : ${NODES[*]}"
+echo ""
+
+echo "==> Получаю CA-сертификат с $REGISTRY ..."
+CERT_FILE="/tmp/registry-ca-$REGISTRY.crt"
+
+openssl s_client -connect "${REGISTRY}:443" -showcerts < /dev/null 2>/dev/null \
+  | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/{print}' > "$CERT_FILE"
+
+if ! openssl x509 -in "$CERT_FILE" -noout -subject 2>/dev/null; then
+  echo "ОШИБКА: не удалось получить сертификат"
+  exit 1
+fi
+echo "  $(openssl x509 -in "$CERT_FILE" -noout -subject -enddate 2>/dev/null)"
+echo ""
+
+AUTH_B64=$(printf '%s:%s' "$REG_USER" "$REG_PASS" | base64 -w0)
+
+for node in "${NODES[@]}"; do
   echo "=== $node ==="
-  scp /tmp/registry-ca.crt ikbelykh@$node:/tmp/
-  ssh ikbelykh@$node sudo bash << 'EOF'
-    cp /tmp/registry-ca.crt /etc/pki/ca-trust/source/anchors/registry.test.model.svo.aero.crt
-    update-ca-trust
-    systemctl restart containerd
-    sleep 3
-    systemctl is-active containerd && echo OK
+
+  scp -q "$CERT_FILE" "${SSH_USER}@${node}:/tmp/registry-ca.crt"
+
+  ssh "${SSH_USER}@${node}" sudo bash -s << EOF
+set -e
+
+cp /tmp/registry-ca.crt /etc/pki/ca-trust/source/anchors/${REGISTRY}.crt
+update-ca-trust
+echo "  CA-trust: OK"
+
+mkdir -p /etc/containerd/certs.d/${REGISTRY}
+cat > /etc/containerd/certs.d/${REGISTRY}/hosts.toml << 'TOML'
+server = "https://${REGISTRY}"
+
+[host."https://${REGISTRY}"]
+  capabilities = ["pull", "resolve", "push"]
+  [host."https://${REGISTRY}".header]
+    authorization = ["Basic ${AUTH_B64}"]
+TOML
+echo "  hosts.toml: OK"
+
+if ! grep -q 'config_path' /etc/containerd/config.toml; then
+  sed -i '/^\[plugins\."io\.containerd\.grpc\.v1\.cri"\]$/a\  config_path = "/etc/containerd/certs.d"' \
+    /etc/containerd/config.toml
+  echo "  config_path: добавлен"
+else
+  echo "  config_path: уже есть"
+fi
+
+systemctl restart containerd
+sleep 3
+systemctl is-active containerd && echo "  containerd: OK" || { echo "  containerd: FAILED"; exit 1; }
+
+crictl pull ${REGISTRY}/pause:3.10 2>&1 | tail -1 && echo "  pull test: OK" || echo "  pull test: см. выше"
 EOF
+
+  echo ""
 done
 
-# 3. Пересоздать под
-kubectl delete pod test-dns --ignore-not-found
-kubectl apply -f - << 'YAML'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: test-dns
-  namespace: default
-spec:
-  imagePullSecrets:
-    - name: registry-credentials
-  containers:
-    - name: test-dns
-      image: registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0
-      command: ["sleep", "300"]
-  restartPolicy: Never
-YAML
-kubectl get pod test-dns -w
+echo "==> Создаю imagePullSecrets в Kubernetes ..."
+NAMESPACES=(default kube-system longhorn-system calico-system tigera-operator gpu-operator monitoring)
+
+if ! kubectl version --client -o json > /dev/null 2>&1; then
+  echo "  kubectl не найден — запусти на control-plane с KUBECONFIG=/root/.kube/config"
+else
+  for ns in "${NAMESPACES[@]}"; do
+    kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+    kubectl create secret docker-registry registry-credentials \
+      --namespace="$ns" \
+      --docker-server="$REGISTRY" \
+      --docker-username="$REG_USER" \
+      --docker-password="$REG_PASS" \
+      --dry-run=client -o yaml | kubectl apply -f - && echo "  $ns: OK"
+  done
+fi
+
+echo ""
+echo "Готово."
+ENDOFFILE
+chmod +x setup-registry.sh
