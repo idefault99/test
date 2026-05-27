@@ -1,18 +1,19 @@
-sed -i 's/- name: "1\/2 · containerd — доступ к {{ local_registry }}"/- name: "1\/2 · containerd — настройка registry"/' playbooks/02-registry.yml
-sed -i 's/- name: "2\/2 · Kubernetes — imagePullSecret для {{ local_registry }}"/- name: "2\/2 · Kubernetes — imagePullSecret"/' playbooks/02-registry.yml
+TASK [Дождаться containerd после рестарта] ***********************************************************************************************************************************************************************************************************************************************************************************************************************************************
+[ERROR]: Task failed: Module failed: Timeout when waiting for file /run/containerd/containerd.sock
+Origin: /home/ikbelykh/k8s-ansible/playbooks/02-registry.yml:84:7
+
+82   tasks:
+83
+84     - name: Дождаться containerd после рестарта
+         ^ column 7
+
+fatal: [coparking-5]: FAILED! => {"changed": false, "elapsed": 30, "msg": "Timeout when waiting for file /run/containerd/containerd.sock"}
 ---
-# Запустить в фоне ожидание
-while true; do
-  pod=$(kubectl get pod -n longhorn-system -l app=longhorn-ui --field-selector=status.phase=Running -o name 2>/dev/null | head -1)
-  if [ -n "$pod" ]; then
-    kubectl exec -n longhorn-system $pod -- cat /var/config/nginx/nginx.conf 2>/dev/null && break
-  fi
-  sleep 1
-done
----
-# Посмотреть ConfigMap/Secret который генерирует конфиг
-kubectl get configmap -n longhorn-system -o name | xargs -I{} kubectl get -n longhorn-system {} -o yaml 2>/dev/null | grep -A30 'nginx.conf\|resolver\|longhorn-backend'
----
-# Проверить DNS прямо с control-plane ноды через kube-dns
-kubectl exec -n kube-system coredns-668d6bf9bc-2vfmd -- \
-  nslookup longhorn-backend.longhorn-system.svc.cluster.local 127.0.0.1
+systemctl status containerd
+× containerd.service - containerd container runtime
+     Loaded: loaded (/usr/lib/systemd/system/containerd.service; enabled; preset: disabled)
+    Drop-In: /usr/lib/systemd/system/service.d
+             └─10-timeout-abort.conf
+             /etc/systemd/system/containerd.service.d
+             └─proxy.conf
+     Active: failed (Result: exit-code) since Wed 2026-05-27 21:16:31 MSK; 49s ago
