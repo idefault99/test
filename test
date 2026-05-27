@@ -1,10 +1,4 @@
-TASK [Применить SELinux workaround для iscsid (RHEL-совместимые)] ************************************************************************************************************************************************************************************************************************************************************************************************************************
-[ERROR]: Task failed: Module failed: non-zero return code
-Origin: /home/ikbelykh/k8s-ansible/playbooks/05-longhorn.yml:49:7
-
-47         dest: /tmp/longhorn-iscsi-selinux-workaround.yaml
-48
-49     - name: Применить SELinux workaround для iscsid (RHEL-совместимые)
-         ^ column 7
-
-fatal: [coparking-5]: FAILED! => {"changed": true, "cmd": ["kubectl", "apply", "-f", "/tmp/longhorn-iscsi-selinux-workaround.yaml"], "delta": "0:00:00.202033", "end": "2026-05-27 20:18:55.334917", "msg": "non-zero return code", "rc": 1, "start": "2026-05-27 20:18:55.132884", "stderr": "Error from server (NotFound): error when creating \"/tmp/longhorn-iscsi-selinux-workaround.yaml\": namespaces \"longhorn-system\" not found", "stderr_lines": ["Error from server (NotFound): error when creating \"/tmp/longhorn-iscsi-selinux-workaround.yaml\": namespaces \"longhorn-system\" not found"], "stdout": "", "stdout_lines": []}
+sed -i '/Скопировать SELinux workaround манифест/{
+  i\    - name: Создать namespace longhorn-system\n      command: kubectl create namespace longhorn-system --dry-run=client -o yaml | kubectl apply -f -\n
+  /Применить SELinux workaround/{n;n;n;n;n;n;n;d}
+}' playbooks/05-longhorn.yml
