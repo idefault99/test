@@ -1,21 +1,15 @@
-# Узнать ноду
-kubectl get pod test-dns -o wide
-
-# На этой ноде проверить источник --cluster-dns
-ssh ikbelykh@coparking-X sudo bash << 'EOF'
-  echo "=== systemd unit ==="
-  systemctl cat kubelet | grep -i dns
-
-  echo "=== environment file ==="
-  cat /etc/sysconfig/kubelet 2>/dev/null || cat /etc/default/kubelet 2>/dev/null || echo "не найден"
-
-  echo "=== drop-ins ==="
-  ls /etc/systemd/system/kubelet.service.d/ 2>/dev/null
-  grep -r dns /etc/systemd/system/kubelet.service.d/ 2>/dev/null || true
-
-  echo "=== фактические аргументы запущенного кубелета ==="
-  cat /proc/$(pgrep kubelet)/cmdline | tr '\0' '\n' | grep dns || echo "нет --cluster-dns в cmdline"
-
-  echo "=== config.yaml clusterDNS ==="
-  grep -A3 clusterDNS /var/lib/kubelet/config.yaml
-EOF
+=== systemd unit ===
+Environment="KUBELET_DNS_ARGS=--cluster-dns=10.96.0.10 --cluster-domain=cluster.local"
+ExecStart=/usr/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_SYSTEM_PODS_ARGS $KUBELET_DNS_ARGS $KUBELET_AUTHZ_ARGS $KUBELET_EXTRA_ARGS $KUBELET_KUBEADM_ARGS
+=== environment file ===
+не найден
+=== drop-ins ===
+kubeadm.conf
+/etc/systemd/system/kubelet.service.d/kubeadm.conf:Environment="KUBELET_DNS_ARGS=--cluster-dns=10.96.0.10 --cluster-domain=cluster.local"
+=== фактические аргументы запущенного кубелета ===
+--cluster-dns=10.96.0.10
+=== config.yaml clusterDNS ===
+clusterDNS:
+- 172.30.0.10
+clusterDomain: cluster.local
+containerRuntimeEndpoint: ""
