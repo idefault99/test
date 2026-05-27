@@ -1,58 +1,38 @@
-k describe pod test-dns
-Name:             test-dns
-Namespace:        default
-Priority:         0
-Service Account:  default
-Node:             coparking-9/172.16.175.27
-Start Time:       Wed, 27 May 2026 21:35:57 +0300
-Labels:           run=test-dns
-Annotations:      cni.projectcalico.org/containerID: de825c370dbcc1f0f6b93e2310b2d5d78958498ee7b69a1b2a07948f941fccbe
-                  cni.projectcalico.org/podIP: 10.244.198.206/32
-                  cni.projectcalico.org/podIPs: 10.244.198.206/32
-Status:           Pending
-IP:               10.244.198.206
-IPs:
-  IP:  10.244.198.206
-Containers:
-  test-dns:
-    Container ID:
-    Image:         registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0
-    Image ID:
-    Port:          <none>
-    Host Port:     <none>
-    Args:
-      sh
-    State:          Waiting
-      Reason:       ImagePullBackOff
-    Ready:          False
-    Restart Count:  0
-    Environment:    <none>
-    Mounts:
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-f8t7m (ro)
-Conditions:
-  Type                        Status
-  PodReadyToStartContainers   True
-  Initialized                 True
-  Ready                       False
-  ContainersReady             False
-  PodScheduled                True
-Volumes:
-  kube-api-access-f8t7m:
-    Type:                    Projected (a volume that contains injected data from multiple sources)
-    TokenExpirationSeconds:  3607
-    ConfigMapName:           kube-root-ca.crt
-    ConfigMapOptional:       <nil>
-    DownwardAPI:             true
-QoS Class:                   BestEffort
-Node-Selectors:              <none>
-Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
-                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
-Events:
-  Type     Reason     Age                From               Message
-  ----     ------     ----               ----               -------
-  Normal   Scheduled  43s                default-scheduler  Successfully assigned default/test-dns to coparking-9
-  Normal   BackOff    19s (x3 over 42s)  kubelet            Back-off pulling image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0"
-  Warning  Failed     19s (x3 over 42s)  kubelet            Error: ImagePullBackOff
-  Normal   Pulling    4s (x3 over 43s)   kubelet            Pulling image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0"
-  Warning  Failed     4s (x3 over 43s)   kubelet            Failed to pull image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to pull and unpack image "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to resolve reference "registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0": failed to do request: Head "https://registry.test.model.svo.aero/v2/dpm/iac/infra/alpine-netutils/manifests/1.0.0": tls: failed to verify certificate: x509: certificate signed by unknown authority
-  Warning  Failed     4s (x3 over 43s)   kubelet            Error: ErrImagePull
+for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9 coparking-10; do
+  echo "=== $node ==="
+  ssh ikbelykh@$node sudo bash << 'EOF'
+    # 1. Создать hosts.toml с skip_verify
+    mkdir -p /etc/containerd/certs.d/registry.test.model.svo.aero
+    cat > /etc/containerd/certs.d/registry.test.model.svo.aero/hosts.toml << 'TOML'
+server = "https://registry.test.model.svo.aero"
+
+[host."https://registry.test.model.svo.aero"]
+  capabilities = ["pull", "resolve", "push"]
+  skip_verify = true
+TOML
+
+    # 2. Добавить config_path если отсутствует
+    if ! grep -q 'config_path' /etc/containerd/config.toml; then
+      sed -i '/^\[plugins\."io\.containerd\.grpc\.v1\.cri"\]$/a\  config_path = "/etc/containerd/certs.d"' \
+        /etc/containerd/config.toml
+      echo "config_path добавлен"
+    else
+      echo "config_path уже есть"
+    fi
+
+    # 3. Перезапустить
+    systemctl restart containerd
+    sleep 3
+    systemctl is-active containerd
+    # 4. Проверить
+    grep config_path /etc/containerd/config.toml
+EOF
+done
+---
+kubectl delete pod test-dns
+ansible-playbook -i inventory.ini playbooks/02-registry.yml
+---
+# Проверить что credentials тоже работают (не только TLS)
+kubectl run test2 --image=registry.test.model.svo.aero/dpm/iac/infra/alpine-netutils:1.0.0 \
+  --restart=Never -- sleep 30
+kubectl get pod test2 -w
