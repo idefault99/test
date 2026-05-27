@@ -1,7 +1,8 @@
-# Скопировать на ноды
-for node in coparking-5 coparking-6 coparking-7 coparking-8 coparking-9; do
-  scp calico-images.tar ikbelykh@${node}:/tmp/
-done
+ansible-playbook -i inventory.ini playbooks/05-longhorn.yml
+[ERROR]: Error processing keyword 'name': 'longhorn_version' is undefined
+Origin: /home/ikbelykh/k8s-ansible/playbooks/05-longhorn.yml:8:9
 
-# На каждой ноде импортировать
-sudo ctr -n k8s.io images import /tmp/calico-images.tar
+6 # Запуск: ansible-playbook playbooks/05-longhorn.yml -K
+7
+8 - name: "Longhorn v{{ longhorn_version }} установка"
+          ^ column 9
