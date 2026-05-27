@@ -1,35 +1,18 @@
-kubectl get pods -n kube-system | grep coredns
-coredns-668d6bf9bc-2vfmd              1/1     Running   0          21h
-coredns-668d6bf9bc-2xr4d              1/1     Running   0          21h
-[root@coparking-5 coparking]# kubectl get configmap -n longhorn-system | grep nginx
-kubectl get configmap -n longhorn-system longhorn-ui -o yaml 2>/dev/null || \
-  kubectl describe pod -n longhorn-system longhorn-ui-75779c679-9tdfv | grep -A5 "Volumes\|ConfigMap"
-Volumes:
-  nginx-cache:
-    Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
-    Medium:
-    SizeLimit:  <unset>
-  nginx-config:
---
-    ConfigMapName:           kube-root-ca.crt
-    ConfigMapOptional:       <nil>
-    DownwardAPI:             true
-QoS Class:                   BestEffort
-Node-Selectors:              <none>
-Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
-                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
-[root@coparking-5 coparking]# kubectl logs -n longhorn-system -l app=longhorn-ui --previous 2>&1 | head -20
-No IPv6 address detected, running in IPv4-only mode...
-nginx: [emerg] host not found in upstream "longhorn-backend" in /var/config/nginx/nginx.conf:34
-No IPv6 address detected, running in IPv4-only mode...
-nginx: [emerg] host not found in upstream "longhorn-backend" in /var/config/nginx/nginx.conf:34
+sed -i 's/- name: "1\/2 · containerd — доступ к {{ local_registry }}"/- name: "1\/2 · containerd — настройка registry"/' playbooks/02-registry.yml
+sed -i 's/- name: "2\/2 · Kubernetes — imagePullSecret для {{ local_registry }}"/- name: "2\/2 · Kubernetes — imagePullSecret"/' playbooks/02-registry.yml
 ---
-Чтобы запустить тестовый под, сначала нужно настроить доступ к registry
-ansible-playbook -i inventory.ini playbooks/02-registry.yml
-[ERROR]: Error processing keyword 'name': 'local_registry' is undefined
-Origin: /home/ikbelykh/k8s-ansible/playbooks/02-registry.yml:13:9
-
-11
-12 # ─── Play 1: containerd на всех нодах ─────────────────────────────────────────
-13 - name: "1/2 · containerd — доступ к {{ local_registry }}"
-           ^ column 9
+# Запустить в фоне ожидание
+while true; do
+  pod=$(kubectl get pod -n longhorn-system -l app=longhorn-ui --field-selector=status.phase=Running -o name 2>/dev/null | head -1)
+  if [ -n "$pod" ]; then
+    kubectl exec -n longhorn-system $pod -- cat /var/config/nginx/nginx.conf 2>/dev/null && break
+  fi
+  sleep 1
+done
+---
+# Посмотреть ConfigMap/Secret который генерирует конфиг
+kubectl get configmap -n longhorn-system -o name | xargs -I{} kubectl get -n longhorn-system {} -o yaml 2>/dev/null | grep -A30 'nginx.conf\|resolver\|longhorn-backend'
+---
+# Проверить DNS прямо с control-plane ноды через kube-dns
+kubectl exec -n kube-system coredns-668d6bf9bc-2vfmd -- \
+  nslookup longhorn-backend.longhorn-system.svc.cluster.local 127.0.0.1
