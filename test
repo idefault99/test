@@ -1,1 +1,10 @@
-sed -i "s/- name: \"Longhorn v{{ longhorn_version }} установка\"/- name: \"Longhorn v{{ longhorn_version | default('1.10.2') }} установка\"/" playbooks/05-longhorn.yml
+TASK [Применить SELinux workaround для iscsid (RHEL-совместимые)] ************************************************************************************************************************************************************************************************************************************************************************************************************************
+[ERROR]: Task failed: Module failed: non-zero return code
+Origin: /home/ikbelykh/k8s-ansible/playbooks/05-longhorn.yml:49:7
+
+47         dest: /tmp/longhorn-iscsi-selinux-workaround.yaml
+48
+49     - name: Применить SELinux workaround для iscsid (RHEL-совместимые)
+         ^ column 7
+
+fatal: [coparking-5]: FAILED! => {"changed": true, "cmd": ["kubectl", "apply", "-f", "/tmp/longhorn-iscsi-selinux-workaround.yaml"], "delta": "0:00:00.202033", "end": "2026-05-27 20:18:55.334917", "msg": "non-zero return code", "rc": 1, "start": "2026-05-27 20:18:55.132884", "stderr": "Error from server (NotFound): error when creating \"/tmp/longhorn-iscsi-selinux-workaround.yaml\": namespaces \"longhorn-system\" not found", "stderr_lines": ["Error from server (NotFound): error when creating \"/tmp/longhorn-iscsi-selinux-workaround.yaml\": namespaces \"longhorn-system\" not found"], "stdout": "", "stdout_lines": []}
