@@ -1,1 +1,1 @@
-registry.k8s.io/nfd/node-feature-discovery:v0.18.3
+nvcr.io/nvidia/gpu-operator:v26.3.1
