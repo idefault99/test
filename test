@@ -1,1 +1,1 @@
-vcr.io/nvidia/k8s/dcgm-exporter:4.5.1-4.8.0-distroless
+nvcr.io/nvidia/gpu-operator:v26.3.1
