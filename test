@@ -1,2 +1,149 @@
-sudo nft list ruleset | grep 'hook input'
-sudo nft insert rule inet filter input tcp dport 3128 accept
+---
+# Фаза 2-registry: Настройка доступа к локальному registry
+#
+# Что делает:
+#   1. containerd — certs.d/hosts.toml (TLS skip-verify + Basic auth)
+#      НЕ трогает config.toml, только добавляет config_path если отсутствует
+#   2. Kubernetes — imagePullSecret во всех нужных namespaces
+#
+# Запуск: ansible-playbook playbooks/02-registry.yml
+
+# ─── Play 1: containerd на всех нодах ─────────────────────────────────────────
+- name: "1/2 containerd — настройка registry"
+  hosts: all_nodes
+  become: true
+  gather_facts: false
+  vars:
+    registry_auth_b64: "{{ (registry_user + ':' + registry_password) | b64encode }}"
+  tasks:
+
+    - name: Создать директорию certs.d для registry
+      file:
+        path: "/etc/containerd/certs.d/{{ local_registry }}"
+        state: directory
+        mode: "0755"
+
+    - name: "hosts.toml — TLS skip-verify + Basic auth"
+      copy:
+        dest: "/etc/containerd/certs.d/{{ local_registry }}/hosts.toml"
+        mode: "0644"
+        content: |
+          server = "https://{{ local_registry }}"
+
+          [host."https://{{ local_registry }}"]
+            capabilities = ["pull", "resolve", "push"]
+            skip_verify = true
+            [host."https://{{ local_registry }}".header]
+              authorization = ["Basic {{ registry_auth_b64 }}"]
+
+    - name: Проверить наличие config_path в config.toml
+      command: grep -c 'config_path' /etc/containerd/config.toml
+      register: r_config_path
+      changed_when: false
+      failed_when: false
+
+    - name: Добавить config_path = certs.d (только если ещё нет)
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*config_path\s*='
+        insertafter: '^\[plugins\."io\.containerd\.grpc\.v1\.cri"\]'
+        line: '  config_path = "/etc/containerd/certs.d"'
+      when: r_config_path.stdout == "0"
+      notify: restart containerd
+
+    - name: Убедиться containerd запущен (если не было изменений)
+      systemd:
+        name: containerd
+        state: started
+
+  handlers:
+    - name: restart containerd
+      systemd:
+        name: containerd
+        state: restarted
+        daemon_reload: false
+
+    - name: wait containerd socket
+      wait_for:
+        path: /run/containerd/containerd.sock
+        timeout: 60
+
+- name: "1b/2 Проверить pull через ctr"
+  hosts: first_control_plane
+  become: true
+  gather_facts: false
+  vars:
+    registry_auth_b64: "{{ (registry_user + ':' + registry_password) | b64encode }}"
+  tasks:
+
+    - name: Дождаться containerd
+      wait_for:
+        path: /run/containerd/containerd.sock
+        timeout: 60
+
+    - name: Тест pull тестового образа
+      shell: |
+        ctr -n k8s.io image pull \
+          --user "{{ registry_user }}:{{ registry_password }}" \
+          --skip-verify \
+          {{ local_registry }}/pause:3.10 2>&1 | tail -3
+      register: r_pull_test
+      changed_when: false
+      ignore_errors: true
+
+    - name: Результат теста pull
+      debug:
+        msg: "{{ r_pull_test.stdout | default(r_pull_test.stderr) }}"
+
+# ─── Play 2: imagePullSecret в K8s ───────────────────────────────────────────
+- name: "2/2 Kubernetes — imagePullSecret"
+  hosts: first_control_plane
+  become: true
+  gather_facts: false
+  environment:
+    KUBECONFIG: /root/.kube/config
+  vars:
+    secret_name: "registry-credentials"
+    target_namespaces:
+      - default
+      - kube-system
+      - tigera-operator
+      - calico-system
+      - longhorn-system
+      - gpu-operator
+      - monitoring
+  tasks:
+
+    - name: Создать namespaces (идемпотентно)
+      shell: "kubectl create namespace {{ item }} --dry-run=client -o yaml | kubectl apply -f -"
+      loop: "{{ target_namespaces }}"
+      ignore_errors: true
+      changed_when: false
+
+    - name: Создать imagePullSecret во всех namespaces
+      shell: >
+        kubectl create secret docker-registry {{ secret_name }}
+        --namespace={{ item }}
+        --docker-server={{ local_registry }}
+        --docker-username={{ registry_user }}
+        --docker-password={{ registry_password }}
+        --dry-run=client -o yaml | kubectl apply -f -
+      loop: "{{ target_namespaces }}"
+      changed_when: false
+
+    - name: Добавить imagePullSecret в ServiceAccount default
+      shell: |
+        kubectl patch serviceaccount default \
+          --namespace={{ item }} \
+          -p '{"imagePullSecrets": [{"name": "{{ secret_name }}"}]}' 2>&1 || true
+      loop: "{{ target_namespaces }}"
+      changed_when: false
+
+    - name: Проверить секреты
+      command: kubectl get secrets -A --field-selector=type=kubernetes.io/dockerconfigjson
+      register: r_secrets_check
+      changed_when: false
+
+    - name: imagePullSecrets
+      debug:
+        msg: "{{ r_secrets_check.stdout }}"
