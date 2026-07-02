@@ -1,1 +1,5 @@
-sudo firewall-cmd --permanent --add-port=3128/tcp && sudo firewall-cmd --reload
+sudo ufw status verbose
+sudo iptables -L ufw-user-input -n --line-numbers
+sudo ufw allow 3128/tcp
+sudo ufw status numbered | grep 3128
+nc -vz jump-host-ipv4 3128        # ждём succeeded
