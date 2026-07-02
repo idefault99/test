@@ -1,2 +1,0 @@
-ss -tlnp 'sport = :3128'
-State                          Recv-Q                           Send-Q                                                     Local Address:Port                                                     Peer Address:Port                          Process
