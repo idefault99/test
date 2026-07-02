@@ -1,2 +1,4 @@
-$ set -euo pipefail # collapsed multi-line command
-Release "videorecorder" does not exist. Installing it now.
+LANIP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')
+echo "lan ip: $LANIP"
+curl -s -o /dev/null -w "loopback: %{http_code}\n" -x http://127.0.0.1:3128   https://<registry>/v2/
+curl -s -o /dev/null -w "lan-ip:   %{http_code}\n" -x http://$LANIP:3128       https://<registry>/v2/
