@@ -1,162 +1,130 @@
 #!/usr/bin/env bash
-# Раскатка доступа к registry на все ноды по SSH (замена плейбука 02-registry.yml).
-#   1. containerd на каждой ноде: certs.d/hosts.toml (skip_verify + Basic auth)
-#      + config_path строго в [plugins."io.containerd.grpc.v1.cri".registry]
-#   2. crictl pull на каждой ноде — проверка, что hosts.toml-аутентификация реально работает
-#   3. imagePullSecret + патч default SA в нужных namespaces (на control plane)
+# Раскатка доступа к registry на все ноды по SSH — точная копия логики плейбука 02-registry.yml.
 set -euo pipefail
 
 # ─────────────────────────── КОНФИГ ───────────────────────────
 SSH_USER="couser"
-NODES=(coparking1 coparking2 coparking3 coparking4 coparking5 coparking6)  # ВСЕ ноды
-CONTROL_PLANE="coparking1"                       # где лежит kubeconfig / крутится kubectl
+NODES=(coparking1 coparking2 coparking3 coparking4 coparking5 coparking6)  # ВСЕ ноды (all_nodes)
+FIRST_CONTROL_PLANE="coparking1"                 # first_control_plane
 
-REGISTRY="harbor.host.ru"
+LOCAL_REGISTRY="harbor.host.ru"
 REGISTRY_USER="CHANGE_ME"
 REGISTRY_PASSWORD="CHANGE_ME"
 
-TEST_IMAGE_REF="${REGISTRY}/coparking/videorecorder:prod-draft.bin"  # образ, который реально тянется
 KUBECONFIG_REMOTE="/root/.kube/config"
 SECRET_NAME="registry-credentials"
-NAMESPACES=(default kube-system tigera-operator calico-system longhorn-system gpu-operator monitoring)
+TARGET_NAMESPACES=(default kube-system tigera-operator calico-system longhorn-system gpu-operator monitoring)
 
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
-# sudo на нодах. Если заходишь root-ом — оставь пустым: PRIV=""
-PRIV="sudo"
+PRIV="sudo"          # become: true. root-ом -> PRIV=""
 # ──────────────────────────────────────────────────────────────
 
 [ "$REGISTRY_USER" != "CHANGE_ME" ] || { echo "Заполни REGISTRY_USER/REGISTRY_PASSWORD"; exit 1; }
 
-AUTH_B64=$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_PASSWORD" | base64 -w0)
-
+REGISTRY_AUTH_B64=$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_PASSWORD" | base64 -w0)
 log(){ printf '\n\033[1;34m[%s]\033[0m %s\n' "$(date +%T)" "$*"; }
-warn(){ printf '\033[1;33m  ! %s\033[0m\n' "$*"; }
 
-FAILED=()
-
-# Тело, исполняемое на ноде под sudo. Quoted-heredoc: $REGISTRY/$AUTH_B64 подставятся
-# на ноде из присвоений, которые допишутся сверху при отправке.
+# ─── Play 1: containerd на всех нодах ───
 NODE_BODY=$(cat <<'REMOTE'
 set -euo pipefail
-CFG="/etc/containerd/config.toml"
-CERT_DIR="/etc/containerd/certs.d/${REGISTRY}"
 
-mkdir -p "$CERT_DIR"
-cat > "${CERT_DIR}/hosts.toml" <<TOML
-server = "https://${REGISTRY}"
+# Создать директорию certs.d для registry
+mkdir -p "/etc/containerd/certs.d/${LOCAL_REGISTRY}"
+chmod 0755 "/etc/containerd/certs.d/${LOCAL_REGISTRY}"
 
-[host."https://${REGISTRY}"]
+# hosts.toml — TLS skip-verify + Basic auth
+cat > "/etc/containerd/certs.d/${LOCAL_REGISTRY}/hosts.toml" <<TOML
+server = "https://${LOCAL_REGISTRY}"
+
+[host."https://${LOCAL_REGISTRY}"]
   capabilities = ["pull", "resolve", "push"]
   skip_verify = true
-  [host."https://${REGISTRY}".header]
-    authorization = ["Basic ${AUTH_B64}"]
+  [host."https://${LOCAL_REGISTRY}".header]
+    authorization = ["Basic ${REGISTRY_AUTH_B64}"]
 TOML
-chmod 0644 "${CERT_DIR}/hosts.toml"
+chmod 0644 "/etc/containerd/certs.d/${LOCAL_REGISTRY}/hosts.toml"
 
-# config_path именно ПОД секцией .registry (иначе containerd его не читает -> 401)
-has_registry_cfgpath() {
-  awk '
-    index($0,"[plugins.\"io.containerd.grpc.v1.cri\".registry]"){inreg=1; next}
-    /^\[/{inreg=0}
-    inreg && $0 ~ /config_path[ \t]*=/ {found=1}
-    END{exit found?0:1}
-  ' "$CFG"
-}
-
-changed=0
-if has_registry_cfgpath; then
-  :
-else
-  if grep -q 'plugins."io.containerd.grpc.v1.cri".registry]' "$CFG"; then
-    sed -i '/plugins."io.containerd.grpc.v1.cri".registry]/a\    config_path = "/etc/containerd/certs.d"' "$CFG"
-  else
-    printf '\n[plugins."io.containerd.grpc.v1.cri".registry]\n  config_path = "/etc/containerd/certs.d"\n' >> "$CFG"
-  fi
-  changed=1
-fi
-
-if [ "$changed" -eq 1 ]; then
+# Проверить наличие config_path в config.toml
+if [ "$(grep -c 'config_path' /etc/containerd/config.toml || true)" = "0" ]; then
+  # Добавить config_path = certs.d (только если ещё нет) — как в плейбуке:
+  # insertafter [plugins."io.containerd.grpc.v1.cri"]
+  sed -i '/^\[plugins\."io\.containerd\.grpc\.v1\.cri"\]/a\  config_path = "/etc/containerd/certs.d"' /etc/containerd/config.toml
   systemctl restart containerd
+  daemon_reload=false
 else
-  systemctl is-active --quiet containerd || systemctl start containerd
+  # Убедиться containerd запущен (если не было изменений)
+  systemctl start containerd
 fi
 
-for i in $(seq 1 30); do [ -S /run/containerd/containerd.sock ] && break; sleep 1; done
+# wait containerd socket
+for i in $(seq 1 60); do [ -S /run/containerd/containerd.sock ] && break; sleep 1; done
 [ -S /run/containerd/containerd.sock ] || { echo "containerd socket missing"; exit 1; }
-echo "containerd OK (changed=${changed})"
+echo "containerd OK"
 REMOTE
 )
 
-# Тест pull через CRI (crictl) — читает hosts.toml, тот же путь что у kubelet.
-TEST_BODY=$(cat <<'REMOTE'
-set -uo pipefail
-if command -v crictl >/dev/null 2>&1; then
-  crictl pull "${TEST_IMAGE_REF}" >/dev/null 2>&1 \
-    && echo "crictl pull: OK" \
-    || { echo "crictl pull: FAIL"; crictl pull "${TEST_IMAGE_REF}" 2>&1 | tail -3; exit 1; }
-else
-  ctr -n k8s.io image pull --skip-verify "${TEST_IMAGE_REF}" >/dev/null 2>&1 \
-    && echo "ctr(hosts.toml) pull: OK" \
-    || { echo "ctr pull: FAIL"; exit 1; }
-fi
-REMOTE
-)
-
-log "Registry=${REGISTRY}  nodes=${NODES[*]}"
-
+log "LOCAL_REGISTRY=${LOCAL_REGISTRY}  nodes=${NODES[*]}"
 for node in "${NODES[@]}"; do
-  log "=== ${node}: настройка containerd ==="
-  if ! ssh $SSH_OPTS "${SSH_USER}@${node}" "${PRIV} bash -s" <<EOF
-REGISTRY='${REGISTRY}'
-AUTH_B64='${AUTH_B64}'
+  log "1/2 ${node}: containerd — настройка registry"
+  ssh $SSH_OPTS "${SSH_USER}@${node}" "${PRIV} bash -s" <<EOF
+LOCAL_REGISTRY='${LOCAL_REGISTRY}'
+REGISTRY_AUTH_B64='${REGISTRY_AUTH_B64}'
 ${NODE_BODY}
 EOF
-  then warn "${node}: containerd config FAILED"; FAILED+=("$node"); continue; fi
-
-  log "${node}: тест pull через CRI"
-  if ! ssh $SSH_OPTS "${SSH_USER}@${node}" "${PRIV} bash -s" <<EOF
-TEST_IMAGE_REF='${TEST_IMAGE_REF}'
-${TEST_BODY}
-EOF
-  then warn "${node}: pull-тест не прошёл (auth/сеть)"; FAILED+=("$node"); fi
 done
 
-# ── K8s: imagePullSecret на control plane ──
+# ─── Play 1b: проверить pull через ctr (first_control_plane) ───
+log "1b/2 ${FIRST_CONTROL_PLANE}: тест pull через ctr"
+ssh $SSH_OPTS "${SSH_USER}@${FIRST_CONTROL_PLANE}" "${PRIV} bash -s" <<EOF
+set -uo pipefail
+for i in \$(seq 1 60); do [ -S /run/containerd/containerd.sock ] && break; sleep 1; done
+ctr -n k8s.io image pull \\
+  --user '${REGISTRY_USER}:${REGISTRY_PASSWORD}' \\
+  --skip-verify \\
+  '${LOCAL_REGISTRY}/pause:3.10' 2>&1 | tail -3
+EOF
+
+# ─── Play 2: imagePullSecret в K8s (first_control_plane) ───
 K8S_BODY=$(cat <<'REMOTE'
 set -euo pipefail
 export KUBECONFIG="${KUBECONFIG_REMOTE}"
+
+# Создать namespaces (идемпотентно)
 for ns in ${NS_LIST}; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+done
+
+# Создать imagePullSecret во всех namespaces
+for ns in ${NS_LIST}; do
   kubectl create secret docker-registry "${SECRET_NAME}" \
     --namespace="$ns" \
-    --docker-server="${REGISTRY}" \
+    --docker-server="${LOCAL_REGISTRY}" \
     --docker-username="${REGISTRY_USER}" \
     --docker-password="${REGISTRY_PASSWORD}" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  kubectl patch serviceaccount default --namespace="$ns" \
-    -p "{\"imagePullSecrets\":[{\"name\":\"${SECRET_NAME}\"}]}" >/dev/null 2>&1 || true
-  echo "ns ${ns}: secret + default SA OK"
 done
-echo "--- dockerconfigjson secrets ---"
+
+# Добавить imagePullSecret в ServiceAccount default
+for ns in ${NS_LIST}; do
+  kubectl patch serviceaccount default \
+    --namespace="$ns" \
+    -p "{\"imagePullSecrets\": [{\"name\": \"${SECRET_NAME}\"}]}" 2>&1 || true
+done
+
+# Проверить секреты
 kubectl get secrets -A --field-selector=type=kubernetes.io/dockerconfigjson
 REMOTE
 )
 
-log "=== ${CONTROL_PLANE}: imagePullSecret в namespaces ==="
-ssh $SSH_OPTS "${SSH_USER}@${CONTROL_PLANE}" "${PRIV} bash -s" <<EOF || warn "K8s-часть завершилась с ошибкой"
+log "2/2 ${FIRST_CONTROL_PLANE}: Kubernetes — imagePullSecret"
+ssh $SSH_OPTS "${SSH_USER}@${FIRST_CONTROL_PLANE}" "${PRIV} bash -s" <<EOF
 KUBECONFIG_REMOTE='${KUBECONFIG_REMOTE}'
 SECRET_NAME='${SECRET_NAME}'
-REGISTRY='${REGISTRY}'
+LOCAL_REGISTRY='${LOCAL_REGISTRY}'
 REGISTRY_USER='${REGISTRY_USER}'
 REGISTRY_PASSWORD='${REGISTRY_PASSWORD}'
-NS_LIST='${NAMESPACES[*]}'
+NS_LIST='${TARGET_NAMESPACES[*]}'
 ${K8S_BODY}
 EOF
 
-echo
-if [ ${#FAILED[@]} -eq 0 ]; then
-  log "ГОТОВО: все ноды настроены и pull-тест прошёл."
-else
-  warn "Проблемные ноды: ${FAILED[*]}"
-  exit 1
-fi
+log "ГОТОВО"
