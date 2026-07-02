@@ -1,6 +1,4 @@
-sudo cat /etc/containerd/certs.d/harbor.host.ru/hosts.toml
-echo -n 'ПОЛЬЗОВАТЕЛЬ:ПАРОЛЬ' | base64
-sudo systemctl restart containerd
-sudo grep -n 'config_path' /etc/containerd/config.toml
-sudo crictl pull harbor.host.ru/coparking/videorecorder:prod-draft.bin
-kubectl -n <ns> get secret registry-credentials -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d; echo
+grep -n 'config_path' /etc/containerd/config.toml
+163:      config_path = "/etc/containerd/certs.d"
+194:    plugin_config_path = "/etc/nri/conf.d"
+255:    config_path = ""
