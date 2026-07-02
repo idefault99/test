@@ -1,147 +1,125 @@
-#!/usr/bin/env bash
-# Раскатка доступа к registry на все ноды по SSH — точная копия логики плейбука 02-registry.yml.
-set -euo pipefail
-
-# ─────────────────────────── КОНФИГ ───────────────────────────
-SSH_USER="couser"
-NODES=(coparking1 coparking2 coparking3 coparking4 coparking5 coparking6)  # ВСЕ ноды (all_nodes)
-FIRST_CONTROL_PLANE="coparking1"                 # first_control_plane
-
-LOCAL_REGISTRY="harbor.host.ru"
-REGISTRY_USER="CHANGE_ME"
-REGISTRY_PASSWORD="CHANGE_ME"
-
-KUBECONFIG_REMOTE="/root/.kube/config"
-SECRET_NAME="registry-credentials"
-TARGET_NAMESPACES=(default kube-system tigera-operator calico-system longhorn-system gpu-operator monitoring)
-
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
-PRIV="sudo"          # become: true. root-ом -> PRIV=""
-# ──────────────────────────────────────────────────────────────
-
-[ "$REGISTRY_USER" != "CHANGE_ME" ] || { echo "Заполни REGISTRY_USER/REGISTRY_PASSWORD"; exit 1; }
-
-REGISTRY_AUTH_B64=$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_PASSWORD" | base64 -w0)
-log(){ printf '\n\033[1;34m[%s]\033[0m %s\n' "$(date +%T)" "$*"; }
-
-# ─── Play 1: containerd на всех нодах ───
-NODE_BODY=$(cat <<'REMOTE'
-set -euo pipefail
-
-# Создать директорию certs.d для registry
-mkdir -p "/etc/containerd/certs.d/${LOCAL_REGISTRY}"
-chmod 0755 "/etc/containerd/certs.d/${LOCAL_REGISTRY}"
-
-# hosts.toml — TLS skip-verify + Basic auth
-cat > "/etc/containerd/certs.d/${LOCAL_REGISTRY}/hosts.toml" <<TOML
-server = "https://${LOCAL_REGISTRY}"
-
-[host."https://${LOCAL_REGISTRY}"]
-  capabilities = ["pull", "resolve", "push"]
-  skip_verify = true
-  [host."https://${LOCAL_REGISTRY}".header]
-    authorization = ["Basic ${REGISTRY_AUTH_B64}"]
-TOML
-chmod 0644 "/etc/containerd/certs.d/${LOCAL_REGISTRY}/hosts.toml"
-
-# config_path в registry-секции.
-# Дефолтный config.toml часто уже содержит пустой `config_path = ""` в
-# [plugins."io.containerd.grpc.v1.cri".registry] — его и надо заполнить.
-# Просто "добавить если нет" ломается: пустая директива перебивает вставленную не туда.
-CFG=/etc/containerd/config.toml
-CERTS='/etc/containerd/certs.d'
-changed=0
-
-# 0) убрать возможную ошибочную строку из прошлых прогонов (config_path certs.d
-#    с 2-пробельным отступом, вставленную не в ту секцию)
-if grep -Eq '^  config_path = "/etc/containerd/certs.d"$' "$CFG"; then
-  sed -i '\#^  config_path = "/etc/containerd/certs.d"$#d' "$CFG"
-  changed=1
-fi
-
-if grep -Eq '^[[:space:]]*config_path[[:space:]]*=[[:space:]]*""' "$CFG"; then
-  # 1) есть штатная пустая директива — заполняем её
-  sed -i 's#^\([[:space:]]*\)config_path[[:space:]]*=[[:space:]]*""#\1config_path = "'"$CERTS"'"#' "$CFG"
-  changed=1
-elif ! grep -Eq '^[[:space:]]*config_path[[:space:]]*=[[:space:]]*"/etc/containerd/certs.d"' "$CFG"; then
-  # 2) директивы нет вовсе — добавляем в секцию .registry
-  if grep -Eq '^\[plugins\."io\.containerd\.grpc\.v1\.cri"\.registry\]' "$CFG"; then
-    sed -i '/^\[plugins\."io\.containerd\.grpc\.v1\.cri"\.registry\]/a\    config_path = "/etc/containerd/certs.d"' "$CFG"
-  else
-    printf '\n[plugins."io.containerd.grpc.v1.cri".registry]\n  config_path = "/etc/containerd/certs.d"\n' >> "$CFG"
-  fi
-  changed=1
-fi
-
-# Проверка: ровно один registry-config_path и он заполнен, пустого не осталось
-if grep -Eq '^[[:space:]]*config_path[[:space:]]*=[[:space:]]*""' "$CFG"; then
-  echo "config_path остался пустым — проверь конфиг вручную"; exit 1
-fi
-
-if [ "$changed" -eq 1 ]; then
-  systemctl restart containerd
-else
-  systemctl is-active --quiet containerd || systemctl start containerd
-fi
-
-# wait containerd socket
-for i in $(seq 1 60); do [ -S /run/containerd/containerd.sock ] && break; sleep 1; done
-[ -S /run/containerd/containerd.sock ] || { echo "containerd socket missing"; exit 1; }
-echo "containerd OK"
-REMOTE
-)
-
-log "LOCAL_REGISTRY=${LOCAL_REGISTRY}  nodes=${NODES[*]}"
-for node in "${NODES[@]}"; do
-  log "1/2 ${node}: containerd — настройка registry"
-  ssh $SSH_OPTS "${SSH_USER}@${node}" "${PRIV} bash -s" <<EOF
-LOCAL_REGISTRY='${LOCAL_REGISTRY}'
-REGISTRY_AUTH_B64='${REGISTRY_AUTH_B64}'
-${NODE_BODY}
-EOF
-done
-
-# ─── Play 2: imagePullSecret в K8s (first_control_plane) ───
-K8S_BODY=$(cat <<'REMOTE'
-set -euo pipefail
-export KUBECONFIG="${KUBECONFIG_REMOTE}"
-
-# Создать namespaces (идемпотентно)
-for ns in ${NS_LIST}; do
-  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
-done
-
-# Создать imagePullSecret во всех namespaces
-for ns in ${NS_LIST}; do
-  kubectl create secret docker-registry "${SECRET_NAME}" \
-    --namespace="$ns" \
-    --docker-server="${LOCAL_REGISTRY}" \
-    --docker-username="${REGISTRY_USER}" \
-    --docker-password="${REGISTRY_PASSWORD}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-done
-
-# Добавить imagePullSecret в ServiceAccount default
-for ns in ${NS_LIST}; do
-  kubectl patch serviceaccount default \
-    --namespace="$ns" \
-    -p "{\"imagePullSecrets\": [{\"name\": \"${SECRET_NAME}\"}]}" 2>&1 || true
-done
-
-# Проверить секреты
-kubectl get secrets -A --field-selector=type=kubernetes.io/dockerconfigjson
-REMOTE
-)
-
-log "2/2 ${FIRST_CONTROL_PLANE}: Kubernetes — imagePullSecret"
-ssh $SSH_OPTS "${SSH_USER}@${FIRST_CONTROL_PLANE}" "${PRIV} bash -s" <<EOF
-KUBECONFIG_REMOTE='${KUBECONFIG_REMOTE}'
-SECRET_NAME='${SECRET_NAME}'
-LOCAL_REGISTRY='${LOCAL_REGISTRY}'
-REGISTRY_USER='${REGISTRY_USER}'
-REGISTRY_PASSWORD='${REGISTRY_PASSWORD}'
-NS_LIST='${TARGET_NAMESPACES[*]}'
-${K8S_BODY}
-EOF
-
-log "ГОТОВО"
+У меня есть вот такой манифест
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nvidia-plugin-config
+  namespace: gpu-operator
+data:
+  config: |
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        renameByDefault: false
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 16   # до 16 подов могут использовать один GPU
+И Helm чарт
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: videorecorder-config
+  labels:
+    app.kubernetes.io/name: videorecorder
+    projectLabel: videorecorder
+data:
+  MONGO_HOST: "${env.MONGO_HOST}"
+  MONGO_PORT: "${env.MONGO_PORT}"
+  MONGO_USER: "${env.MONGO_USER}"
+  MONGO_DATABASE: "${env.MONGO_DATABASE}"
+  MONGO_AUTHSOURCE: "${env.MONGO_AUTHSOURCE}"
+  LOCAL_K8S_DOMAIN: "${env.LOCAL_K8S_DOMAIN}"
+  BASE_NS: "${env.BASE_NS}"
+---
+{{- range .Values.videorecorder.nodes }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: videorecorder-{{ .name | lower | replace " " "-" }}
+  labels:
+    app.kubernetes.io/name: videorecorder
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    projectLabel: videorecorder
+    coparking/node: {{ .name | quote }}
+spec:
+  replicas: {{ .replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: videorecorder
+      projectLabel: videorecorder
+      coparking/node: {{ .name | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: videorecorder
+        projectLabel: videorecorder
+        coparking/node: {{ .name | quote }}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: {{ .name | quote }}
+      containers:
+        - name: videorecorder
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {{ $.Values.parkingPort | default 8000 }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ $.Release.Name }}-config
+          resources:
+            limits:
+              cpu: {{ ((($.Values.resources).limits).cpu) | default "500m" | quote }}
+              memory: {{ ((($.Values.resources).limits).memory) | default "512Mi" | quote }}
+              nvidia.com/gpu: {{ ((($.Values.resources).limits).gpu) | default 1 | quote }}
+            requests:
+              cpu: {{ ((($.Values.resources).requests).cpu) | default "100m" | quote }}
+              memory: {{ ((($.Values.resources).requests).memory) | default "512Mi" | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+---
+У меня настроено количество реплик на каждый сервер + это регулируется через values по такому принципу
+Сoparking-5:
+videorecorder-8
+platereader-2
+segmentator-4
+Coparking-6:
+videorecorder-8
+platereader-2
+segmentator-4
+Coparking-7:
+videorecorder-8
+segmentator-4
+Coparking-8:
+videorecorder-8
+minio-handler-1
+platereader-2
+segmentator-4
+Coparking-9:
+videorecorder-16
+minio-handler-2
+streams-2 
+Coparking-10:
+videorecorder-16
+minio-handler-2
+streams-2
+Но на нодах у меня 1 gpu и мне нужно чтобы все поды запускались и делили этот один gpu
+Дай точно рабочий и готовый Чарт
