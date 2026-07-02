@@ -1,2 +1,75 @@
-kubernetesui/dashboard:v2.7.0
-kubernetesui/metrics-scraper:v1.0.8
+.deploy:
+  stage: deploy
+  tags:
+    - docker
+  image:
+    name: ${CI_REGISTRY}/dpm/iac/infra:helm
+    pull_policy: [always, if-not-present]
+    entrypoint: [""]
+  variables:
+    PROXY_PORT: "3128"
+    KUBE_API_PORT: "6443"
+  before_script:
+    - set -euo pipefail
+    - |
+      if ! command -v tinyproxy >/dev/null; then
+        rm -f /etc/apt/sources.list.d/helm-stable-debian.list \
+              /etc/apt/sources.list.d/helm.list 2>/dev/null || true
+        apt-get update
+        apt-get install -y --no-install-recommends tinyproxy openssh-client iproute2
+      fi
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - |
+      if [ -f "$JUMP_SSH_KEY" ]; then
+        cat "$JUMP_SSH_KEY" > ~/.ssh/id_proxy
+      else
+        printf '%s\n' "$JUMP_SSH_KEY" > ~/.ssh/id_proxy
+      fi
+    - chmod 600 ~/.ssh/id_proxy
+    - ssh-keygen -y -f ~/.ssh/id_proxy >/dev/null || { echo "SSH key invalid"; exit 1; }
+    - ssh-keyscan -H "$JUMP_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+    - mkdir -p /etc/tinyproxy /var/log/tinyproxy /var/run/tinyproxy
+    - |
+      cat > /etc/tinyproxy/tinyproxy.conf <<EOF
+      User nobody
+      Group nogroup
+      Port ${PROXY_PORT}
+      Listen 127.0.0.1
+      Timeout 600
+      DefaultErrorFile "/usr/share/tinyproxy/default.html"
+      LogFile "/var/log/tinyproxy/tinyproxy.log"
+      LogLevel Info
+      MaxClients 100
+      Allow 127.0.0.1
+      ViaProxyName "tinyproxy"
+      EOF
+    - tinyproxy -c /etc/tinyproxy/tinyproxy.conf
+    - sleep 1
+    - pgrep -af tinyproxy || { echo "tinyproxy not running"; exit 1; }
+    - |
+      ssh -f -N \
+        -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+        -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new \
+        -i ~/.ssh/id_proxy \
+        -R 0.0.0.0:${PROXY_PORT}:127.0.0.1:${PROXY_PORT} \
+        -L 127.0.0.1:${KUBE_API_PORT}:${KUBE_API_HOST}:${KUBE_API_PORT} \
+        "${JUMP_USER}@${JUMP_HOST}"
+    - sleep 2
+    - ps aux | grep ssh | grep -v grep || { echo "SSH tunnel failed"; exit 1; }
+  script:
+    - export TAG=${CI_COMMIT_REF_SLUG}
+    - unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy
+    - helm --kubeconfig "$KUBECONFIG" upgrade -i --history-max 2 -n "$NAMESPACE" "$RELEASE_NAME" ./Helm -f "$VALUES" --set "image.tag=${TAG}.bin" --wait --timeout 2m
+  after_script:
+    - pkill -f "ssh.*id_proxy" 2>/dev/null || true
+    - pkill -x tinyproxy 2>/dev/null || true
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: manual
+    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
+      when: manual
+    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
+      when: manual
