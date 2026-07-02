@@ -1,80 +1,94 @@
-.deploy:
-  stage: deploy
-  tags: [docker]
-  image:
-    name: ${CI_REGISTRY}/dpm/iac/infra:helm
-    pull_policy: [always, if-not-present]
-    entrypoint: [""]
-  variables:
-    PROXY_PORT_PARKING: "3128"
-    KUBE_API_PORT: "6443"
-    TP_CONF: "/etc/tinyproxy/tinyproxy.conf"
-    AUTOSSH_GATETIME: "0"
-  before_script:
-    - |
-      set -euo pipefail
-      if ! command -v autossh >/dev/null 2>&1 || ! command -v tinyproxy >/dev/null 2>&1; then
-        rm -f /etc/apt/sources.list.d/helm-stable-debian.list \
-              /etc/apt/sources.list.d/helm.list 2>/dev/null || true
-        apt-get update -qq
-        apt-get install -y --no-install-recommends \
-          tinyproxy autossh openssh-client iproute2 curl procps
-      fi
-    - |
-      mkdir -p ~/.ssh && chmod 700 ~/.ssh
-      if [ -f "$JUMP_SSH_KEY" ]; then
-        cat "$JUMP_SSH_KEY" > ~/.ssh/id_proxy
-      else
-        printf '%s\n' "$JUMP_SSH_KEY" > ~/.ssh/id_proxy
-      fi
-      chmod 600 ~/.ssh/id_proxy
-      ssh-keyscan -H "$JUMP_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-    - |
-      mkdir -p /etc/tinyproxy /var/log/tinyproxy /var/run/tinyproxy
-      cat > "$TP_CONF" <<EOF
-      User nobody
-      Group nogroup
-      Port ${PROXY_PORT_PARKING}
-      Listen 127.0.0.1
-      Timeout 600
-      DefaultErrorFile "/usr/share/tinyproxy/default.html"
-      LogFile "/var/log/tinyproxy/tinyproxy.log"
-      LogLevel Info
-      MaxClients 100
-      Allow 127.0.0.1
-      ViaProxyName "tinyproxy"
-      EOF
-      tinyproxy -c "$TP_CONF"
-    - |
-      autossh -M 0 -f -N \
-        -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-        -o ExitOnForwardFailure=yes \
-        -o StrictHostKeyChecking=accept-new \
-        -o TCPKeepAlive=yes \
-        -i ~/.ssh/id_proxy \
-        -R 0.0.0.0:${PROXY_PORT_PARKING}:127.0.0.1:${PROXY_PORT_PARKING} \
-        -L 127.0.0.1:${KUBE_API_PORT}:${KUBE_API_HOST}:${KUBE_API_PORT} \
-        "${JUMP_USER}@${JUMP_HOST}"
-      sleep 3
-  script:
-    - |
-      set -euo pipefail
-      export TAG="${CI_COMMIT_REF_SLUG}"
-      unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy NO_PROXY no_proxy
-      helm --kubeconfig "$KUBECONFIG" upgrade -i --history-max 2 \
-        -n "$NAMESPACE" "$RELEASE_NAME" ./Helm -f "$VALUES" \
-        --set "image.tag=${TAG}.bin" --wait --timeout 5m
-  after_script:
-    - pkill -f "id_proxy" 2>/dev/null || true
-    - pkill -x tinyproxy 2>/dev/null || true
-    - rm -f ~/.ssh/id_proxy 2>/dev/null || true
-  when: manual
-  rules:
-    - if: $CI_COMMIT_TAG
-      when: manual
-    - if: $CI_OPEN_MERGE_REQUESTS
-      when: manual
-    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
-      when: manual
-    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
-      when: manual
+{{- range .Values.segmentator.nodes }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: segmentator-{{ .name | lower | replace " " "-" }}
+  labels:
+    app.kubernetes.io/name: segmentator
+    app.kubernetes.io/instance: segmentator
+    projectLabel: segmentator
+    coparking/node: {{ .name | quote }}
+spec:
+  replicas: {{ .replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: segmentator
+      projectLabel: segmentator
+      coparking/node: {{ .name | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: segmentator
+        projectLabel: segmentator
+        coparking/node: {{ .name | quote }}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: {{ .name | quote }}
+      containers:
+        - name: segmentator
+          image: "${image.repository}:${image.tag}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: MONGO_HOST
+              value: "${env.MONGO_HOST}"
+            - name: MONGO_PORT
+              value: "${env.MONGO_PORT}"
+            - name: MONGO_USER
+              value: "${env.MONGO_USER}"
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret
+                  key: password
+            - name: MONGO_DATABASE
+              value: "${env.MONGO_DATABASE}"
+            - name: MONGO_AUTHSOURCE
+              value: "${env.MONGO_AUTHSOURCE}"
+            - name: LOCAL_K8S_DOMAIN
+              value: "${env.LOCAL_K8S_DOMAIN}"
+            - name: BASE_NS
+              value: "${env.BASE_NS}"
+          resources:
+            limits:
+              cpu: 500m
+              memory: {{ .Values.segmentator.resources.limits.memory | default "512Mi" | quote }}
+              nvidia.com/gpu: 1
+            requests:
+              cpu: 100m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      affinity: {}
+      tolerations: []
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: segmentator-config
+  labels:
+    app.kubernetes.io/name: segmentator
+    projectLabel: segmentator
+data:
+  MONGO_HOST: "${env.MONGO_HOST}"
+  MONGO_PORT: "${env.MONGO_PORT}"
+  MONGO_USER: "${env.MONGO_USER}"
+  MONGO_DATABASE: "${env.MONGO_DATABASE}"
+  MONGO_AUTHSOURCE: "${env.MONGO_AUTHSOURCE}"
+  LOCAL_K8S_DOMAIN: "${env.LOCAL_K8S_DOMAIN}"
+  BASE_NS: "${env.BASE_NS}"
