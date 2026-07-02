@@ -1,7 +1,3 @@
-ss -tlnp | grep 3128
-LISTEN 0      128          0.0.0.0:3128      0.0.0.0:*
-couser@coparking1:/tmp$ curl -s -o /dev/null -w "loopback: %{http_code}\n" -x http://127.0.0.1:3128   https://harbor.host.ru/v2/
-loopback: 401
-couser@coparking1:/tmp$ curl -s -o /dev/null -w "lan-ip:   %{http_code}\n" -x http://$LANIP:3128       https://harbor.host.ru/v2/
----
-Warning  Failed     99s (x5 over 4m32s)   kubelet            Failed to pull image "harbor.host.ru/coparking/videorecorder:prod-draft.bin": failed to pull and unpack image "harbor.host.ru/coparking/videorecorder:prod-draft.bin": failed to resolve reference "harbor.host.ru/coparking/videorecorder:prod-draft.bin": failed to do request: Head "https://harbor.host.ru/v2/coparking/videorecorder/manifests/prod-draft.bin": proxyconnect tcp: dial tcp jump-host-ipv4:3128: connect: connection refused
+sudo firewall-cmd --permanent --add-rich-rule=\
+'rule family="ipv4" source address="<node-subnet>/24" port port="3128" protocol="tcp" accept'
+sudo firewall-cmd --reload
