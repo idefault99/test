@@ -6,7 +6,8 @@
     pull_policy: [always, if-not-present]
     entrypoint: [""]
   variables:
-    PROXY_PORT_PARKING: "3128"
+    PROXY_PORT: "3128"
+    JUMP_PROXY_PORT: "3128"
     KUBE_API_PORT: "6443"
     TP_CONF: "/etc/tinyproxy/tinyproxy.conf"
     AUTOSSH_GATETIME: "0"
@@ -50,12 +51,12 @@
       ssh-keygen -y -f ~/.ssh/id_proxy >/dev/null || die "SSH key invalid"
       ssh-keyscan -H "$JUMP_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
     - |
-      log "tinyproxy 127.0.0.1:${PROXY_PORT_PARKING}"
+      log "tinyproxy 127.0.0.1:${PROXY_PORT}"
       mkdir -p /etc/tinyproxy /var/log/tinyproxy /var/run/tinyproxy
       cat > "$TP_CONF" <<EOF
       User nobody
       Group nogroup
-      Port ${PROXY_PORT_PARKING}
+      Port ${PROXY_PORT}
       Listen 127.0.0.1
       Timeout 600
       DefaultErrorFile "/usr/share/tinyproxy/default.html"
@@ -66,19 +67,19 @@
       ViaProxyName "tinyproxy"
       EOF
       tinyproxy -c "$TP_CONF"
-      wait_tcp 127.0.0.1 "${PROXY_PORT_PARKING}" tinyproxy 15 || {
+      wait_tcp 127.0.0.1 "${PROXY_PORT}" tinyproxy 15 || {
         cat /var/log/tinyproxy/tinyproxy.log 2>/dev/null || true
-        die "tinyproxy не слушает 127.0.0.1:${PROXY_PORT_PARKING}"
+        die "tinyproxy не слушает 127.0.0.1:${PROXY_PORT}"
       }
     - |
-      log "SSH-туннель через autossh (reverse proxy + local kube API)"
+      log "SSH-туннель через autossh (reverse ${JUMP_PROXY_PORT}<-${PROXY_PORT} + local kube API)"
       autossh -M 0 -f -N \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
         -o ExitOnForwardFailure=yes \
         -o StrictHostKeyChecking=accept-new \
         -o TCPKeepAlive=yes \
         -i ~/.ssh/id_proxy \
-        -R 0.0.0.0:${PROXY_PORT_PARKING}:127.0.0.1:${PROXY_PORT_PARKING} \
+        -R 0.0.0.0:${JUMP_PROXY_PORT}:127.0.0.1:${PROXY_PORT} \
         -L 127.0.0.1:${KUBE_API_PORT}:${KUBE_API_HOST}:${KUBE_API_PORT} \
         "${JUMP_USER}@${JUMP_HOST}"
       pgrep -x autossh >/dev/null || die "autossh не запустился"
@@ -87,24 +88,29 @@
       wait_tcp 127.0.0.1 "${KUBE_API_PORT}" kube-api 25 \
         || die "kube API недоступен через 127.0.0.1:${KUBE_API_PORT}"
     - |
-      log "Проверка reverse-forward на jump host"
+      log "Проверка reverse-forward на jump host (порт ${JUMP_PROXY_PORT} = порт нод)"
       binds=""
       for i in $(seq 1 15); do
-        binds=$(remote "ss -Htln 'sport = :${PROXY_PORT_PARKING}' | awk '{print \$4}'" 2>/dev/null || true)
-        printf '%s\n' "$binds" | grep -Eq "(^|[^0-9.])(0\.0\.0\.0|\*|\[::\]):${PROXY_PORT_PARKING}\$" && break
+        binds=$(remote "ss -Htln 'sport = :${JUMP_PROXY_PORT}' | awk '{print \$4}'" 2>/dev/null || true)
+        printf '%s\n' "$binds" | grep -Eq "(^|[^0-9.])(0\.0\.0\.0|\*|\[::\]):${JUMP_PROXY_PORT}\$" && break
         sleep 2
       done
-      [ -n "$binds" ] || die "reverse-forward не забинжен на ${JUMP_HOST}:${PROXY_PORT_PARKING}"
-      printf '%s\n' "$binds" | grep -Eq "(^|[^0-9.])(0\.0\.0\.0|\*|\[::\]):${PROXY_PORT_PARKING}\$" \
+      [ -n "$binds" ] || die "reverse-forward не забинжен на ${JUMP_HOST}:${JUMP_PROXY_PORT}"
+      printf '%s\n' "$binds" | grep -Eq "(^|[^0-9.])(0\.0\.0\.0|\*|\[::\]):${JUMP_PROXY_PORT}\$" \
         || die "reverse-forward только на loopback (${binds//$'\n'/ }); нужен 'GatewayPorts clientspecified' в sshd_config на ${JUMP_HOST} + reload sshd"
       log "bind OK: ${binds//$'\n'/ }"
     - |
-      log "E2E: jump -> runner tinyproxy -> registry"
-      REG_HOST="${CI_REGISTRY%%/*}"
+      log "E2E: node-path (jump:${JUMP_PROXY_PORT}) -> runner tinyproxy -> registry"
+      REG_HOST="${REGISTRY_HOST:-${CI_REGISTRY%%/*}}"
       if remote "command -v curl >/dev/null 2>&1"; then
-        code=$(remote "curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -x http://127.0.0.1:${PROXY_PORT_PARKING} https://${REG_HOST}/v2/ 2>/dev/null" || echo 000)
-        [ "$code" != "000" ] || die "proxy-цепочка не работает через туннель (code=000)"
-        log "proxy-цепочка OK (registry /v2/ -> HTTP ${code})"
+        set +e
+        code=$(remote "curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -x http://127.0.0.1:${JUMP_PROXY_PORT} https://${REG_HOST}/v2/ 2>/dev/null")
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ] || [ "${code:-000}" = "000" ]; then
+          die "proxy-цепочка не работает: jump->runner->${REG_HOST} через :${JUMP_PROXY_PORT} (curl rc=${rc} code=${code:-none}). Проверь, что REGISTRY_HOST указывает на реестр образов и tinyproxy на раннере до него дотягивается."
+        fi
+        log "proxy-цепочка OK (${REG_HOST}/v2/ -> HTTP ${code})"
       else
         log "curl на jump host отсутствует — e2e пропущена"
       fi
