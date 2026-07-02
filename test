@@ -1,125 +1,154 @@
-У меня есть вот такой манифест
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nvidia-plugin-config
-  namespace: gpu-operator
-data:
-  config: |
-    version: v1
-    flags:
-      migStrategy: none
-    sharing:
-      timeSlicing:
-        renameByDefault: false
-        resources:
-          - name: nvidia.com/gpu
-            replicas: 16   # до 16 подов могут использовать один GPU
-И Helm чарт
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: videorecorder-config
-  labels:
-    app.kubernetes.io/name: videorecorder
-    projectLabel: videorecorder
-data:
-  MONGO_HOST: "${env.MONGO_HOST}"
-  MONGO_PORT: "${env.MONGO_PORT}"
-  MONGO_USER: "${env.MONGO_USER}"
-  MONGO_DATABASE: "${env.MONGO_DATABASE}"
-  MONGO_AUTHSOURCE: "${env.MONGO_AUTHSOURCE}"
-  LOCAL_K8S_DOMAIN: "${env.LOCAL_K8S_DOMAIN}"
-  BASE_NS: "${env.BASE_NS}"
----
-{{- range .Values.videorecorder.nodes }}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: videorecorder-{{ .name | lower | replace " " "-" }}
-  labels:
-    app.kubernetes.io/name: videorecorder
-    app.kubernetes.io/instance: {{ $.Release.Name }}
-    projectLabel: videorecorder
-    coparking/node: {{ .name | quote }}
-spec:
-  replicas: {{ .replicas }}
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: videorecorder
-      projectLabel: videorecorder
-      coparking/node: {{ .name | quote }}
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: videorecorder
-        projectLabel: videorecorder
-        coparking/node: {{ .name | quote }}
-    spec:
-      nodeSelector:
-        kubernetes.io/hostname: {{ .name | quote }}
-      containers:
-        - name: videorecorder
-          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: http
-              containerPort: {{ $.Values.parkingPort | default 8000 }}
-              protocol: TCP
-          envFrom:
-            - configMapRef:
-                name: {{ $.Release.Name }}-config
-          resources:
-            limits:
-              cpu: {{ ((($.Values.resources).limits).cpu) | default "500m" | quote }}
-              memory: {{ ((($.Values.resources).limits).memory) | default "512Mi" | quote }}
-              nvidia.com/gpu: {{ ((($.Values.resources).limits).gpu) | default 1 | quote }}
-            requests:
-              cpu: {{ ((($.Values.resources).requests).cpu) | default "100m" | quote }}
-              memory: {{ ((($.Values.resources).requests).memory) | default "512Mi" | quote }}
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 5
-      {{- with $.Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-{{- end }}
----
-У меня настроено количество реплик на каждый сервер + это регулируется через values по такому принципу
-Сoparking-5:
-videorecorder-8
-platereader-2
-segmentator-4
-Coparking-6:
-videorecorder-8
-platereader-2
-segmentator-4
-Coparking-7:
-videorecorder-8
-segmentator-4
-Coparking-8:
-videorecorder-8
-minio-handler-1
-platereader-2
-segmentator-4
-Coparking-9:
-videorecorder-16
-minio-handler-2
-streams-2 
-Coparking-10:
-videorecorder-16
-minio-handler-2
-streams-2
-Но на нодах у меня 1 gpu и мне нужно чтобы все поды запускались и делили этот один gpu
-Дай точно рабочий и готовый Чарт
+.deploy:
+  stage: deploy
+  tags: [docker]
+  image:
+    name: ${CI_REGISTRY}/dpm/iac/infra:helm
+    pull_policy: [always, if-not-present]
+    entrypoint: [""]
+  variables:
+    PROXY_PORT_PARKING: "3128"
+    KUBE_API_PORT: "6443"
+    TP_CONF: "/etc/tinyproxy/tinyproxy.conf"
+    AUTOSSH_GATETIME: "0"
+  before_script:
+    - |
+      set -euo pipefail
+      log() { printf '\n\033[1;34m[deploy]\033[0m %s\n' "$*"; }
+      die() { printf '\n\033[1;31m[deploy][FATAL]\033[0m %s\n' "$*" >&2; exit 1; }
+      wait_tcp() {
+        local host=$1 port=$2 name=$3 tries=${4:-30} i
+        for i in $(seq 1 "$tries"); do
+          if (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null; then
+            exec 3>&- 3<&-; log "${name}: ${host}:${port} доступен"; return 0
+          fi
+          sleep 1
+        done
+        return 1
+      }
+      remote() {
+        ssh -i ~/.ssh/id_proxy -o StrictHostKeyChecking=accept-new \
+          -o ConnectTimeout=10 "${JUMP_USER}@${JUMP_HOST}" "$@"
+      }
+    - |
+      log "Зависимости"
+      if ! command -v autossh >/dev/null 2>&1 || ! command -v tinyproxy >/dev/null 2>&1; then
+        rm -f /etc/apt/sources.list.d/helm-stable-debian.list \
+              /etc/apt/sources.list.d/helm.list 2>/dev/null || true
+        apt-get update -qq
+        apt-get install -y --no-install-recommends \
+          tinyproxy autossh openssh-client iproute2 curl procps
+      fi
+    - |
+      log "SSH-ключ"
+      mkdir -p ~/.ssh && chmod 700 ~/.ssh
+      if [ -f "$JUMP_SSH_KEY" ]; then
+        cat "$JUMP_SSH_KEY" > ~/.ssh/id_proxy
+      else
+        printf '%s\n' "$JUMP_SSH_KEY" > ~/.ssh/id_proxy
+      fi
+      chmod 600 ~/.ssh/id_proxy
+      ssh-keygen -y -f ~/.ssh/id_proxy >/dev/null || die "SSH key invalid"
+      ssh-keyscan -H "$JUMP_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+    - |
+      log "tinyproxy 127.0.0.1:${PROXY_PORT_PARKING}"
+      mkdir -p /etc/tinyproxy /var/log/tinyproxy /var/run/tinyproxy
+      cat > "$TP_CONF" <<EOF
+      User nobody
+      Group nogroup
+      Port ${PROXY_PORT_PARKING}
+      Listen 127.0.0.1
+      Timeout 600
+      DefaultErrorFile "/usr/share/tinyproxy/default.html"
+      LogFile "/var/log/tinyproxy/tinyproxy.log"
+      LogLevel Info
+      MaxClients 100
+      Allow 127.0.0.1
+      ViaProxyName "tinyproxy"
+      EOF
+      tinyproxy -c "$TP_CONF"
+      wait_tcp 127.0.0.1 "${PROXY_PORT_PARKING}" tinyproxy 15 || {
+        cat /var/log/tinyproxy/tinyproxy.log 2>/dev/null || true
+        die "tinyproxy не слушает 127.0.0.1:${PROXY_PORT_PARKING}"
+      }
+    - |
+      log "SSH-туннель через autossh (reverse proxy + local kube API)"
+      autossh -M 0 -f -N \
+        -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+        -o ExitOnForwardFailure=yes \
+        -o StrictHostKeyChecking=accept-new \
+        -o TCPKeepAlive=yes \
+        -i ~/.ssh/id_proxy \
+        -R 0.0.0.0:${PROXY_PORT_PARKING}:127.0.0.1:${PROXY_PORT_PARKING} \
+        -L 127.0.0.1:${KUBE_API_PORT}:${KUBE_API_HOST}:${KUBE_API_PORT} \
+        "${JUMP_USER}@${JUMP_HOST}"
+      pgrep -x autossh >/dev/null || die "autossh не запустился"
+    - |
+      log "Проверка local-forward до kube API"
+      wait_tcp 127.0.0.1 "${KUBE_API_PORT}" kube-api 25 \
+        || die "kube API недоступен через 127.0.0.1:${KUBE_API_PORT}"
+    - |
+      log "Проверка reverse-forward на jump host"
+      binds=""
+      for i in $(seq 1 15); do
+        binds=$(remote "ss -Htln 'sport = :${PROXY_PORT_PARKING}' | awk '{print \$4}'" 2>/dev/null || true)
+        printf '%s\n' "$binds" | grep -Eq "(^|[^0-9.])(0\.0\.0\.0|\*|\[::\]):${PROXY_PORT_PARKING}\$" && break
+        sleep 2
+      done
+      [ -n "$binds" ] || die "reverse-forward не забинжен на ${JUMP_HOST}:${PROXY_PORT_PARKING}"
+      printf '%s\n' "$binds" | grep -Eq "(^|[^0-9.])(0\.0\.0\.0|\*|\[::\]):${PROXY_PORT_PARKING}\$" \
+        || die "reverse-forward только на loopback (${binds//$'\n'/ }); нужен 'GatewayPorts clientspecified' в sshd_config на ${JUMP_HOST} + reload sshd"
+      log "bind OK: ${binds//$'\n'/ }"
+    - |
+      log "E2E: jump -> runner tinyproxy -> registry"
+      REG_HOST="${CI_REGISTRY%%/*}"
+      if remote "command -v curl >/dev/null 2>&1"; then
+        code=$(remote "curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -x http://127.0.0.1:${PROXY_PORT_PARKING} https://${REG_HOST}/v2/ 2>/dev/null" || echo 000)
+        [ "$code" != "000" ] || die "proxy-цепочка не работает через туннель (code=000)"
+        log "proxy-цепочка OK (registry /v2/ -> HTTP ${code})"
+      else
+        log "curl на jump host отсутствует — e2e пропущена"
+      fi
+  script:
+    - |
+      set -euo pipefail
+      export TAG="${CI_COMMIT_REF_SLUG}"
+      unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy NO_PROXY no_proxy
+      KC="--kubeconfig ${KUBECONFIG} -n ${NAMESPACE}"
+      ( while :; do
+          a=$(pgrep -x autossh >/dev/null && echo up || echo DOWN)
+          t=$(pgrep -x tinyproxy >/dev/null && echo up || echo DOWN)
+          if (exec 3<>"/dev/tcp/127.0.0.1/${KUBE_API_PORT}") 2>/dev/null; then exec 3>&- 3<&-; k=up; else k=DOWN; fi
+          echo "[tunnel $(date +%T)] autossh=$a tinyproxy=$t kubeapi=$k"
+          sleep 15
+        done ) & MON=$!
+      set +e
+      helm --kubeconfig "$KUBECONFIG" upgrade -i --history-max 2 \
+        -n "$NAMESPACE" "$RELEASE_NAME" ./Helm -f "$VALUES" \
+        --set "image.tag=${TAG}.bin" --wait --timeout 5m
+      RC=$?
+      set -e
+      kill "$MON" 2>/dev/null || true
+      if [ "$RC" -ne 0 ]; then
+        echo "===== helm rc=$RC — диагностика ====="
+        kubectl $KC get pods -o wide || true
+        kubectl $KC get events --sort-by=.lastTimestamp | tail -n 40 || true
+        for p in $(kubectl $KC get pods --no-headers 2>/dev/null | awk '{split($2,a,"/"); if(a[1]!=a[2]) print $1}'); do
+          echo "----- describe $p -----"
+          kubectl $KC describe pod "$p" | sed -n '/Events:/,$p' || true
+        done
+      fi
+      exit "$RC"
+  after_script:
+    - pkill -f "id_proxy" 2>/dev/null || true
+    - pkill -x tinyproxy 2>/dev/null || true
+    - rm -f ~/.ssh/id_proxy 2>/dev/null || true
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - if: $CI_OPEN_MERGE_REQUESTS
+      when: manual
+    - if: $CI_COMMIT_REF_NAME =~ /^(main|master|develop|release\/.*)$/
+      when: manual
+    - if: $CI_COMMIT_REF_NAME !~ /^(main|master|develop|release\/.*)$/
+      when: manual
