@@ -1,5 +1,1 @@
-sudo ufw status verbose
-sudo iptables -L ufw-user-input -n --line-numbers
-sudo ufw allow 3128/tcp
-sudo ufw status numbered | grep 3128
-nc -vz jump-host-ipv4 3128        # ждём succeeded
+iptables v1.8.7 (nf_tables): chain `ufw-user-input' in table `filter' is incompatible, use 'nft' tool.
