@@ -1,42 +1,9 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nvidia-plugin-config
-  namespace: gpu-operator
-data:
-  config: |
-    version: v1
-    flags:
-      migStrategy: none
-    sharing:
-      timeSlicing:
-        renameByDefault: false
-        resources:
-          - name: nvidia.com/gpu
-            replicas: 16
+kubectl -n gpu-operator rollout restart ds/nvidia-device-plugin-daemonset
+kubectl -n gpu-operator rollout status  ds/nvidia-device-plugin-daemonset --timeout=180s
 ---
-#!/usr/bin/env bash
-set -euo pipefail
-NS=gpu-operator
-
-kubectl apply -f nvidia-plugin-config.yaml
-
-CP=$(kubectl get clusterpolicies.nvidia.com -o jsonpath='{.items[0].metadata.name}')
-echo "ClusterPolicy: $CP"
-
-kubectl patch clusterpolicies.nvidia.com "$CP" --type merge \
-  -p '{"spec":{"devicePlugin":{"config":{"name":"nvidia-plugin-config","default":"config"}}}}'
-
-echo "Ждём, пока device-plugin перечитает конфиг и ноды объявят слайсы..."
-for i in $(seq 1 36); do
-  caps=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}={.status.capacity.nvidia\.com/gpu}{"\n"}{end}' \
-         | grep -E '=[0-9]+$' || true)
-  echo "$caps" | grep -qvE '=(0|1)$' && { echo "$caps"; break; }
-  sleep 5
-done
-
-echo "--- Итоговая ёмкость GPU по нодам (ожидаем 16, а не 1) ---"
 kubectl get nodes -o custom-columns=NODE:.metadata.name,'GPU:.status.capacity.nvidia\.com/gpu'
 ---
-kubectl get pods -l app.kubernetes.io/name=segmentator -o wide -n <ns> | grep -v Running
-# пусто = все поднялись; если Pending -> kubectl describe покажет Insufficient nvidia.com/gpu
+kubectl get clusterpolicy -o jsonpath='{.items[0].spec.devicePlugin.config}{"\n"}'
+---
+kubectl -n gpu-operator logs ds/nvidia-device-plugin-daemonset -c nvidia-device-plugin --tail=50 \
+  | grep -iE 'replicas|timeslic|sharing|config'
