@@ -1,32 +1,15 @@
-{"default":"config","name":"nvidia-plugin-config"}
-kubectl get nodes -L nvidia.com/device-plugin.config coparking-5 coparking-6 coparking-7 coparking-8
-NAME          STATUS   ROLES           AGE   VERSION    DEVICE-PLUGIN.CONFIG
-coparking-5   Ready    control-plane   37d   v1.32.13   tesla-t4
-coparking-6   Ready    control-plane   37d   v1.32.13   tesla-t4
-coparking-7   Ready    control-plane   37d   v1.32.13   tesla-t4
-coparking-8   Ready    worker          37d   v1.32.13   tesla-t4
-kubectl -n gpu-operator get cm | grep -Ei 'plugin|slic|device'
-nvidia-device-plugin-entrypoint                   1      35d
-nvidia-plugin-config                              1      26m
-time-slicing-config                               1      36d
-POD=$(kubectl -n gpu-operator get pod -l app=nvidia-device-plugin-daemonset \
-  --field-selector spec.nodeName=coparking-7 -o jsonpath='{.items[0].metadata.name}')
-kubectl -n gpu-operator exec "$POD" -c nvidia-device-plugin -- \
+POD8=$(kubectl -n gpu-operator get pod -l app=nvidia-device-plugin-daemonset \
+  --field-selector spec.nodeName=coparking-8 -o jsonpath='{.items[0].metadata.name}')
+echo "$POD8"
+kubectl -n gpu-operator delete pod "$POD8"
+kubectl -n gpu-operator rollout status ds/nvidia-device-plugin-daemonset --timeout=180s
+---
+kubectl get node coparking-8 -o jsonpath='{.status.capacity.nvidia\.com/gpu}{"\n"}'
+---
+POD8=$(kubectl -n gpu-operator get pod -l app=nvidia-device-plugin-daemonset \
+  --field-selector spec.nodeName=coparking-8 -o jsonpath='{.items[0].metadata.name}')
+kubectl -n gpu-operator exec "$POD8" -c nvidia-device-plugin -- \
   sh -c 'cat "$CONFIG_FILE" 2>/dev/null || cat /available-configs/* 2>/dev/null'
-version: v1
-flags:
-  migStrategy: none
-sharing:
-  timeSlicing:
-    renameByDefault: false
-    resources:
-      - name: nvidia.com/gpu
-        replicas: 16
-kubectl get nodes -o custom-columns=NODE:.metadata.name,'GPU:.status.capacity.nvidia\.com/gpu'
-NODE           GPU
-coparking-10   <none>
-coparking-5    16
-coparking-6    16
-coparking-7    16
-coparking-8    4
-coparking-9    <none>
+---
+kubectl -n gpu-operator get cm time-slicing-config -o jsonpath='{.data}{"\n"}'   # посмотреть ключи и replicas
+# если там ключ tesla-t4 с replicas: 4 — поправь на 16 и перезапусти плагин на 8
