@@ -1,26 +1,9 @@
-Certificate:
-    Data:
-        Version: 3 (0x2)
-        Serial Number:
-            
-        Signature Algorithm: sha256WithRSAEncryption
-        Issuer: CN = test
-        Validity
-            Not Before: May 14 11:37:13 2022 GMT
-            Not After : May  6 11:37:13 2062 GMT
-        Subject: CN = test
-        Subject Public Key Info:
-            Public Key Algorithm: rsaEncryption
-                Public-Key: (2048 bit)
-                Modulus:
+Привет. То, что прислали (.pem с CN=test), для Ingress использовать нельзя — это корневой CA-сертификат (самоподписанный: Issuer = Subject = test, стоит CA:TRUE, Key Usage = Certificate Sign). Он предназначен подписывать сертификаты, а не обслуживать HTTPS. Как серверный он не подойдёт по двум причинам: в нём нет нашего домена в SAN (клиент отвергнет по имени) и это CA, а не leaf-серт.
 
-                Exponent: 
-        X509v3 extensions:
-            X509v3 Key Usage: critical
-                Digital Signature, Certificate Sign, CRL Sign
-            X509v3 Basic Constraints: critical
-                CA:TRUE
-            X509v3 Subject Key Identifier:
+Нужен серверный (leaf) сертификат на наш домен. Пришлите, пожалуйста, в формате PEM:
 
-    Signature Algorithm: sha256WithRSAEncryption
-    Signature Value:
+	1.	Серверный сертификат на hostname: <укажи свои домены> — с этими именами в SAN (SubjectAltName), с назначением serverAuth, CA:FALSE.
+	2.	Fullchain — в одном файле: наш серт + все промежуточные CA (и корневой, если цепочка от него).
+	3.	Приватный ключ к этому серверному серту (PEM, без пароля) — только если CSR генерите вы. Если пришлёте только требования — я сам сгенерю ключ и CSR у себя и передам вам только CSR на подпись (так безопаснее, приватный ключ не покидает наш контур).
+
+Не подойдёт: только корневой CA; сертификат без SAN с доменом; формат PFX/DER (нужен PEM); ключ под паролем.
