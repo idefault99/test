@@ -1,12 +1,32 @@
-kubectl get clusterpolicy -o jsonpath='{.items[0].spec.devicePlugin.config}{"\n"}'
----
+{"default":"config","name":"nvidia-plugin-config"}
 kubectl get nodes -L nvidia.com/device-plugin.config coparking-5 coparking-6 coparking-7 coparking-8
----
+NAME          STATUS   ROLES           AGE   VERSION    DEVICE-PLUGIN.CONFIG
+coparking-5   Ready    control-plane   37d   v1.32.13   tesla-t4
+coparking-6   Ready    control-plane   37d   v1.32.13   tesla-t4
+coparking-7   Ready    control-plane   37d   v1.32.13   tesla-t4
+coparking-8   Ready    worker          37d   v1.32.13   tesla-t4
 kubectl -n gpu-operator get cm | grep -Ei 'plugin|slic|device'
-# и содержимое подозрительных:
-kubectl -n gpu-operator get cm <имя> -o jsonpath='{.data}{"\n"}'
----
+nvidia-device-plugin-entrypoint                   1      35d
+nvidia-plugin-config                              1      26m
+time-slicing-config                               1      36d
 POD=$(kubectl -n gpu-operator get pod -l app=nvidia-device-plugin-daemonset \
   --field-selector spec.nodeName=coparking-7 -o jsonpath='{.items[0].metadata.name}')
 kubectl -n gpu-operator exec "$POD" -c nvidia-device-plugin -- \
   sh -c 'cat "$CONFIG_FILE" 2>/dev/null || cat /available-configs/* 2>/dev/null'
+version: v1
+flags:
+  migStrategy: none
+sharing:
+  timeSlicing:
+    renameByDefault: false
+    resources:
+      - name: nvidia.com/gpu
+        replicas: 16
+kubectl get nodes -o custom-columns=NODE:.metadata.name,'GPU:.status.capacity.nvidia\.com/gpu'
+NODE           GPU
+coparking-10   <none>
+coparking-5    16
+coparking-6    16
+coparking-7    16
+coparking-8    4
+coparking-9    <none>
