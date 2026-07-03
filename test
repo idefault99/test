@@ -1,29 +1,11 @@
-gpu-feature-discovery-p22bf                                   2/2     Running            0                6d22h  coparking-8   
-gpu-feature-discovery-q4knh                                   1/2     CrashLoopBackOff   12 (5m4s ago)    41m    coparking-7   
-gpu-feature-discovery-s6j4f                                   1/2     CrashLoopBackOff   12 (5m12s ago)   41m    coparking-5   
-gpu-feature-discovery-wq7ht                                   2/2     Running            0                6d22h  coparking-6   
-gpu-operator-99b897b59-94ntb                                  1/1     Running            0                6d22h  coparking-5   
-gpu-operator-node-feature-discovery-gc-65f665f889-6c6m7       1/1     Running            0                6d22h  coparking-10  
-gpu-operator-node-feature-discovery-master-698dd55448-zdngc   1/1     Running            0                6d22h  coparking-5   
-gpu-operator-node-feature-discovery-worker-8v4gh              1/1     Running            0                6d22h  coparking-7   
-gpu-operator-node-feature-discovery-worker-dpvs4              1/1     Running            0                6d22h  coparking-9   
-gpu-operator-node-feature-discovery-worker-ppv44              1/1     Running            0                6d22h  coparking-10  
-gpu-operator-node-feature-discovery-worker-ppxkm              1/1     Running            0                6d22h  coparking-5   
-gpu-operator-node-feature-discovery-worker-rcjt8              1/1     Running            0                6d22h  coparking-8   
-gpu-operator-node-feature-discovery-worker-vr9m8              1/1     Running            0                6d22h  coparking-6   
-nvidia-cuda-validator-mdvwc                                   0/1     Completed          0                6d22h  coparking-8   
-nvidia-cuda-validator-sfrpj                                   0/1     Completed          0                6d22h  coparking-5   
-nvidia-cuda-validator-tf889                                   0/1     Completed          0                6d22h  coparking-7   
-nvidia-cuda-validator-tzr4z                                   0/1     Completed          0                6d22h  coparking-6   
-nvidia-dcgm-exporter-mbnq4                                    1/1     Running            0                6d22h  coparking-8   
-nvidia-dcgm-exporter-n8q9k                                    1/1     Running            0                6d22h  coparking-6   
-nvidia-dcgm-exporter-n9gnb                                    1/1     Running            0                6d22h  coparking-5   
-nvidia-dcgm-exporter-xwslr                                    1/1     Running            0                6d22h  coparking-7   
-nvidia-device-plugin-daemonset-gz66q                          1/2     CrashLoopBackOff   2 (24s ago)      49s    coparking-6   
-nvidia-device-plugin-daemonset-jfsqn                          1/2     CrashLoopBackOff   2 (20s ago)      49s    coparking-8   
-nvidia-device-plugin-daemonset-wtk9z                          1/2     CrashLoopBackOff   2 (24s ago)      49s    coparking-5   
-nvidia-device-plugin-daemonset-z8s8j                          1/2     CrashLoopBackOff   2 (25s ago)      49s    coparking-7   
-nvidia-operator-validator-7pgv6                               1/1     Running            0                6d22h  coparking-6   
-nvidia-operator-validator-9knm6                               1/1     Running            0                6d22h  coparking-8   
-nvidia-operator-validator-hd87p                               1/1     Running            0                6d22h  coparking-7   
-nvidia-operator-validator-tqdwz                               1/1     Running            0                6d22h  coparking-5   
+# имена контейнеров в поде (увидишь оба: nvidia-device-plugin и *-sidecar/config-manager)
+kubectl -n gpu-operator get pod nvidia-device-plugin-daemonset-wtk9z \
+  -o jsonpath='{range .spec.containers[*]}{.name}{"\n"}{end}'
+
+# лог предыдущего запуска ПАДАЮЩЕГО контейнера (подставь имя из вывода выше)
+kubectl -n gpu-operator logs nvidia-device-plugin-daemonset-wtk9z \
+  -c <имя-второго-контейнера> --previous --tail=60
+
+# и причина/код завершения по контейнерам
+kubectl -n gpu-operator get pod nvidia-device-plugin-daemonset-wtk9z \
+  -o jsonpath='{range .status.containerStatuses[*]}{.name}{": "}{.state}{" last="}{.lastState.terminated.reason}{" exit="}{.lastState.terminated.exitCode}{"\n"}{end}'
