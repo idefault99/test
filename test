@@ -1,9 +1,196 @@
-Привет. То, что прислали (.pem с CN=test), для Ingress использовать нельзя — это корневой CA-сертификат (самоподписанный: Issuer = Subject = test, стоит CA:TRUE, Key Usage = Certificate Sign). Он предназначен подписывать сертификаты, а не обслуживать HTTPS. Как серверный он не подойдёт по двум причинам: в нём нет нашего домена в SAN (клиент отвергнет по имени) и это CA, а не leaf-серт.
+{{ if eq .Release.Namespace "default" }}
+{{- fail "Default namespace not available for this helm chart"}}
+{{ end }}
+{{- if .Values.ingress.enabled }}
+{{ if empty .Values.ingressDomain }}
+{{- fail ".Values.ingressDomain should be present, cannot be empty. Use --set for this (or disable ingress with --set ingress.enabled=false)"}}
+{{ end }}
 
-Нужен серверный (leaf) сертификат на наш домен. Пришлите, пожалуйста, в формате PEM:
+############### Backend Endpoints ###############
+{{- $anyBackend := false -}}
+{{- range .Values.ingress.backendPaths -}}
+{{- if include "coparking.isServiceEnabled" (dict "root" $ "name" .service) -}}
+{{- $anyBackend = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $anyBackend }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-not-free
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{- end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+      {{- range .Values.ingress.backendPaths }}
+      {{- if include "coparking.isServiceEnabled" (dict "root" $ "name" .service) }}
+      - path: {{ .path }}
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ $.Release.Namespace }}-{{ .service }}-cs
+            port:
+              number: {{ $.Values.ports.internal.back }}
+      {{- end }}
+      {{- end }}
+{{- end }}
 
-	1.	Серверный сертификат на hostname: <укажи свои домены> — с этими именами в SAN (SubjectAltName), с назначением serverAuth, CA:FALSE.
-	2.	Fullchain — в одном файле: наш серт + все промежуточные CA (и корневой, если цепочка от него).
-	3.	Приватный ключ к этому серверному серту (PEM, без пароля) — только если CSR генерите вы. Если пришлёте только требования — я сам сгенерю ключ и CSR у себя и передам вам только CSR на подпись (так безопаснее, приватный ключ не покидает наш контур).
+---
+############### S3 Minio Endpoints ###############
+{{ if eq .Values.enableService.s3minio true }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-s3minio
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{ if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{ end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+      - path: /api/s3minio(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Values.labels.s3minio }}-api-service
+            port:
+              number: {{ .Values.ports.internal.s3minioAPI }}
+      - path: /s3minio(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Values.labels.s3minio }}-console-service
+            port:
+              number: {{ .Values.ports.internal.s3minioConsole }}
+{{ end }}
 
-Не подойдёт: только корневой CA; сертификат без SAN с доменом; формат PFX/DER (нужен PEM); ключ под паролем.
+---
+############### Free Endpoints ###############
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-free
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{ if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{ end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Values.labels.front }}-service
+            port:
+              number: {{ .Values.ports.internal.front }}
+{{- end }}{{/* ingress.enabled */}}
+---
+###############################################################################
+# Cross-namespace доступ к микросервисам.
+#
+# Для каждого включённого микросервиса в основном неймспейсе создаётся
+# ExternalName-сервис "<base>-<name>-cs", указывающий на сервис микросервиса
+# "<base>-<name>-service" в его собственном неймспейсе "<base>-<name>".
+#
+###############################################################################
+{{- if .Values.microservices.enabled }}
+{{- $base := .Release.Namespace }}
+{{- range .Values.microservices.list }}
+{{- if ne (.enabled | toString) "false" }}
+{{- $port := .port | default $.Values.microservices.defaultPort }}
+{{- $selector := .selector | default .name }}
+{{- $msNs := include "coparking.msNamespace" (dict "root" $ "name" .name) }}
+{{- $createTarget := $.Values.microservices.createTargetService }}
+{{- if hasKey . "createTargetService" }}{{- $createTarget = .createTargetService }}{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $base }}-{{ .name }}-cs
+  namespace: {{ $base }}
+  labels:
+    app: {{ .name }}
+    {{- include "coparking.commonLabels" (dict "root" $ "app" .name) | nindent 4 }}
+spec:
+  type: ExternalName
+  externalName: {{ $base }}-{{ .name }}-service.{{ $msNs }}.svc.{{ $.Values.localK8sDomain }}
+  ports:
+    - port: {{ $port }}
+      protocol: TCP
+{{- if $createTarget }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $base }}-{{ .name }}-service
+  namespace: {{ $msNs }}
+  labels:
+    app: {{ $selector }}
+    {{- include "coparking.commonLabels" (dict "root" $ "app" .name) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $selector }}
+  ports:
+    - port: {{ $port }}
+      protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+bookingserver - /api/bookingserver/v1
+mapserver - /api/mapserver/v1
+openparkingapi - /api/openparkingapi/v1
+capsmanager - /api/capsmanager/v1
+alertprocessor - /api/alertprocessor/v1
+administration - /api/administration/v1
+cameracolorcontroller - /api/cameracolorcontroller/v1
+crash_processor - /api/crash-processor/v1
+eventserver - /api/eventserver/v1
+parkingreports - /api/parkingreports/v1
