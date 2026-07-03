@@ -1,3 +1,26 @@
-service/ingress-nginx-controller у него уже есть EXTERNAL-IP
-service/ingress-nginx-controller-admission
-deployment.apps/ingress-nginx-controller   1/1     1            1
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN = test
+        Validity
+            Not Before: May 14 11:37:13 2022 GMT
+            Not After : May  6 11:37:13 2062 GMT
+        Subject: CN = test
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+
+                Exponent: 
+        X509v3 extensions:
+            X509v3 Key Usage: critical
+                Digital Signature, Certificate Sign, CRL Sign
+            X509v3 Basic Constraints: critical
+                CA:TRUE
+            X509v3 Subject Key Identifier:
+
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
