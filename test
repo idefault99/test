@@ -1,196 +1,126 @@
-{{ if eq .Release.Namespace "default" }}
-{{- fail "Default namespace not available for this helm chart"}}
-{{ end }}
-{{- if .Values.ingress.enabled }}
-{{ if empty .Values.ingressDomain }}
-{{- fail ".Values.ingressDomain should be present, cannot be empty. Use --set for this (or disable ingress with --set ingress.enabled=false)"}}
-{{ end }}
+TLS:
+  enable: true
+  secret: '{{ .Values.ingressDomain }}-tls'   # имя секрета; скрипт ниже создаёт ровно его
 
-############### Backend Endpoints ###############
-{{- $anyBackend := false -}}
-{{- range .Values.ingress.backendPaths -}}
-{{- if include "coparking.isServiceEnabled" (dict "root" $ "name" .service) -}}
-{{- $anyBackend = true -}}
-{{- end -}}
-{{- end -}}
-{{- if $anyBackend }}
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{ .Values.ingressDomain }}-ingress-not-free
-  namespace: {{ .Release.Namespace }}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
-    nginx.ingress.kubernetes.io/rewrite-target: /$1
-    nginx.ingress.kubernetes.io/use-regex: 'true'
-spec:
-  ingressClassName: {{ .Values.ingressClassName }}
-  {{- if eq .Values.TLS.enable true }}
-  tls:
-    - hosts:
-        - {{ .Values.ingressDomain }}
-      secretName: {{ tpl .Values.TLS.secret . }}
-  {{- end }}
-  rules:
-  - host: {{ .Values.ingressDomain }}
-    http:
-      paths:
-      {{- range .Values.ingress.backendPaths }}
-      {{- if include "coparking.isServiceEnabled" (dict "root" $ "name" .service) }}
-      - path: {{ .path }}
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: {{ $.Release.Namespace }}-{{ .service }}-cs
-            port:
-              number: {{ $.Values.ports.internal.back }}
-      {{- end }}
-      {{- end }}
-{{- end }}
+ingress:
+  enabled: true
+  backendPaths:
+    - { path: '/api/bookingserver/v1(?:/|$)(.*)',         service: bookingserver }
+    - { path: '/api/mapserver/v1(?:/|$)(.*)',             service: mapserver }
+    - { path: '/api/openparkingapi/v1(?:/|$)(.*)',        service: openparkingapi }
+    - { path: '/api/capsmanager/v1(?:/|$)(.*)',           service: capsmanager }
+    - { path: '/api/alertprocessor/v1(?:/|$)(.*)',        service: alertprocessor }
+    - { path: '/api/administration/v1(?:/|$)(.*)',        service: administration }
+    - { path: '/api/cameracolorcontroller/v1(?:/|$)(.*)', service: cameracolorcontroller }
+    - { path: '/api/crash-processor/v1(?:/|$)(.*)',       service: crash-processor }
+    - { path: '/api/eventserver/v1(?:/|$)(.*)',           service: eventserver }
+    - { path: '/api/parkingreports/v1(?:/|$)(.*)',        service: parkingreports }
+
+microservices:
+  enabled: true
+  list:
+    - { name: bookingserver }
+    - { name: mapserver }
+    - { name: openparkingapi }
+    - { name: capsmanager }
+    - { name: alertprocessor }
+    - { name: administration }
+    - { name: cameracolorcontroller }
+    - { name: crash-processor }
+    - { name: eventserver }
+    - { name: parkingreports }
 
 ---
-############### S3 Minio Endpoints ###############
-{{ if eq .Values.enableService.s3minio true }}
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{ .Values.ingressDomain }}-ingress-s3minio
-  namespace: {{ .Release.Namespace }}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/use-regex: 'true'
-    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
-spec:
-  ingressClassName: {{ .Values.ingressClassName }}
-  {{ if eq .Values.TLS.enable true }}
-  tls:
-    - hosts:
-        - {{ .Values.ingressDomain }}
-      secretName: {{ tpl .Values.TLS.secret . }}
-  {{ end }}
-  rules:
-  - host: {{ .Values.ingressDomain }}
-    http:
-      paths:
-      - path: /api/s3minio(/|$)(.*)
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: {{ .Values.labels.s3minio }}-api-service
-            port:
-              number: {{ .Values.ports.internal.s3minioAPI }}
-      - path: /s3minio(/|$)(.*)
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: {{ .Values.labels.s3minio }}-console-service
-            port:
-              number: {{ .Values.ports.internal.s3minioConsole }}
-{{ end }}
+#!/usr/bin/env bash
+# Быстрое и идемпотентное создание/обновление TLS-секрета для Ingress.
+# Запускать повторно можно сколько угодно — просто перезапишет секрет свежим сертом.
+set -euo pipefail
+
+# ─────────────────────────── НАСТРОЙКА ───────────────────────────
+NAMESPACE="coparking"                 # неймспейс релиза (где живёт Ingress)
+SECRET_NAME="coparking-tls"           # ДОЛЖНО совпадать с secretName в Ingress
+                                      #   (.Values.TLS.secret после tpl, напр. "<domain>-tls")
+CERT_FILE="fullchain.crt"             # серверный серт: leaf (+ intermediates/CA) в PEM
+KEY_FILE="tls.key"                    # приватный ключ сервера, PEM, без пароля
+CA_FILE=""                            # опц.: корневой CA (CN=test) — добавится в цепочку
+                                      #   и продублируется в configmap для раздачи клиентам
+INGRESS_DOMAIN=""                     # опц.: hostname для проверки SAN (пусто = пропустить)
+# ─────────────────────────────────────────────────────────────────
+
+command -v kubectl >/dev/null || { echo "нет kubectl"; exit 1; }
+command -v openssl >/dev/null || { echo "нет openssl"; exit 1; }
+[ -f "$CERT_FILE" ] || { echo "нет файла серта: $CERT_FILE"; exit 1; }
+
+# ── если ключ лежит внутри того же .pem — вытащим ──
+if [ ! -f "$KEY_FILE" ]; then
+  if grep -q 'BEGIN.*PRIVATE KEY' "$CERT_FILE"; then
+    echo "Ключ найден внутри $CERT_FILE — извлекаю в $KEY_FILE"
+    awk '/BEGIN.*PRIVATE KEY/,/END.*PRIVATE KEY/' "$CERT_FILE" > "$KEY_FILE"
+    chmod 600 "$KEY_FILE"
+  else
+    echo "нет ключа $KEY_FILE и внутри серта его нет"; exit 1
+  fi
+fi
+
+# ── ключ читается и без пароля? ──
+openssl pkey -in "$KEY_FILE" -noout 2>/dev/null || {
+  echo "Ключ зашифрован/битый. Сними пароль: openssl rsa -in $KEY_FILE -out $KEY_FILE"; exit 1; }
+
+# ── серт и ключ — одна пара? (работает для RSA и EC) ──
+cpub=$(openssl x509 -in "$CERT_FILE" -pubkey -noout 2>/dev/null | openssl md5)
+kpub=$(openssl pkey -in "$KEY_FILE" -pubout 2>/dev/null | openssl md5)
+[ "$cpub" = "$kpub" ] || { echo "ОШИБКА: серт и ключ НЕ пара (публичные ключи не совпали)"; exit 1; }
+echo "серт/ключ: пара совпадает"
+
+# ── срок действия ──
+if openssl x509 -in "$CERT_FILE" -noout -checkend 0 >/dev/null 2>&1; then
+  echo "серт действует до: $(openssl x509 -in "$CERT_FILE" -noout -enddate | cut -d= -f2)"
+else
+  echo "ВНИМАНИЕ: серт просрочен"
+fi
+
+# ── SAN содержит домен? ──
+if [ -n "$INGRESS_DOMAIN" ]; then
+  if openssl x509 -in "$CERT_FILE" -noout -ext subjectAltName 2>/dev/null | grep -q "$INGRESS_DOMAIN"; then
+    echo "SAN содержит $INGRESS_DOMAIN — ок"
+  else
+    echo "ВНИМАНИЕ: '$INGRESS_DOMAIN' НЕ найден в SAN — клиент отвергнет серт по имени хоста"
+  fi
+fi
+
+# ── собрать bundle (добавить CA в цепочку, если задан) ──
+BUNDLE="$CERT_FILE"
+CLEANUP=""
+if [ -n "$CA_FILE" ] && [ -f "$CA_FILE" ]; then
+  BUNDLE="$(mktemp)"; CLEANUP="$BUNDLE"
+  cat "$CERT_FILE" "$CA_FILE" > "$BUNDLE"
+  echo "CA добавлен в цепочку"
+fi
+
+kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
+
+# ── создать/обновить TLS-секрет (идемпотентно) ──
+kubectl create secret tls "$SECRET_NAME" \
+  --cert="$BUNDLE" --key="$KEY_FILE" \
+  --namespace "$NAMESPACE" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# ── CA в configmap для раздачи клиентам (hairpin-поды, curl) ──
+if [ -n "$CA_FILE" ] && [ -f "$CA_FILE" ]; then
+  kubectl create configmap "${SECRET_NAME}-ca" --from-file=ca.crt="$CA_FILE" \
+    --namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+  echo "CA положен в configmap ${SECRET_NAME}-ca (ключ ca.crt)"
+fi
+
+[ -n "$CLEANUP" ] && rm -f "$CLEANUP"
+
+echo
+echo "Готово. ingress-nginx подхватит новый серт САМ, reload/restart не нужен."
+kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" \
+  -o custom-columns=NAME:.metadata.name,TYPE:.type,AGE:.metadata.creationTimestamp
+echo
+echo "Проверка вживую (домен + порт из EXTERNAL-IP ingress-nginx):"
+echo "  curl -kv https://${INGRESS_DOMAIN:-<domain>}/ 2>&1 | grep -Ei 'subject:|issuer:|expire'"
+echo "  openssl s_client -connect ${INGRESS_DOMAIN:-<domain>}:443 -servername ${INGRESS_DOMAIN:-<domain>} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates"
 
 ---
-############### Free Endpoints ###############
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{ .Values.ingressDomain }}-ingress-free
-  namespace: {{ .Release.Namespace }}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
-    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
-    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
-spec:
-  ingressClassName: {{ .Values.ingressClassName }}
-  {{ if eq .Values.TLS.enable true }}
-  tls:
-    - hosts:
-        - {{ .Values.ingressDomain }}
-      secretName: {{ tpl .Values.TLS.secret . }}
-  {{ end }}
-  rules:
-  - host: {{ .Values.ingressDomain }}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: {{ .Values.labels.front }}-service
-            port:
-              number: {{ .Values.ports.internal.front }}
-{{- end }}{{/* ingress.enabled */}}
----
-###############################################################################
-# Cross-namespace доступ к микросервисам.
-#
-# Для каждого включённого микросервиса в основном неймспейсе создаётся
-# ExternalName-сервис "<base>-<name>-cs", указывающий на сервис микросервиса
-# "<base>-<name>-service" в его собственном неймспейсе "<base>-<name>".
-#
-###############################################################################
-{{- if .Values.microservices.enabled }}
-{{- $base := .Release.Namespace }}
-{{- range .Values.microservices.list }}
-{{- if ne (.enabled | toString) "false" }}
-{{- $port := .port | default $.Values.microservices.defaultPort }}
-{{- $selector := .selector | default .name }}
-{{- $msNs := include "coparking.msNamespace" (dict "root" $ "name" .name) }}
-{{- $createTarget := $.Values.microservices.createTargetService }}
-{{- if hasKey . "createTargetService" }}{{- $createTarget = .createTargetService }}{{- end }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $base }}-{{ .name }}-cs
-  namespace: {{ $base }}
-  labels:
-    app: {{ .name }}
-    {{- include "coparking.commonLabels" (dict "root" $ "app" .name) | nindent 4 }}
-spec:
-  type: ExternalName
-  externalName: {{ $base }}-{{ .name }}-service.{{ $msNs }}.svc.{{ $.Values.localK8sDomain }}
-  ports:
-    - port: {{ $port }}
-      protocol: TCP
-{{- if $createTarget }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $base }}-{{ .name }}-service
-  namespace: {{ $msNs }}
-  labels:
-    app: {{ $selector }}
-    {{- include "coparking.commonLabels" (dict "root" $ "app" .name) | nindent 4 }}
-spec:
-  type: ClusterIP
-  selector:
-    app: {{ $selector }}
-  ports:
-    - port: {{ $port }}
-      protocol: TCP
-{{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
----
-bookingserver - /api/bookingserver/v1
-mapserver - /api/mapserver/v1
-openparkingapi - /api/openparkingapi/v1
-capsmanager - /api/capsmanager/v1
-alertprocessor - /api/alertprocessor/v1
-administration - /api/administration/v1
-cameracolorcontroller - /api/cameracolorcontroller/v1
-crash_processor - /api/crash-processor/v1
-eventserver - /api/eventserver/v1
-parkingreports - /api/parkingreports/v1
