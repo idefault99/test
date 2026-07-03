@@ -1,4 +1,3 @@
-Сертификат в формате PEM (fullchain: leaf + промежуточные CA в одном файле).
-	2.	Приватный ключ в PEM, без пароля.
-	3.	Если CA внутренний — ещё root CA (ca.crt).
-Домены/SAN: <перечисли hostname, что пойдут в Ingress>. Не PFX/DER, а PEM.
+service/ingress-nginx-controller у него уже есть EXTERNAL-IP
+service/ingress-nginx-controller-admission
+deployment.apps/ingress-nginx-controller   1/1     1            1
