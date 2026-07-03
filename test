@@ -1,94 +1,42 @@
-{{- range .Values.segmentator.nodes }}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: segmentator-{{ .name | lower | replace " " "-" }}
-  labels:
-    app.kubernetes.io/name: segmentator
-    app.kubernetes.io/instance: segmentator
-    projectLabel: segmentator
-    coparking/node: {{ .name | quote }}
-spec:
-  replicas: {{ .replicas }}
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: segmentator
-      projectLabel: segmentator
-      coparking/node: {{ .name | quote }}
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: segmentator
-        projectLabel: segmentator
-        coparking/node: {{ .name | quote }}
-    spec:
-      nodeSelector:
-        kubernetes.io/hostname: {{ .name | quote }}
-      containers:
-        - name: segmentator
-          image: "${image.repository}:${image.tag}"
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
-          env:
-            - name: MONGO_HOST
-              value: "${env.MONGO_HOST}"
-            - name: MONGO_PORT
-              value: "${env.MONGO_PORT}"
-            - name: MONGO_USER
-              value: "${env.MONGO_USER}"
-            - name: MONGO_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mongo-secret
-                  key: password
-            - name: MONGO_DATABASE
-              value: "${env.MONGO_DATABASE}"
-            - name: MONGO_AUTHSOURCE
-              value: "${env.MONGO_AUTHSOURCE}"
-            - name: LOCAL_K8S_DOMAIN
-              value: "${env.LOCAL_K8S_DOMAIN}"
-            - name: BASE_NS
-              value: "${env.BASE_NS}"
-          resources:
-            limits:
-              cpu: 500m
-              memory: {{ .Values.segmentator.resources.limits.memory | default "512Mi" | quote }}
-              nvidia.com/gpu: 1
-            requests:
-              cpu: 100m
-              memory: 512Mi
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 5
-      affinity: {}
-      tolerations: []
-{{- end }}
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: segmentator-config
-  labels:
-    app.kubernetes.io/name: segmentator
-    projectLabel: segmentator
+  name: nvidia-plugin-config
+  namespace: gpu-operator
 data:
-  MONGO_HOST: "${env.MONGO_HOST}"
-  MONGO_PORT: "${env.MONGO_PORT}"
-  MONGO_USER: "${env.MONGO_USER}"
-  MONGO_DATABASE: "${env.MONGO_DATABASE}"
-  MONGO_AUTHSOURCE: "${env.MONGO_AUTHSOURCE}"
-  LOCAL_K8S_DOMAIN: "${env.LOCAL_K8S_DOMAIN}"
-  BASE_NS: "${env.BASE_NS}"
+  config: |
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        renameByDefault: false
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 16
+---
+#!/usr/bin/env bash
+set -euo pipefail
+NS=gpu-operator
+
+kubectl apply -f nvidia-plugin-config.yaml
+
+CP=$(kubectl get clusterpolicies.nvidia.com -o jsonpath='{.items[0].metadata.name}')
+echo "ClusterPolicy: $CP"
+
+kubectl patch clusterpolicies.nvidia.com "$CP" --type merge \
+  -p '{"spec":{"devicePlugin":{"config":{"name":"nvidia-plugin-config","default":"config"}}}}'
+
+echo "Ждём, пока device-plugin перечитает конфиг и ноды объявят слайсы..."
+for i in $(seq 1 36); do
+  caps=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}={.status.capacity.nvidia\.com/gpu}{"\n"}{end}' \
+         | grep -E '=[0-9]+$' || true)
+  echo "$caps" | grep -qvE '=(0|1)$' && { echo "$caps"; break; }
+  sleep 5
+done
+
+echo "--- Итоговая ёмкость GPU по нодам (ожидаем 16, а не 1) ---"
+kubectl get nodes -o custom-columns=NODE:.metadata.name,'GPU:.status.capacity.nvidia\.com/gpu'
+---
+kubectl get pods -l app.kubernetes.io/name=segmentator -o wide -n <ns> | grep -v Running
+# пусто = все поднялись; если Pending -> kubectl describe покажет Insufficient nvidia.com/gpu
