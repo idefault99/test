@@ -1,9 +1,85 @@
-kubectl -n gpu-operator rollout restart ds/nvidia-device-plugin-daemonset
-kubectl -n gpu-operator rollout status  ds/nvidia-device-plugin-daemonset --timeout=180s
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/run/nvidia-persistenced/socket as /run/nvidia-persistenced/socket"
+time="2026-07-03T06:19:39Z" level=warning msg="Could not locate /nvidia-fabricmanager/socket: /nvidia-fabricmanager/socket: not found"
+time="2026-07-03T06:19:39Z" level=warning msg="Could not locate /tmp/nvidia-mps: /tmp/nvidia-mps: not found"
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/lib/firmware/nvidia/570.133.20/gsp_ga10x.bin as /lib/firmware/nvidia/570.133.20/gsp_ga10x.bin"
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/lib/firmware/nvidia/570.133.20/gsp_tu10x.bin as /lib/firmware/nvidia/570.133.20/gsp_tu10x.bin"
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/usr/bin/nvidia-smi as /usr/bin/nvidia-smi"
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/usr/bin/nvidia-debugdump as /usr/bin/nvidia-debugdump"
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/usr/bin/nvidia-persistenced as /usr/bin/nvidia-persistenced"
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/usr/bin/nvidia-cuda-mps-control as /usr/bin/nvidia-cuda-mps-control"
+time="2026-07-03T06:19:39Z" level=info msg="Selecting /host/usr/bin/nvidia-cuda-mps-server as /usr/bin/nvidia-cuda-mps-server"
+time="2026-07-03T06:19:39Z" level=warning msg="Could not locate nvidia-imex: nvidia-imex: not found"
+time="2026-07-03T06:19:39Z" level=warning msg="Could not locate nvidia-imex-ctl: nvidia-imex-ctl: not found"
+time="2026-07-03T06:19:40Z" level=info msg="Generating CDI spec for resource: k8s.device-plugin.nvidia.com/gdrcopy"
+time="2026-07-03T06:19:40Z" level=warning msg="Could not locate /dev/gdrdrv: /dev/gdrdrv: not found"
+E0703 06:19:40.012870     575 cdi.go:211] "Ignoring empty CDI specs" err="failed to write spec: invalid CDI Spec: failed add device \"all\": invalid device, empty device edits" vendor="k8s.device-plugin.nvidia.com" class="gdrcopy"
+time="2026-07-03T06:19:40Z" level=info msg="Generating CDI spec for resource: k8s.device-plugin.nvidia.com/gds"
+time="2026-07-03T06:19:40Z" level=warning msg="Could not locate /dev/nvidia-fs*: /dev/nvidia-fs*: not found"
+time="2026-07-03T06:19:40Z" level=warning msg="Could not locate /dev/nvidia-fs*: /dev/nvidia-fs*: not found"
+E0703 06:19:40.019341     575 cdi.go:211] "Ignoring empty CDI specs" err="failed to write spec: invalid CDI Spec: failed add device \"all\": invalid device, empty device edits" vendor="k8s.device-plugin.nvidia.com" class="gds"
+time="2026-07-03T06:19:40Z" level=info msg="Generating CDI spec for resource: k8s.device-plugin.nvidia.com/mofed"
+time="2026-07-03T06:19:40Z" level=warning msg="Could not locate /dev/infiniband/uverbs*: /dev/infiniband/uverbs*: not found"
+time="2026-07-03T06:19:40Z" level=warning msg="Could not locate /dev/infiniband/rdma_cm: /dev/infiniband/rdma_cm: not found"
+E0703 06:19:40.024825     575 cdi.go:211] "Ignoring empty CDI specs" err="failed to write spec: invalid CDI Spec: failed add device \"all\": invalid device, empty device edits" vendor="k8s.device-plugin.nvidia.com" class="mofed"
+I0703 06:19:40.032136     575 server.go:198] Starting GRPC server for 'nvidia.com/gpu'
+I0703 06:19:40.033384     575 server.go:142] Starting to serve 'nvidia.com/gpu' on /var/lib/kubelet/device-plugins/nvidia-gpu.sock
+I0703 06:19:40.039899     575 server.go:149] Registered device plugin for 'nvidia.com/gpu' with Kubelet
+I0703 06:19:40.044239     575 health.go:64] Ignoring the following XIDs for health checks: map[13:true 31:true 43:true 45:true 68:true 109:true]
 ---
-kubectl get nodes -o custom-columns=NODE:.metadata.name,'GPU:.status.capacity.nvidia\.com/gpu'
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/usr/lib64/vdpau/libvdpau_nvidia.so.570.133.20 as /usr/lib64/vdpau/libvdpau_nvidia.so.570.133.20"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate /nvidia-persistenced/socket: /nvidia-persistenced/socket: not found"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate /nvidia-fabricmanager/socket: /nvidia-fabricmanager/socket: not found"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate /tmp/nvidia-mps: /tmp/nvidia-mps: not found"
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/lib/firmware/nvidia/570.133.20/gsp_ga10x.bin as /lib/firmware/nvidia/570.133.20/gsp_ga10x.bin"
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/lib/firmware/nvidia/570.133.20/gsp_tu10x.bin as /lib/firmware/nvidia/570.133.20/gsp_tu10x.bin"
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/usr/bin/nvidia-smi as /usr/bin/nvidia-smi"
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/usr/bin/nvidia-debugdump as /usr/bin/nvidia-debugdump"
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/usr/bin/nvidia-persistenced as /usr/bin/nvidia-persistenced"
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/usr/bin/nvidia-cuda-mps-control as /usr/bin/nvidia-cuda-mps-control"
+time="2026-07-03T06:19:35Z" level=info msg="Selecting /host/usr/bin/nvidia-cuda-mps-server as /usr/bin/nvidia-cuda-mps-server"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate nvidia-imex: nvidia-imex: not found"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate nvidia-imex-ctl: nvidia-imex-ctl: not found"
+time="2026-07-03T06:19:35Z" level=info msg="Generating CDI spec for resource: k8s.device-plugin.nvidia.com/gdrcopy"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate /dev/gdrdrv: /dev/gdrdrv: not found"
+E0703 06:19:35.978316     577 cdi.go:211] "Ignoring empty CDI specs" err="failed to write spec: invalid CDI Spec: failed add device \"all\": invalid device, empty device edits" vendor="k8s.device-plugin.nvidia.com" class="gdrcopy"
+time="2026-07-03T06:19:35Z" level=info msg="Generating CDI spec for resource: k8s.device-plugin.nvidia.com/gds"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate /dev/nvidia-fs*: /dev/nvidia-fs*: not found"
+time="2026-07-03T06:19:35Z" level=warning msg="Could not locate /dev/nvidia-fs*: /dev/nvidia-fs*: not found"
+E0703 06:19:35.985312     577 cdi.go:211] "Ignoring empty CDI specs" err="failed to write spec: invalid CDI Spec: failed add device \"all\": invalid device, empty device edits" vendor="k8s.device-plugin.nvidia.com" class="gds"
+I0703 06:19:35.989873     577 server.go:198] Starting GRPC server for 'nvidia.com/gpu'
+I0703 06:19:35.991495     577 server.go:142] Starting to serve 'nvidia.com/gpu' on /var/lib/kubelet/device-plugins/nvidia-gpu.sock
+I0703 06:19:36.000667     577 server.go:149] Registered device plugin for 'nvidia.com/gpu' with Kubelet
+I0703 06:19:36.007416     577 health.go:64] Ignoring the following XIDs for health checks: map[13:true 31:true 43:true 45:true 68:true 109:true]
 ---
-kubectl get clusterpolicy -o jsonpath='{.items[0].spec.devicePlugin.config}{"\n"}'
----
-kubectl -n gpu-operator logs ds/nvidia-device-plugin-daemonset -c nvidia-device-plugin --tail=50 \
-  | grep -iE 'replicas|timeslic|sharing|config'
+2026/07/03 06:16:18 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:16:18.461240     576 main.go:281] Creating Labels
+I0703 06:16:18.467277     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:16:18.467288     576 main.go:294] Sleeping for 1m0s
+2026/07/03 06:17:18 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:17:18.566093     576 main.go:281] Creating Labels
+I0703 06:17:18.572264     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:17:18.572286     576 main.go:294] Sleeping for 1m0s
+2026/07/03 06:18:18 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:18:18.664470     576 main.go:281] Creating Labels
+I0703 06:18:18.670539     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:18:18.670605     576 main.go:294] Sleeping for 1m0s
+2026/07/03 06:19:18 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:19:18.751515     576 main.go:281] Creating Labels
+I0703 06:19:18.758520     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:19:18.758548     576 main.go:294] Sleeping for 1m0s
+2026/07/03 06:20:18 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:20:18.858486     576 main.go:281] Creating Labels
+I0703 06:20:18.864588     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:20:18.864625     576 main.go:294] Sleeping for 1m0s
+2026/07/03 06:21:18 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:21:18.943551     576 main.go:281] Creating Labels
+I0703 06:21:18.949038     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:21:18.949058     576 main.go:294] Sleeping for 1m0s
+2026/07/03 06:22:18 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:22:19.050256     576 main.go:281] Creating Labels
+I0703 06:22:19.056943     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:22:19.056968     576 main.go:294] Sleeping for 1m0s
+2026/07/03 06:23:19 WARNING: unable to detect IOMMU FD for [0000:81:00.0 open /sys/bus/pci/devices/0000:81:00.0/vfio-dev: no such file or directory]: %!v(MISSING)
+I0703 06:23:19.133316     576 main.go:281] Creating Labels
+I0703 06:23:19.139019     576 output.go:161] no changes in NodeFeature object nvidia-features-for-coparking-7
+I0703 06:23:19.139039     576 main.go:294] Sleeping for 1m0s
