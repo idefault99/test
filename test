@@ -1,3 +1,49 @@
+############### Backend Endpoints ###############
+{{- $anyBackend := false -}}
+{{- range .Values.microservices.list -}}
+{{- if and (ne (.enabled | toString) "false") .path -}}
+{{- $anyBackend = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $anyBackend }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingressDomain }}-ingress-not-free
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingressSettings.maxBodySize }}
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers: "4 256k"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "256k"
+    nginx.ingress.kubernetes.io/cors-allow-origin: '*'
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if eq .Values.TLS.enable true }}
+  tls:
+    - hosts:
+        - {{ .Values.ingressDomain }}
+      secretName: {{ tpl .Values.TLS.secret . }}
+  {{- end }}
+  rules:
+  - host: {{ .Values.ingressDomain }}
+    http:
+      paths:
+      {{- range .Values.microservices.list }}
+      {{- if and (ne (.enabled | toString) "false") .path }}
+      - path: {{ .path }}
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ $.Release.Namespace }}-{{ .name }}-cs
+            port:
+              number: {{ $.Values.ports.internal.back }}
+      {{- end }}
+      {{- end }}
+{{- end }}
+---
 labels:
   elasticsearch: elasticsearch
   kafka: kafka
@@ -33,7 +79,7 @@ ports:
     frontTargetPort: 8080
     mongodb: 27017
     back: 8000
-    elasticsearch: 
+    elasticsearch:
       http: 9200
       transport: 9300
     galaxy: 8000
@@ -153,12 +199,21 @@ enableModules:
   bookingserver: false
   eventserver: false
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Единый источник правды по микросервисам.
+# Из этого списка генерируются: namespace, ExternalName "-cs", target-service,
+# И backend-пути Ingress — для записей, у которых задан `path`.
+# Правило: имя сервиса = `name`; URL внешнего пути = `path` (может отличаться
+# по написанию от name — поэтому и держим рядом, чтобы не рассинхронить).
+# Отключить сервис целиком: enabled: false.
+# ─────────────────────────────────────────────────────────────────────────────
 microservices:
   enabled: true
   defaultPort: 8000
   createNamespace: true
   createTargetService: true
   list:
+    # ── воркеры без внешнего HTTP-роута (без path) ──
     - name: streams
     - name: videorecorder
     - name: miniohandler
@@ -169,19 +224,20 @@ microservices:
     - name: crashdetection
     - name: car-counter
     - name: obstruction-monitoring
-    - name: parkingreports
     - name: ledcontroller
-    - name: openparkingapi
-    - name: caps-manager
-    - name: alert-processor
-    - name: administration
-    - name: cameracolorcontroller
-    - name: parkingauth
-    - name: bookingserver
-    - name: eventserver
-    - name: crashprocessor
-    - name: mapserver
     - name: eventsrecorder
+    # ── API-сервисы: path => появляется backend-путь в Ingress ──
+    - { name: bookingserver,        path: '/api/bookingserver/v1(?:/|$)(.*)' }
+    - { name: mapserver,            path: '/api/mapserver/v1(?:/|$)(.*)' }
+    - { name: openparkingapi,       path: '/api/openparkingapi/v1(?:/|$)(.*)' }
+    - { name: caps-manager,         path: '/api/capsmanager/v1(?:/|$)(.*)' }
+    - { name: alert-processor,      path: '/api/alertprocessor/v1(?:/|$)(.*)' }
+    - { name: administration,       path: '/api/administration/v1(?:/|$)(.*)' }
+    - { name: cameracolorcontroller, path: '/api/cameracolorcontroller/v1(?:/|$)(.*)' }
+    - { name: parkingreports,       path: '/api/parkingreports/v1(?:/|$)(.*)' }
+    - { name: crashprocessor,       path: '/api/crash-processor/v1(?:/|$)(.*)' }
+    - { name: eventserver,          path: '/api/eventserver/v1(?:/|$)(.*)' }
+    - { name: parkingauth,          path: '/api/parking-auth/v1(?:/|$)(.*)' }
 
 ingressClassName: nginx
 realmName: test-realm
@@ -193,101 +249,12 @@ ingressSettings:
   maxBodySize: "500m"
 baseNs: main
 
-
 ingress:
   enabled: true
-  backendPaths:
-    - { path: '/api/bookingserver/v1(?:/|$)(.*)',         service: bookingserver }
-    - { path: '/api/mapserver/v1(?:/|$)(.*)',             service: mapserver }
-    - { path: '/api/openparkingapi/v1(?:/|$)(.*)',        service: openparkingapi }
-    - { path: '/api/capsmanager/v1(?:/|$)(.*)',           service: capsmanager }
-    - { path: '/api/alertprocessor/v1(?:/|$)(.*)',        service: alertprocessor }
-    - { path: '/api/administration/v1(?:/|$)(.*)',        service: administration }
-    - { path: '/api/cameracolorcontroller/v1(?:/|$)(.*)', service: cameracolorcontroller }
-    - { path: '/api/eventserver/v1(?:/|$)(.*)',           service: eventserver }
-    - { path: '/api/parkingreports/v1(?:/|$)(.*)',        service: parkingreports }
-    - { path: '/api/crash-processor/v1(?:/|$)(.*)',       service: crash-processor }
-    - { path: '/api/parking-auth/v1(?:/|$)(.*)',          service: parkingauth }
+  # backendPaths больше нет — пути живут в microservices.list (поле path)
 
 imagePullSecret: regcred-2
 
 TLS:
   enable: false
   secret: "{{ .Values.ingressDomain }}-tls-secret"
----
-################ Namespaces для микросервисов ################
-# Для каждого включённого микросервиса создаётся отдельный неймспейс
-# "<release-namespace>-<name>" - например coparking-streams
-#
-{{- if .Values.microservices.enabled }}
-{{- range .Values.microservices.list }}
-{{- $createNs := $.Values.microservices.createNamespace }}
-{{- if hasKey . "createNamespace" }}{{- $createNs = .createNamespace }}{{- end }}
-{{- if and (ne (.enabled | toString) "false") $createNs }}
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: {{ include "coparking.msNamespace" (dict "root" $ "name" .name) }}
-  labels:
-    name: {{ include "coparking.msNamespace" (dict "root" $ "name" .name) }}
-    {{- include "coparking.commonLabels" (dict "root" $ "app" .name) | nindent 4 }}
-  annotations:
-    "helm.sh/resource-policy": keep
-{{- end }}
-{{- end }}
-{{- end }}
----
-###############################################################################
-# Cross-namespace доступ к микросервисам.
-#
-# Для каждого включённого микросервиса в основном неймспейсе создаётся
-# ExternalName-сервис "<base>-<name>-cs", указывающий на сервис микросервиса
-# "<base>-<name>-service" в его собственном неймспейсе "<base>-<name>".
-#
-###############################################################################
-{{- if .Values.microservices.enabled }}
-{{- $base := .Release.Namespace }}
-{{- range .Values.microservices.list }}
-{{- if ne (.enabled | toString) "false" }}
-{{- $port := .port | default $.Values.microservices.defaultPort }}
-{{- $selector := .selector | default .name }}
-{{- $msNs := include "coparking.msNamespace" (dict "root" $ "name" .name) }}
-{{- $createTarget := $.Values.microservices.createTargetService }}
-{{- if hasKey . "createTargetService" }}{{- $createTarget = .createTargetService }}{{- end }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $base }}-{{ .name }}-cs
-  namespace: {{ $base }}
-  labels:
-    app: {{ .name }}
-    {{- include "coparking.commonLabels" (dict "root" $ "app" .name) | nindent 4 }}
-spec:
-  type: ExternalName
-  externalName: {{ $base }}-{{ .name }}-service.{{ $msNs }}.svc.{{ $.Values.localK8sDomain }}
-  ports:
-    - port: {{ $port }}
-      protocol: TCP
-{{- if $createTarget }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $base }}-{{ .name }}-service
-  namespace: {{ $msNs }}
-  labels:
-    app: {{ $selector }}
-    {{- include "coparking.commonLabels" (dict "root" $ "app" .name) | nindent 4 }}
-spec:
-  type: ClusterIP
-  selector:
-    app: {{ $selector }}
-  ports:
-    - port: {{ $port }}
-      protocol: TCP
-{{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
